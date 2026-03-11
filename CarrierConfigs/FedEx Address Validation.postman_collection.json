@@ -1,0 +1,136 @@
+{
+  "info": {
+    "_postman_id": "4214ce2b-b05b-40d0-8f44-38b9d5048eef",
+    "name": "FedEx Address Validation",
+    "description": "FedEx Address Validation API - Validate and resolve addresses to ensure accurate delivery.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "8255341",
+    "_collection_link": "https://go.postman.co/collection/8255341-4214ce2b-b05b-40d0-8f44-38b9d5048eef?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Validate Address",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// Get token from globals if collection variable is empty",
+              "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+              "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+              "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+              "    if (globalToken) {",
+              "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+              "    }",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has output\", function () {",
+              "    pm.expect(jsonData).to.have.property('output');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{fedex_access_token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "x-locale",
+            "value": "en_US",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"addressesToValidate\": [\n        {\n            \"address\": {\n                \"streetLines\": [\n                    \"7372 PARKRIDGE BLVD\",\n                    \"APT 286\"\n                ],\n                \"city\": \"IRVING\",\n                \"stateOrProvinceCode\": \"TX\",\n                \"postalCode\": \"75063-8659\",\n                \"countryCode\": \"US\"\n            }\n        }\n    ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{fedex_base_url}}/address/v1/addresses/resolve",
+          "host": [
+            "{{fedex_base_url}}"
+          ],
+          "path": [
+            "address",
+            "v1",
+            "addresses",
+            "resolve"
+          ]
+        },
+        "description": "Validate and resolve addresses."
+      },
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "fedex_base_url",
+      "value": "https://apis-sandbox.fedex.com"
+    },
+    {
+      "key": "fedex_access_token",
+      "value": "WILL_BE_AUTO_POPULATED"
+    },
+    {
+      "key": "fedex_base_url_Staging",
+      "value": ""
+    }
+  ]
+}

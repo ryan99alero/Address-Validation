@@ -1,0 +1,230 @@
+{
+  "info": {
+    "_postman_id": "fe82d3b7-2bca-4dc9-bdc9-613826602b97",
+    "name": "UPS Address Validation",
+    "description": "UPS Address Validation API - Validate and correct addresses for accurate delivery.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "8255341",
+    "_collection_link": "https://go.postman.co/collection/8255341-fe82d3b7-2bca-4dc9-bdc9-613826602b97?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Validate Address",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// Get token from globals if collection variable is empty",
+              "var token = pm.collectionVariables.get(\"ups_access_token\");",
+              "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+              "    var globalToken = pm.globals.get(\"ups_access_token\");",
+              "    if (globalToken) {",
+              "        pm.collectionVariables.set(\"ups_access_token\", globalToken);",
+              "    }",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has XAVResponse\", function () {",
+              "    pm.expect(jsonData).to.have.property('XAVResponse');",
+              "});",
+              "",
+              "// Log validation result",
+              "if (jsonData.XAVResponse && jsonData.XAVResponse.Candidate) {",
+              "    console.log(\"Address candidates found: \" + jsonData.XAVResponse.Candidate.length);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{ups_access_token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "transId",
+            "value": "{{$guid}}",
+            "description": "Unique transaction ID",
+            "type": "text"
+          },
+          {
+            "key": "transactionSrc",
+            "value": "AddressCorrection",
+            "description": "Source of transaction",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"XAVRequest\": {\n        \"AddressKeyFormat\": {\n            \"AddressLine\": [\n                \"7372 PARKRIDGE BLVD\",\n                \"APT 286\"\n            ],\n            \"PoliticalDivision2\": \"IRVING\",\n            \"PoliticalDivision1\": \"TX\",\n            \"PostcodePrimaryLow\": \"75063\",\n            \"CountryCode\": \"US\"\n        }\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{ups_base_url}}/api/addressvalidation/v1/3",
+          "host": [
+            "{{ups_base_url}}"
+          ],
+          "path": [
+            "api",
+            "addressvalidation",
+            "v1",
+            "3"
+          ]
+        },
+        "description": "Validate and correct addresses using UPS Address Validation API.\n\nRequest Option Codes:\n- 1 = Address Validation\n- 2 = Address Classification\n- 3 = Address Validation and Classification"
+      },
+      "response": []
+    },
+    {
+      "name": "Validate Address - Canada",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "var token = pm.collectionVariables.get(\"ups_access_token\");",
+              "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+              "    var globalToken = pm.globals.get(\"ups_access_token\");",
+              "    if (globalToken) {",
+              "        pm.collectionVariables.set(\"ups_access_token\", globalToken);",
+              "    }",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{ups_access_token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "transId",
+            "value": "{{$guid}}",
+            "type": "text"
+          },
+          {
+            "key": "transactionSrc",
+            "value": "AddressCorrection",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"XAVRequest\": {\n        \"AddressKeyFormat\": {\n            \"AddressLine\": [\n                \"100 Queen St W\"\n            ],\n            \"PoliticalDivision2\": \"Toronto\",\n            \"PoliticalDivision1\": \"ON\",\n            \"PostcodePrimaryLow\": \"M5H2N1\",\n            \"CountryCode\": \"CA\"\n        }\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{ups_base_url}}/api/addressvalidation/v1/3",
+          "host": [
+            "{{ups_base_url}}"
+          ],
+          "path": [
+            "api",
+            "addressvalidation",
+            "v1",
+            "3"
+          ]
+        },
+        "description": "Validate a Canadian address."
+      },
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "ups_base_url",
+      "value": "https://wwwcie.ups.com"
+    },
+    {
+      "key": "ups_access_token",
+      "value": "WILL_BE_AUTO_POPULATED"
+    }
+  ]
+}
