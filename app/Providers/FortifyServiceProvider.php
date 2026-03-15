@@ -27,7 +27,8 @@ class FortifyServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureActions();
-        $this->configureViews();
+        // Views disabled - Filament handles authentication
+        // $this->configureViews();
         $this->configureRateLimiting();
     }
 

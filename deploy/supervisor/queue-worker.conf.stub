@@ -1,0 +1,14 @@
+[program:{{APP_NAME}}-worker]
+process_name=%(program_name)s_%(process_num)02d
+command={{PHP_PATH}} {{APP_PATH}}/artisan queue:work --sleep=3 --tries=3 --max-time=3600 --memory={{MEMORY_LIMIT}}
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+user={{USER}}
+numprocs={{NUM_PROCS}}
+redirect_stderr=true
+stdout_logfile={{LOG_PATH}}/worker.log
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=5
+stopwaitsecs=3600

@@ -1,3 +1,186 @@
+# Address Validation Application
+
+## Project Overview
+
+This is a comprehensive **Address Validation Solution** built with Laravel 12 and Filament 5. The application validates mailing addresses through carrier APIs (UPS, FedEx, future USPS) and provides both single-address validation and batch import capabilities.
+
+### Core Features
+
+1. **Single Address Validation** (`/validate-address`)
+   - Manual address entry with carrier selection
+   - Real-time validation against carrier APIs
+   - Shows original vs corrected address comparison
+   - Highlights corrections with background color
+   - Displays delivery analysis (classification, residential status, confidence)
+   - Copy-to-clipboard for validated addresses
+
+2. **Batch Processing** (`/batch-processing`)
+   - Combined Import/Export with centered tab navigation
+   - **Import Tab:**
+     - Excel/CSV file upload with optional import name
+     - Field mapping UI with auto-matching
+     - Save/load mapping templates for reuse
+     - 20 "extra" fields for pass-through custom data (extra_1 through extra_20)
+     - Auto-validates after import (configurable)
+     - Progress bar for validation status
+   - **Export Tab:**
+     - Select completed batch to export
+     - Choose export template (ePace, UPS WorldShip, FedEx, Generic)
+     - Filter by validation status (all, validated, valid, invalid, ambiguous)
+     - View batch statistics before export
+     - Download as CSV or XLSX
+
+3. **Carrier Management** (`/carriers`)
+   - Support for multiple carriers (UPS, FedEx)
+   - Environment-aware URLs (sandbox vs production)
+   - Encrypted credential storage (client_id, client_secret)
+   - OAuth2 authentication for carrier APIs
+
+4. **Export Templates** (`/export-templates`)
+   - Define field layout and custom headers
+   - Configure target system (ePace, shipping solutions)
+   - Choose file format (CSV, XLSX, Fixed Width)
+
+### Architecture
+
+- **Admin Panel**: Filament 5 at root `/` (ONLY interface)
+- **Database**: MySQL on port 3307, database name "AddressValidation"
+- **Authentication**: Laravel Fortify (headless)
+- **Debugging**: Laravel Telescope at `/telescope`
+
+### Key Models
+
+- `Address` - Individual addresses with validation status and 20 extra fields
+- `AddressCorrection` - Validation results from carriers (use `hasAddressChanges()` not `hasChanges()`)
+- `Carrier` - Carrier configuration with encrypted credentials
+- `ImportBatch` - Batch import tracking
+- `ImportFieldTemplate` - Saved field mapping templates
+- `ExportTemplate` - Export format configurations
+
+### Important Technical Notes
+
+1. **Filament 5 Namespaces**:
+   - Form fields: `Filament\Forms\Components\*` (TextInput, Select, Toggle)
+   - Layout/Schema: `Filament\Schemas\Components\*` (Section, Actions)
+   - Infolist entries: `Filament\Infolists\Components\*` (TextEntry)
+   - Schema class: `Filament\Schemas\Schema`
+
+### Blade Template Patterns (CRITICAL)
+
+Before writing ANY Blade template for Filament pages:
+
+1. **ALWAYS read existing templates first** - Run `ls resources/views/filament/pages/` and read 1-2 existing templates to understand patterns
+2. **Use Filament Blade components, NEVER custom HTML** for:
+   - Tabs: `<x-filament::tabs>` and `<x-filament::tabs.item>` (NOT `<button>` or `<nav>`)
+   - Sections: `<x-filament::section>` (NOT `<div class="...">`)
+   - Badges: `<x-slot name="badge">` inside tabs (NOT `<span class="...">`)
+   - Icons: `<x-heroicon-o-*>` or `icon="heroicon-o-*"` attribute
+   - Buttons: `<x-filament::button>` (NOT `<button>`)
+
+3. **No inline styles** - Filament components handle all styling. If you're writing `style="..."`, you're doing it wrong.
+
+4. **Wire directives on Filament components** - Use `wire:click` directly on `<x-filament::tabs.item>`, not on custom elements.
+
+### CSS Guidelines (CRITICAL)
+
+- **NEVER write custom CSS** for Filament UI - use existing `fi-*` classes or component props
+- If styling looks wrong, search docs with `search-docs` tool for the component's styling options
+- Filament handles dark mode, responsive, etc. - custom CSS breaks these
+- For non-Filament areas, borrow patterns from existing CSS files in the project
+
+### Before Creating UI Files
+
+Run this checklist:
+1. `ls` the target directory to see existing files
+2. `Read` 1-2 similar files to understand patterns
+3. `search-docs` for the Filament component documentation
+4. Only then write the new file using discovered patterns
+
+### Native Components First (CRITICAL)
+
+- **ALWAYS use Filament's native components before writing custom Blade views.** This ensures visual consistency across the application.
+- For tables: Use Filament's Table Builder with `->records($collection)` - it works with any Collection, not just Eloquent models.
+- For stats/metrics: Use `StatsOverviewWidget` with `Stat::make()` cards.
+- For read-only data display: Use Infolists with entries like `TextEntry`, `IconEntry`, etc.
+- For modals with data: Use Actions with `->infolist()` or `->table()` instead of `->modalContent(view(...))`.
+- **Only use custom Blade as a last resort** when Filament genuinely cannot do what's needed.
+- **When custom Blade is unavoidable**: Use Filament's Blade components (`<x-filament::icon>`, `<x-filament::button>`, etc.) and CSS classes (`fi-*` prefixed classes) to maintain visual consistency.
+- Before writing any UI code, ask: "Does Filament have a native component for this?" Search docs if unsure.
+
+### Queue Workers (CRITICAL)
+
+- **ALWAYS notify the user to restart queue workers** when modifying any of the following:
+  - Job classes in `app/Jobs/` (like `ProcessImportBatchValidation`)
+  - Notification classes (especially those implementing `ShouldQueue`)
+  - Mail classes that are queued
+  - Any class that implements `ShouldQueue`
+- Tell them: "**Restart queue workers:** `php artisan queue:restart`"
+- Queue workers cache the code at startup; changes won't take effect until restart.
+
+### Common Namespace Mistakes
+
+- Form fields (TextInput, Select, etc.): `Filament\Forms\Components\`
+- Infolist entries (TextEntry, IconEntry, etc.): `Filament\Infolists\Components\`
+- Layout components (Grid, Section, Tabs, etc.): `Filament\Schemas\Components\`
+- Schema utilities (Get, Set, etc.): `Filament\Schemas\Components\Utilities\`
+- Actions: `Filament\Actions\` (NOT `Filament\Tables\Actions\`)
+- Icons: `Filament\Support\Icons\Heroicon` enum
+
+### Bulk Delete Pattern
+
+All Filament resources MUST include bulk delete functionality:
+
+```php
+use Filament\Actions\BulkActionGroup;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\DeleteBulkAction;
+
+return $table
+    ->columns([...])
+    ->recordActions([
+        EditAction::make(),
+        DeleteAction::make(),
+    ])
+    ->toolbarActions([
+        BulkActionGroup::make([
+            DeleteBulkAction::make(),
+        ]),
+    ]);
+```
+
+2. **Carrier API URLs**:
+   - UPS Sandbox: `https://wwwcie.ups.com`
+   - UPS Production: `https://onlinetools.ups.com`
+   - FedEx Sandbox: `https://apis-sandbox.fedex.com`
+   - FedEx Production: `https://apis.fedex.com`
+
+3. **Credential Handling**:
+   - Stored encrypted using `Crypt::encryptString()`
+   - Retrieved via `$carrier->getCredentials()` method
+   - Set via `$carrier->setCredentials($array)` method
+
+### Current State
+
+- Single address validation working with UPS
+- Batch import with field mapping working
+- Carrier configuration with environment URLs working
+- Validation results display with corrections highlighting
+- Copy button for validated addresses
+
+### Services
+
+- `App\Services\AddressValidationService` - Orchestrates validation
+- `App\Services\UpsAddressValidationService` - UPS API integration
+- `App\Services\FedExAddressValidationService` - FedEx API integration
+- `App\Services\ImportService` - Excel/CSV parsing and field mapping
+- `App\Services\ExportService` - Export addresses using templates
+
+### Jobs
+
+- `App\Jobs\ProcessImportBatchValidation` - Background validation of imported addresses (chunks of 50)
+
+---
+
 <laravel-boost-guidelines>
 === foundation rules ===
 
@@ -9,10 +192,12 @@ The Laravel Boost guidelines are specifically curated by Laravel maintainers for
 
 This application is a Laravel application and its main Laravel ecosystems package & versions are below. You are an expert with them all. Ensure you abide by these specific packages & versions.
 
-- php - 8.4.18
+- php - 8.4.3
+- filament/filament (FILAMENT) - v5
 - laravel/fortify (FORTIFY) - v1
 - laravel/framework (LARAVEL) - v12
 - laravel/prompts (PROMPTS) - v0
+- laravel/telescope (TELESCOPE) - v5
 - livewire/flux (FLUXUI_FREE) - v2
 - livewire/livewire (LIVEWIRE) - v4
 - laravel/boost (BOOST) - v2
@@ -22,6 +207,7 @@ This application is a Laravel application and its main Laravel ecosystems packag
 - laravel/sail (SAIL) - v1
 - pestphp/pest (PEST) - v4
 - phpunit/phpunit (PHPUNIT) - v12
+- tailwindcss (TAILWINDCSS) - v4
 
 ## Skills Activation
 
@@ -30,6 +216,7 @@ This project has domain-specific skills available. You MUST activate the relevan
 - `fluxui-development` — Use this skill for Flux UI development in Livewire applications only. Trigger when working with &lt;flux:*&gt; components, building or customizing Livewire component UIs, creating forms, modals, tables, or other interactive elements. Covers: flux: components (buttons, inputs, modals, forms, tables, date-pickers, kanban, badges, tooltips, etc.), component composition, Tailwind CSS styling, Heroicons/Lucide icon integration, validation patterns, responsive design, and theming. Do not use for non-Livewire frameworks or non-component styling.
 - `livewire-development` — Develops reactive Livewire 4 components. Activates when creating, updating, or modifying Livewire components; working with wire:model, wire:click, wire:loading, or any wire: directives; adding real-time updates, loading states, or reactivity; debugging component behavior; writing Livewire tests; or when the user mentions Livewire, component, counter, or reactive UI.
 - `pest-testing` — Tests applications using the Pest 4 PHP framework. Activates when writing tests, creating unit or feature tests, adding assertions, testing Livewire components, browser testing, debugging test failures, working with datasets or mocking; or when the user mentions test, spec, TDD, expects, assertion, coverage, or needs to verify functionality works.
+- `tailwindcss-development` — Styles applications using Tailwind CSS v4 utilities. Activates when adding styles, restyling components, working with gradients, spacing, layout, flex, grid, responsive design, dark mode, colors, typography, or borders; or when the user mentions CSS, styling, classes, Tailwind, restyle, hero section, cards, buttons, or any visual/UI changes.
 - `fortify-development` — Laravel Fortify headless authentication backend development. Activate when implementing authentication features including login, registration, password reset, email verification, two-factor authentication (2FA/TOTP), profile updates, headless auth, authentication scaffolding, or auth guards in Laravel applications.
 
 ## Conventions
@@ -260,6 +447,14 @@ protected function isAccessible(User $user, ?string $path = null): bool
 - CRITICAL: ALWAYS use `search-docs` tool for version-specific Pest documentation and updated code examples.
 - IMPORTANT: Activate `pest-testing` every time you're working with a Pest or testing-related task.
 
+=== tailwindcss/core rules ===
+
+# Tailwind CSS
+
+- Always use existing Tailwind conventions; check project patterns before adding new ones.
+- IMPORTANT: Always use `search-docs` tool for version-specific Tailwind CSS documentation and updated code examples. Never rely on training data.
+- IMPORTANT: Activate `tailwindcss-development` every time you're working with a Tailwind CSS or styling-related task.
+
 === laravel/fortify rules ===
 
 # Laravel Fortify
@@ -267,5 +462,41 @@ protected function isAccessible(User $user, ?string $path = null): bool
 - Fortify is a headless authentication backend that provides authentication routes and controllers for Laravel applications.
 - IMPORTANT: Always use the `search-docs` tool for detailed Laravel Fortify patterns and documentation.
 - IMPORTANT: Activate `developing-with-fortify` skill when working with Fortify authentication features.
+
+=== filament/css rules ===
+
+# Filament CSS and Styling
+
+## Important: Filament Pages Use Their Own CSS Bundle
+
+Filament pages (`<x-filament-panels::page>`) use Filament's own CSS bundle, NOT the Vite-compiled `app.css`. This means:
+
+1. **Raw Tailwind classes may not work** - Classes like `grid`, `grid-cols-2`, `bg-gray-50`, `rounded-lg`, etc. are not automatically available in Filament pages because they're not in Filament's CSS bundle.
+
+2. **Use Filament components instead** - Always prefer Filament's built-in Blade components which have their own styling:
+   - `<x-filament::section>` for cards/panels
+   - `<x-filament::badge>` for status indicators
+   - `<x-filament::button>` for buttons
+   - `<x-filament::icon icon="heroicon-o-*">` for icons (NOT `<x-heroicon-o-*>` directly)
+   - For grids, use standard HTML divs with Tailwind grid classes: `<div class="grid grid-cols-2 gap-4">`
+
+3. **Icon sizing issues** - If Heroicons appear very large/unsized, replace:
+   ```blade
+   {{-- BAD - icons may appear huge --}}
+   <x-heroicon-o-check-circle class="w-6 h-6" />
+
+   {{-- GOOD - uses Filament's icon wrapper --}}
+   <x-filament::icon icon="heroicon-o-check-circle" class="h-6 w-6" />
+   ```
+
+4. **Filament CSS classes** - Use Filament's `fi-*` prefixed classes which are always available:
+   - `fi-section-content-ctn` for section content containers
+   - `fi-in-text` for text styling
+   - `fi-form-actions` for form action button containers
+
+5. **Color utilities** - Filament provides semantic color classes that work:
+   - `text-success-600`, `text-warning-600`, `text-danger-600`
+   - `text-primary-600`, `text-gray-950`
+   - Dark mode variants: `dark:text-success-400`, etc.
 
 </laravel-boost-guidelines>

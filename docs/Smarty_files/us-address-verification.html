@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8"><script type="text/javascript">
+    (function() {
+      var container = document.querySelector('#_tcx-somtfqusck');
+      if (!container) {
+        return;
+      }
+
+      function addToContainer(url, text) {
+        const wrapper = document.createElement('div');
+        wrapper.setAttribute('data-tcx-url', url);
+        wrapper.innerText = text;
+        container.appendChild(wrapper);
+      }
+
+      const fetch = window.fetch
+      window.fetch = function() {
+        return Promise.resolve(fetch.apply(window, arguments))
+            .then(async response => {
+              if (response.ok) {
+                try {
+                  const clone = response.clone();
+                  const json = await clone.json();
+                  addToContainer(clone.url, JSON.stringify(json));
+                } catch (err) {}
+              }
+              return response;
+            });
+      };
+
+      var XHR = XMLHttpRequest.prototype;
+      var send = XHR.send;
+      var open = XHR.open;
+      XHR.open = function(method, url) {
+        this.url = url;
+        return open.apply(this, arguments);
+      };
+      XHR.send = function() {
+        this.addEventListener('load', function() {
+          try {
+            const response = this.response;
+            if (response && response.length) {
+              const firstChar = response[0];
+              if (firstChar === '[' || firstChar === '{') {
+                addToContainer(this.url, response);
+              }
+            }
+          } catch (err) {
+            // No-op.
+          }
+        });
+        return send.apply(this, arguments);
+      };
+    })();
+  </script>
+        <style>#beacon-container-body,
+#beacon-container {
+  margin: 0;
+  overflow: hidden;
+
+  --BlueConfigGlobalFontFamilyMono: 'SFMono-Regular', Consolas,
+    'Liberation Mono', Menlo, Courier, monospace;
+  --HSDSGlobalFontFamily: -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+    'Segoe UI Symbol';
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: antialiased;
+  box-sizing: border-box;
+  font-family: var(--HSDSGlobalFontFamily);
+  font-size: 14px;
+  line-height: 1.5;
+}
+#beacon-container-body *, #beacon-container * {
+    box-sizing: border-box;
+  }
+</style>
+        <style>.c-FabButtonCritical__button {
+  -webkit-appearance: none;
+     -moz-appearance: none;
+          appearance: none;
+  align-items: center;
+  border-radius: 200px;
+  border: none;
+  bottom: 0;
+  color: white;
+  cursor: pointer;
+  display: block;
+  height: 60px;
+  justify-content: center;
+  min-width: 60px;
+  margin: 0;
+  line-height: 60px;
+  outline: none !important;
+  padding: 0;
+  position: relative;
+  transition: transform 200ms linear;
+  -webkit-user-select: none;
+     -moz-user-select: none;
+          user-select: none;
+  z-index: 999;
+  -webkit-tap-highlight-color: transparent;
+
+  backface-visibility: hidden;
+}
+
+.c-FabButtonCritical__button:active {
+    cursor: pointer;
+    transform: scale(0.96);
+  }
+
+.c-FabButtonCritical__button::-moz-focus-inner {
+    border: 0;
+  }
+
+.c-FabButtonCritical__button:before {
+    --focus-offset: 5px;
+
+    content: '';
+    border-radius: 20px;
+    bottom: var(--focus-offset);
+    box-shadow: 0 0 0 2px var(--text-color);
+    left: var(--focus-offset);
+    pointer-events: none;
+    position: absolute;
+    right: var(--focus-offset);
+    top: var(--focus-offset);
+    opacity: 0;
+    background: transparent;
+    z-index: 3;
+  }
+
+.c-FabButtonCritical__button:focus:before, .c-FabButtonCritical__button.is-focused:before {
+      opacity: 1;
+    }
+
+.c-FabButtonCritical__button:focus:not(:focus-visible):before {
+      opacity: 0;
+    }
+
+.c-FabButtonCritical__button:focus-visible:before {
+      opacity: 1 !important;
+      transition: opacity ease 0.2s;
+    }
+
+.c-FabButtonCritical__button--text-only {
+  height: 42px;
+  line-height: 42px;
+  text-align: center;
+}
+
+.c-FabButtonCritical__button--text-only .c-FabButtonCritical__squircle-background {
+    height: 42px;
+    width: 42px;
+  }
+
+.c-FabButtonCritical__button--is-loading {
+  cursor: pointer;
+  transform: scale(0.96);
+}
+
+.c-FabButtonCritical__text {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 0 20px 0 54px;
+  white-space: nowrap;
+  line-height: 14px;
+}
+
+.c-FabButtonCritical__text--text-only {
+  padding: 0 15px;
+}
+
+.c-FabButtonCritical__text--align-left {
+  padding: 0 54px 0 20px;
+}
+
+@media (max-device-width: 812px) {
+
+.c-FabButtonCritical__text--hide-on-mobile {
+    display: none;
+}
+  }
+
+.c-FabButtonCritical__icon {
+  cursor: pointer;
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  left: 0;
+  opacity: 1;
+  pointer-events: none;
+  position: absolute;
+  text-indent: -99999px;
+  top: 0;
+  width: 60px;
+}
+
+.c-FabButtonCritical__icon path {
+    fill: currentColor;
+  }
+
+.c-FabButtonCritical__icon mask path {
+    fill: white;
+  }
+
+.c-FabButtonCritical__icon path.line-path {
+    fill: transparent;
+    stroke: currentColor;
+  }
+
+.c-FabButtonCritical__icon--text-align-left {
+  left: auto;
+  right: 0;
+}
+
+.c-FabButtonCritical__squircle-background {
+  position: absolute;
+  top: 0;
+  height: 60px;
+  width: 60px;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.c-FabButtonCritical__squircle-background.position-left {
+    left: 0;
+  }
+
+.c-FabButtonCritical__squircle-background.position-right {
+    right: 0;
+  }
+
+.c-FabButtonCritical__squircle-background svg {
+    fill: var(--background-color);
+  }
+</style>
+        <style></style></head>
+        <body id="beacon-container-body">
+          <div id="beacon-container"><div class="frame-content"><button style="background-color: rgb(0, 102, 255); --background-color: #0066ff; --text-color: white;" class="c-FabButtonCritical__button"><span class="c-FabButtonCritical__squircle-background position-left"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" preserveAspectRatio="none" aria-hidden="true">
+  <path d="M60 30C60 51.25 51.25 60 30 60C8.75 60 1.99634e-09 51.25 1.99563e-09 30C1.99492e-09 8.75 8.75 0 30 0C51.25 0 60 8.75 60 30Z"></path>
+</svg>
+</span><span class="c-FabButtonCritical__squircle-background position-right"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" preserveAspectRatio="none" aria-hidden="true">
+  <path d="M60 30C60 51.25 51.25 60 30 60C8.75 60 1.99634e-09 51.25 1.99563e-09 30C1.99492e-09 8.75 8.75 0 30 0C51.25 0 60 8.75 60 30Z"></path>
+</svg>
+</span><span data-testid="fab-icon" class="c-FabButton__icon--icon c-FabButtonCritical__icon" style="color: white;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 60 60"><path d="M41.216 29.026c0 3.576-.895 5.847-2.647 7.268l-.066.052c-.213.173-.448.362-.6.559a1.958 1.958 0 0 0-.311.562c-.086.233-.117.494-.144.719l-.008.062-.303 2.48c-.063.516-.102.834-.151 1.06a1.595 1.595 0 0 1-.04.151.091.091 0 0 1-.015.006 1.42 1.42 0 0 1-.137-.076 14.087 14.087 0 0 1-.868-.626l-2.98-2.244-.041-.03a3.046 3.046 0 0 0-.53-.343 2.061 2.061 0 0 0-.554-.17 3.13 3.13 0 0 0-.648-.016l-.054.002c-.496.023-1.014.034-1.553.034-4.41 0-7.28-.758-9.048-2.22-1.721-1.421-2.602-3.683-2.602-7.23 0-3.546.88-5.808 2.602-7.23 1.769-1.46 4.639-2.22 9.048-2.22 4.41 0 7.28.76 9.048 2.22 1.721 1.422 2.602 3.684 2.602 7.23Z" stroke="#000" stroke-width="2" class="line-path"></path></svg>
+</span></button></div></div>
+        
+      
+    </body></html>

@@ -15,6 +15,7 @@
         "fluxui-development",
         "livewire-development",
         "pest-testing",
+        "tailwindcss-development",
         "fortify-development"
     ]
 }
