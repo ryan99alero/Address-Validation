@@ -215,6 +215,10 @@ fi
 log "Build frontend assets"
 npm run build
 
+log "Publish Livewire and Filament assets"
+"${PHP_BIN}" artisan livewire:publish --assets
+"${PHP_BIN}" artisan filament:assets
+
 log "Re-apply runtime ownership for Laravel"
 sudo chown -R "${APP_USER}:${APP_GROUP}" "${APP_DIR}"
 sudo chown -R "${APP_USER}:${APP_GROUP}" "${APP_DIR}/public"
