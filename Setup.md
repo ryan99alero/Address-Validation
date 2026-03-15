@@ -30,7 +30,7 @@ Complete deployment guide for Ubuntu 22.04/24.04 LTS with MySQL.
 ---
 
 ## Install System Dependencies
-
+tree
 ```bash
 # Update system
 sudo apt update && sudo apt upgrade -y
