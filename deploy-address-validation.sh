@@ -5,13 +5,18 @@ set -euo pipefail
 # File: address-validation-deploy.sh
 # Purpose: First deploy + future updates
 # Ubuntu 22.04
+#
+# Configuration: Copy deploy.conf.example to
+# deploy.conf and edit with your settings.
+# deploy.conf is gitignored (safe for secrets)
 ############################################
 
+# Defaults (override in deploy.conf)
 APP_DIR="/var/www/address-validation"
 REPO_URL="https://github.com/ryan99alero/Address-Validation.git"
 DEFAULT_BRANCH="master"
 
-APP_USER="ryan"
+APP_USER="deploy"
 APP_GROUP="www-data"
 WEB_USER="www-data"
 WEB_GROUP="www-data"
@@ -32,8 +37,28 @@ DB_HOST="localhost"
 DB_PORT="3306"
 DB_DATABASE="address_validation"
 DB_USERNAME="address_validation"
-DB_PASSWORD="YourStrongPasswordHere"
+DB_PASSWORD=""
 QUEUE_CONNECTION="database"
+
+# Load local config (overrides defaults above)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${SCRIPT_DIR}/deploy.conf" ]; then
+    echo "Loading config from ${SCRIPT_DIR}/deploy.conf"
+    source "${SCRIPT_DIR}/deploy.conf"
+elif [ -f "${APP_DIR}/deploy.conf" ]; then
+    echo "Loading config from ${APP_DIR}/deploy.conf"
+    source "${APP_DIR}/deploy.conf"
+else
+    echo "WARNING: No deploy.conf found. Copy deploy.conf.example to deploy.conf and configure it."
+    echo "Press Enter to continue with defaults, or Ctrl+C to abort..."
+    read -r
+fi
+
+# Validate required settings
+if [ -z "${DB_PASSWORD}" ]; then
+    echo "ERROR: DB_PASSWORD is not set. Configure it in deploy.conf"
+    exit 1
+fi
 
 log() {
     echo ""

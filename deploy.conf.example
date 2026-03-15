@@ -1,0 +1,27 @@
+############################################
+# Deploy Configuration
+# Copy this file to deploy.conf and edit
+# deploy.conf is gitignored - safe for secrets
+############################################
+
+# Application
+APP_USER="deploy"
+APP_GROUP="www-data"
+DOMAIN="your-domain.com"
+WWW_DOMAIN="www.your-domain.com"
+
+# Database
+DB_CONNECTION="mysql"
+DB_HOST="localhost"
+DB_PORT="3306"
+DB_DATABASE="address_validation"
+DB_USERNAME="address_validation"
+DB_PASSWORD="YourStrongPasswordHere"
+
+# Queue
+QUEUE_CONNECTION="database"
+
+# Paths (usually don't need to change)
+# APP_DIR="/var/www/address-validation"
+# PHP_BIN="/usr/bin/php"
+# COMPOSER_BIN="/usr/local/bin/composer"
