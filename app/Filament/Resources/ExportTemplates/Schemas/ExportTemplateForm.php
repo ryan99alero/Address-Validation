@@ -20,17 +20,10 @@ class ExportTemplateForm
         return $schema
             ->components([
                 Section::make('Template Details')
-                    ->columns(2)
                     ->schema([
                         TextInput::make('name')
-                            ->required()
-                            ->columnSpan(1),
-                        Select::make('target_system')
-                            ->label('Target System')
-                            ->options(ExportTemplate::getTargetSystems())
-                            ->default('generic'),
-                        Textarea::make('description')
-                            ->columnSpanFull(),
+                            ->required(),
+                        Textarea::make('description'),
                     ]),
 
                 Section::make('File Settings')

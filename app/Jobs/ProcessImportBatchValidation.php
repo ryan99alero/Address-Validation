@@ -75,13 +75,18 @@ class ProcessImportBatchValidation implements ShouldQueue
         $validatedCount = 0;
         $failedCount = 0;
 
-        // Use native batch size based on carrier (FedEx/Smarty support 100, UPS uses concurrent)
-        $batchSize = match ($carrier->slug) {
-            'fedex', 'smarty' => 100,  // Native batch API support
-            default => $this->concurrency,  // UPS uses concurrent requests
-        };
+        // Use the carrier's configured chunk_size for batch processing
+        // The carrier service handles concurrency internally based on its settings
+        $batchSize = $carrier->chunk_size ?? 100;
 
-        // Process in batches
+        Log::info('ProcessImportBatchValidation: Using batch settings', [
+            'batch_id' => $this->batch->id,
+            'chunk_size' => $batchSize,
+            'concurrent_requests' => $carrier->concurrent_requests,
+            'supports_native_batch' => $carrier->supports_native_batch,
+        ]);
+
+        // Process in batches - carrier handles concurrency internally
         foreach ($addressesToValidate->chunk($batchSize) as $chunk) {
             // Check if cancelled
             $this->batch->refresh();

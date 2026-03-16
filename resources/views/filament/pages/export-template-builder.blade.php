@@ -92,42 +92,9 @@
                                             wire:model.live="fieldMappings.{{ $index }}.field"
                                             class="block w-full rounded-lg border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-950 dark:text-white shadow-sm focus:border-primary-500 focus:ring-primary-500 text-sm"
                                         >
-                                            <option value="">-- Select Field --</option>
-                                            <optgroup label="Address Fields">
-                                                <option value="name">Recipient Name</option>
-                                                <option value="company">Company</option>
-                                                <option value="external_reference">External Reference</option>
-                                            </optgroup>
-                                            <optgroup label="Original Address">
-                                                <option value="original_address_line_1">Original Address Line 1</option>
-                                                <option value="original_address_line_2">Original Address Line 2</option>
-                                                <option value="original_city">Original City</option>
-                                                <option value="original_state">Original State</option>
-                                                <option value="original_postal_code">Original Postal Code</option>
-                                            </optgroup>
-                                            <optgroup label="Corrected Address (Recommended)">
-                                                <option value="corrected_address_line_1">Corrected Address Line 1</option>
-                                                <option value="corrected_address_line_2">Corrected Address Line 2</option>
-                                                <option value="corrected_city">Corrected City</option>
-                                                <option value="corrected_state">Corrected State</option>
-                                                <option value="corrected_postal_code">Corrected Postal Code</option>
-                                                <option value="corrected_postal_code_ext">Corrected ZIP+4</option>
-                                                <option value="full_postal_code">Full Postal Code (with +4)</option>
-                                                <option value="country_code">Country Code</option>
-                                            </optgroup>
-                                            <optgroup label="Validation Info">
-                                                <option value="validation_status">Validation Status</option>
-                                                <option value="is_residential">Is Residential</option>
-                                                <option value="classification">Classification</option>
-                                                <option value="confidence_score">Confidence Score</option>
-                                                <option value="carrier">Carrier Used</option>
-                                                <option value="validated_at">Validated At</option>
-                                            </optgroup>
-                                            <optgroup label="Extra Fields (Pass-Through)">
-                                                @for($i = 1; $i <= 20; $i++)
-                                                    <option value="extra_{{ $i }}">Extra Field {{ $i }}</option>
-                                                @endfor
-                                            </optgroup>
+                                            @foreach($systemFields as $field => $label)
+                                                <option value="{{ $field }}">{{ $label }}</option>
+                                            @endforeach
                                         </select>
                                     </td>
 

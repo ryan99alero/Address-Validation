@@ -59,7 +59,6 @@ class ExportTemplateBuilder extends Page implements HasSchemas
     public function mount(): void
     {
         $this->settingsForm->fill([
-            'target_system' => 'generic',
             'file_format' => ExportTemplate::FORMAT_CSV,
             'delimiter' => ',',
             'include_header' => true,
@@ -83,11 +82,6 @@ class ExportTemplateBuilder extends Page implements HasSchemas
                         Textarea::make('description')
                             ->label('Description')
                             ->placeholder('Optional description of this template'),
-
-                        Select::make('target_system')
-                            ->label('Target System')
-                            ->options(ExportTemplate::getTargetSystems())
-                            ->default('generic'),
 
                         Select::make('file_format')
                             ->label('File Format')
@@ -225,7 +219,7 @@ class ExportTemplateBuilder extends Page implements HasSchemas
         }
     }
 
-    protected function autoMatchExportField(string $header): ?string
+    protected function autoMatchExportField(string $header): string
     {
         $normalized = strtolower(trim($header));
         $normalized = str_replace(['_', '-'], ' ', $normalized);
@@ -251,7 +245,8 @@ class ExportTemplateBuilder extends Page implements HasSchemas
             }
         }
 
-        return null;
+        // Unmatched fields default to PassThrough
+        return 'passthrough';
     }
 
     protected function addDefaultMappings(): void
@@ -352,12 +347,32 @@ class ExportTemplateBuilder extends Page implements HasSchemas
             return;
         }
 
-        // Build field_layout for ExportTemplate
+        // Convert passthrough fields to extra_X fields
+        $nextExtraId = 1;
         $fieldLayout = [];
+
         foreach ($validMappings as $index => $mapping) {
+            $field = $mapping['field'];
+
+            // If this is a passthrough, assign the next available extra field
+            if ($field === 'passthrough') {
+                $field = "extra_{$nextExtraId}";
+                $nextExtraId++;
+
+                // Cap at 20 extra fields
+                if ($nextExtraId > 20) {
+                    Notification::make()
+                        ->title('Warning')
+                        ->body('Maximum of 20 PassThrough fields allowed. Some fields were not mapped.')
+                        ->warning()
+                        ->send();
+                    $nextExtraId = 20;
+                }
+            }
+
             $fieldLayout[] = [
                 'position' => $index,
-                'field' => $mapping['field'],
+                'field' => $field,
                 'header' => $mapping['header'],
             ];
         }
@@ -366,7 +381,7 @@ class ExportTemplateBuilder extends Page implements HasSchemas
             $template = ExportTemplate::create([
                 'name' => $data['name'],
                 'description' => $data['description'] ?? null,
-                'target_system' => $data['target_system'] ?? 'generic',
+                'target_system' => 'generic',
                 'file_format' => $data['file_format'] ?? ExportTemplate::FORMAT_CSV,
                 'delimiter' => $data['delimiter'] ?? ',',
                 'include_header' => $data['include_header'] ?? true,
@@ -400,7 +415,14 @@ class ExportTemplateBuilder extends Page implements HasSchemas
 
     public function getExportableFields(): array
     {
-        $fields = ExportTemplate::getAvailableFields();
+        // Start with empty/select option
+        $fields = [
+            '' => '-- Select Field --',
+            'passthrough' => '↔ PassThrough (Auto-assign to Extra Field)',
+        ];
+
+        // Add standard fields
+        $fields = array_merge($fields, ExportTemplate::getAvailableFields());
 
         // Add extra fields
         for ($i = 1; $i <= 20; $i++) {
@@ -442,6 +464,7 @@ class ExportTemplateBuilder extends Page implements HasSchemas
             'confidence_score' => isset($correction['confidence_score']) ? number_format($correction['confidence_score'] * 100, 0).'%' : null,
             'carrier' => $correction['carrier']['name'] ?? null,
             'validated_at' => $correction['validated_at'] ?? null,
+            'passthrough' => '[PassThrough]',
             default => $this->getExtraFieldValue($address, $field),
         };
     }

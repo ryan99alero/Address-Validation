@@ -17,8 +17,6 @@ class ExportTemplatesTable
             ->columns([
                 TextColumn::make('name')
                     ->searchable(),
-                TextColumn::make('target_system')
-                    ->searchable(),
                 TextColumn::make('file_format')
                     ->searchable(),
                 TextColumn::make('delimiter')

@@ -64,6 +64,8 @@ class BatchProcessing extends Page implements HasSchemas
 
     public ?string $lastProcessedFile = null;
 
+    public ?string $originalFilename = null;
+
     // ===== EXPORT PROPERTIES =====
     public ?array $exportData = [];
 
@@ -129,6 +131,7 @@ class BatchProcessing extends Page implements HasSchemas
                             ->maxSize(10240)
                             ->disk('local')
                             ->directory('imports')
+                            ->storeFileNamesIn('original_file_name')
                             ->helperText('Accepted formats: .xlsx, .xls, .csv (max 10MB)'),
                         TextInput::make('import_name')
                             ->label('Import Name')
@@ -251,9 +254,11 @@ class BatchProcessing extends Page implements HasSchemas
 
             $this->uploadedFilePath = $filePath;
             $storedFilePath = Storage::disk('local')->path($filePath);
-            $originalFilename = basename($filePath);
 
-            $file = new UploadedFile($storedFilePath, $originalFilename);
+            // Get the original filename from the upload (captured by storeFileNamesIn)
+            $this->originalFilename = $data['original_file_name'] ?? basename($filePath);
+
+            $file = new UploadedFile($storedFilePath, $this->originalFilename);
 
             $this->headers = $importService->parseHeaders($file);
 
@@ -277,8 +282,8 @@ class BatchProcessing extends Page implements HasSchemas
 
             $importName = $data['import_name'] ?? null;
             $this->batch = ImportBatch::create([
-                'name' => $importName ?: pathinfo($originalFilename, PATHINFO_FILENAME),
-                'original_filename' => $originalFilename,
+                'name' => $importName ?: pathinfo($this->originalFilename, PATHINFO_FILENAME),
+                'original_filename' => $this->originalFilename,
                 'file_path' => $filePath,
                 'status' => ImportBatch::STATUS_MAPPING,
                 'total_rows' => $totalRows,
