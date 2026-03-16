@@ -18,11 +18,6 @@ echo ""
 echo "Pulling latest changes..."
 git pull origin "$BRANCH"
 
-# Install/update composer dependencies
-echo ""
-echo "Updating Composer dependencies..."
-composer install --no-interaction --prefer-dist --optimize-autoloader
-
 # Run migrations
 echo ""
 echo "Running migrations..."
