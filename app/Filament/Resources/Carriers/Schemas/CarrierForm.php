@@ -67,6 +67,46 @@ class CarrierForm
                             ->maxValue(120),
                     ]),
 
+                Section::make('Batch Processing')
+                    ->description('Configure how addresses are processed in bulk')
+                    ->columns(2)
+                    ->schema([
+                        TextInput::make('chunk_size')
+                            ->label('Chunk Size')
+                            ->required()
+                            ->numeric()
+                            ->default(100)
+                            ->minValue(1)
+                            ->maxValue(1000)
+                            ->helperText('Number of addresses to process per batch'),
+                        TextInput::make('concurrent_requests')
+                            ->label('Concurrent Requests')
+                            ->required()
+                            ->numeric()
+                            ->default(10)
+                            ->minValue(1)
+                            ->maxValue(50)
+                            ->helperText('Max parallel HTTP requests within a chunk'),
+                        TextInput::make('rate_limit_per_minute')
+                            ->label('Rate Limit (per minute)')
+                            ->numeric()
+                            ->nullable()
+                            ->minValue(1)
+                            ->helperText('Optional: Max requests per minute (leave blank for unlimited)'),
+                        Toggle::make('supports_native_batch')
+                            ->label('Supports Native Batch API')
+                            ->helperText('Enable if the API supports batch requests natively')
+                            ->live(),
+                        TextInput::make('native_batch_size')
+                            ->label('Native Batch Size')
+                            ->numeric()
+                            ->nullable()
+                            ->minValue(1)
+                            ->maxValue(500)
+                            ->visible(fn (callable $get) => $get('supports_native_batch'))
+                            ->helperText('Max addresses per native batch API call'),
+                    ]),
+
                 Section::make('Authentication')
                     ->description('Configure API authentication. Credentials are encrypted.')
                     ->columns(2)

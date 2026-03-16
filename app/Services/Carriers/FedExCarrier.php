@@ -31,8 +31,8 @@ class FedExCarrier extends AbstractCarrier
     }
 
     /**
-     * Validate multiple addresses in a single FedEx API call.
-     * FedEx supports up to 100 addresses per request.
+     * Validate multiple addresses using FedEx batch API.
+     * Uses carrier settings for native_batch_size, chunk_size, and concurrent_requests.
      *
      * @param  array<Address>  $addresses
      * @return array<AddressCorrection>
@@ -43,15 +43,105 @@ class FedExCarrier extends AbstractCarrier
             return [];
         }
 
-        // FedEx limit is 100 addresses per request
-        $batchSize = 100;
+        // Use native batch size from carrier settings
+        $nativeBatchSize = $this->getNativeBatchSize();
+        $chunkSize = $this->getChunkSize();
+        $concurrentRequests = $this->getConcurrentRequests();
+
         $allCorrections = [];
 
-        // Process in chunks of 100
-        foreach (array_chunk($addresses, $batchSize) as $chunk) {
-            $corrections = $this->validateBatchChunk($chunk);
-            $allCorrections = array_merge($allCorrections, $corrections);
+        // First, split into chunks based on overall chunk_size
+        foreach (array_chunk($addresses, $chunkSize) as $chunk) {
+            // Apply rate limiting if configured
+            $this->applyRateLimit(count($chunk));
+
+            // Split each chunk into native batch sizes and process concurrently
+            $nativeBatches = array_chunk($chunk, $nativeBatchSize);
+
+            // Process native batches concurrently (up to concurrent_requests at a time)
+            foreach (array_chunk($nativeBatches, $concurrentRequests) as $concurrentBatches) {
+                $corrections = $this->validateNativeBatchesConcurrently($concurrentBatches);
+                $allCorrections = array_merge($allCorrections, $corrections);
+            }
         }
+
+        return $allCorrections;
+    }
+
+    /**
+     * Process multiple native batches concurrently using HTTP pool.
+     *
+     * @param  array<array<Address>>  $batches
+     * @return array<AddressCorrection>
+     */
+    protected function validateNativeBatchesConcurrently(array $batches): array
+    {
+        if (empty($batches)) {
+            return [];
+        }
+
+        // If only one batch, process directly (no need for pool)
+        if (count($batches) === 1) {
+            return $this->validateBatchChunk($batches[0]);
+        }
+
+        $accessToken = $this->getAccessToken();
+        $baseUrl = $this->carrier->getBaseUrl();
+        $timeout = $this->carrier->timeout_seconds;
+
+        // Build concurrent requests for each batch
+        $responses = Http::pool(function ($pool) use ($batches, $accessToken, $baseUrl, $timeout) {
+            foreach ($batches as $batchIndex => $batch) {
+                $addressesToValidate = [];
+                foreach ($batch as $index => $address) {
+                    $referenceId = $address->source_row_number
+                        ? "row_{$address->source_row_number}_id_{$address->id}"
+                        : (string) $address->id;
+
+                    $addressesToValidate[] = [
+                        'address' => $this->formatAddressForRequest($address),
+                        'clientReferenceId' => $referenceId,
+                    ];
+                }
+
+                $pool->as($batchIndex)
+                    ->withToken($accessToken)
+                    ->timeout($timeout)
+                    ->acceptJson()
+                    ->post($baseUrl.'/address/v1/addresses/resolve', [
+                        'addressesToValidate' => $addressesToValidate,
+                    ]);
+            }
+        });
+
+        // Process responses
+        $allCorrections = [];
+
+        foreach ($batches as $batchIndex => $batch) {
+            $response = $responses[$batchIndex] ?? null;
+
+            try {
+                if ($response && $response->successful()) {
+                    $corrections = $this->parseBatchResponse($batch, $response->json());
+                    $allCorrections = array_merge($allCorrections, $corrections);
+                } else {
+                    $errorMsg = $response ? 'API error: '.$response->status() : 'No response';
+                    foreach ($batch as $address) {
+                        $allCorrections[] = $this->createFailedCorrection($address, $errorMsg);
+                    }
+                }
+            } catch (Exception $e) {
+                Log::error('FedEx Concurrent Batch Error', [
+                    'batch_index' => $batchIndex,
+                    'error' => $e->getMessage(),
+                ]);
+                foreach ($batch as $address) {
+                    $allCorrections[] = $this->createFailedCorrection($address, $e->getMessage());
+                }
+            }
+        }
+
+        $this->markConnected();
 
         return $allCorrections;
     }

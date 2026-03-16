@@ -18,6 +18,11 @@ class Carrier extends Model
         'name',
         'slug',
         'is_active',
+        'chunk_size',
+        'concurrent_requests',
+        'rate_limit_per_minute',
+        'supports_native_batch',
+        'native_batch_size',
         'environment',
         'sandbox_url',
         'production_url',
@@ -40,6 +45,11 @@ class Carrier extends Model
     {
         return [
             'is_active' => 'boolean',
+            'chunk_size' => 'integer',
+            'concurrent_requests' => 'integer',
+            'rate_limit_per_minute' => 'integer',
+            'supports_native_batch' => 'boolean',
+            'native_batch_size' => 'integer',
             'timeout_seconds' => 'integer',
             'last_connected_at' => 'datetime',
             'last_error_at' => 'datetime',

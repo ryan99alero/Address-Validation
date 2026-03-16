@@ -4,23 +4,12 @@ namespace App\Services\Carriers;
 
 use App\Models\Address;
 use App\Models\AddressCorrection;
-use App\Models\Carrier;
 use Exception;
-use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-class SmartyCarrier implements CarrierInterface
+class SmartyCarrier extends AbstractCarrier
 {
-    protected Carrier $carrier;
-
-    public function setCarrier(Carrier $carrier): self
-    {
-        $this->carrier = $carrier;
-
-        return $this;
-    }
-
     public function getName(): string
     {
         return 'Smarty';
@@ -42,8 +31,8 @@ class SmartyCarrier implements CarrierInterface
     }
 
     /**
-     * Validate multiple addresses in a single Smarty API call using POST.
-     * Smarty supports up to 100 addresses per POST request.
+     * Validate multiple addresses using Smarty batch API.
+     * Uses carrier settings for native_batch_size, chunk_size, and concurrent_requests.
      *
      * @param  array<Address>  $addresses
      * @return array<AddressCorrection>
@@ -54,15 +43,114 @@ class SmartyCarrier implements CarrierInterface
             return [];
         }
 
-        // Smarty limit is 100 addresses per request
-        $batchSize = 100;
+        // Use native batch size from carrier settings
+        $nativeBatchSize = $this->getNativeBatchSize();
+        $chunkSize = $this->getChunkSize();
+        $concurrentRequests = $this->getConcurrentRequests();
+
         $allCorrections = [];
 
-        // Process in chunks of 100
-        foreach (array_chunk($addresses, $batchSize) as $chunk) {
-            $corrections = $this->validateBatchChunk($chunk);
-            $allCorrections = array_merge($allCorrections, $corrections);
+        // First, split into chunks based on overall chunk_size
+        foreach (array_chunk($addresses, $chunkSize) as $chunk) {
+            // Apply rate limiting if configured
+            $this->applyRateLimit(count($chunk));
+
+            // Split each chunk into native batch sizes and process concurrently
+            $nativeBatches = array_chunk($chunk, $nativeBatchSize);
+
+            // Process native batches concurrently (up to concurrent_requests at a time)
+            foreach (array_chunk($nativeBatches, $concurrentRequests) as $concurrentBatches) {
+                $corrections = $this->validateNativeBatchesConcurrently($concurrentBatches);
+                $allCorrections = array_merge($allCorrections, $corrections);
+            }
         }
+
+        return $allCorrections;
+    }
+
+    /**
+     * Process multiple native batches concurrently using HTTP pool.
+     *
+     * @param  array<array<Address>>  $batches
+     * @return array<AddressCorrection>
+     */
+    protected function validateNativeBatchesConcurrently(array $batches): array
+    {
+        if (empty($batches)) {
+            return [];
+        }
+
+        // If only one batch, process directly (no need for pool)
+        if (count($batches) === 1) {
+            return $this->validateBatchChunk($batches[0]);
+        }
+
+        $authId = $this->carrier->getCredential('auth_id');
+        $authToken = $this->carrier->getCredential('auth_token');
+
+        if (empty($authId) || empty($authToken)) {
+            $errorMsg = 'Smarty API credentials not configured';
+            $allCorrections = [];
+            foreach ($batches as $batch) {
+                foreach ($batch as $address) {
+                    $allCorrections[] = $this->createFailedCorrection($address, $errorMsg);
+                }
+            }
+
+            return $allCorrections;
+        }
+
+        $baseUrl = $this->carrier->getBaseUrl();
+        $timeout = $this->carrier->timeout_seconds;
+        $authQuery = http_build_query([
+            'auth-id' => $authId,
+            'auth-token' => $authToken,
+        ]);
+
+        // Build concurrent requests for each batch
+        $responses = Http::pool(function ($pool) use ($batches, $baseUrl, $timeout, $authQuery) {
+            foreach ($batches as $batchIndex => $batch) {
+                $addressArray = [];
+                foreach ($batch as $index => $address) {
+                    $addressArray[] = $this->formatAddressForBatch($address, $index);
+                }
+
+                $pool->as($batchIndex)
+                    ->timeout($timeout)
+                    ->acceptJson()
+                    ->asJson()
+                    ->post($baseUrl.'/street-address?'.$authQuery, $addressArray);
+            }
+        });
+
+        // Process responses
+        $allCorrections = [];
+
+        foreach ($batches as $batchIndex => $batch) {
+            $response = $responses[$batchIndex] ?? null;
+
+            try {
+                if ($response && $response->successful()) {
+                    $corrections = $this->parseBatchResponse($batch, $response->json());
+                    $allCorrections = array_merge($allCorrections, $corrections);
+                } else {
+                    $errorMsg = $response ? 'API error: '.$response->status() : 'No response';
+                    foreach ($batch as $address) {
+                        $allCorrections[] = $this->createFailedCorrection($address, $errorMsg);
+                    }
+                }
+            } catch (Exception $e) {
+                Log::error('Smarty Concurrent Batch Error', [
+                    'batch_index' => $batchIndex,
+                    'error' => $e->getMessage(),
+                ]);
+                foreach ($batch as $address) {
+                    $allCorrections[] = $this->createFailedCorrection($address, $e->getMessage());
+                }
+            }
+        }
+
+        $this->markConnected();
 
         return $allCorrections;
     }
@@ -268,12 +356,13 @@ class SmartyCarrier implements CarrierInterface
     }
 
     /**
-     * Get the HTTP client configured for this carrier.
+     * Fetch access token - Smarty uses API key auth, not OAuth.
+     * This is required by AbstractCarrier but returns empty for API key auth.
      */
-    protected function getHttpClient(): PendingRequest
+    protected function fetchAccessToken(): string
     {
-        return Http::timeout($this->carrier->timeout_seconds)
-            ->acceptJson();
+        // Smarty doesn't use OAuth tokens - it uses auth-id and auth-token in query params
+        return '';
     }
 
     /**
@@ -356,7 +445,6 @@ class SmartyCarrier implements CarrierInterface
     protected function determineValidationStatus(array $analysis, int $candidatesCount): string
     {
         $dpvMatchCode = $analysis['dpv_match_code'] ?? null;
-        $dpvFootnotes = $analysis['dpv_footnotes'] ?? '';
 
         // DPV Match Codes:
         // Y = Confirmed valid
@@ -391,38 +479,5 @@ class SmartyCarrier implements CarrierInterface
             'N' => 0.3,
             default => 0.5,
         };
-    }
-
-    /**
-     * Create a failed correction record.
-     */
-    protected function createFailedCorrection(Address $address, string $errorMessage): AddressCorrection
-    {
-        $correction = new AddressCorrection([
-            'address_id' => $address->id,
-            'carrier_id' => $this->carrier->id,
-            'validation_status' => AddressCorrection::STATUS_INVALID,
-            'raw_response' => ['error' => $errorMessage],
-            'validated_at' => now(),
-        ]);
-        $correction->save();
-
-        return $correction;
-    }
-
-    /**
-     * Mark the carrier as connected.
-     */
-    protected function markConnected(): void
-    {
-        $this->carrier->markConnected();
-    }
-
-    /**
-     * Mark the carrier as having an error.
-     */
-    protected function markError(string $message): void
-    {
-        $this->carrier->markError($message);
     }
 }

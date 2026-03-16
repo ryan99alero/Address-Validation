@@ -327,6 +327,7 @@ class UpsCarrier extends AbstractCarrier
     /**
      * Validate multiple addresses using concurrent HTTP requests.
      * UPS doesn't have a native batch API, so we use HTTP pool for parallel requests.
+     * Uses carrier settings for chunk_size and concurrent_requests.
      *
      * @param  array<Address>  $addresses
      * @return array<AddressCorrection>
@@ -337,42 +338,16 @@ class UpsCarrier extends AbstractCarrier
             return [];
         }
 
-        // Process in chunks of 100 concurrent HTTP requests
-        $chunkSize = 100;
-        $allCorrections = [];
-
-        foreach (array_chunk($addresses, $chunkSize) as $chunk) {
-            $results = $this->validateConcurrentChunk($chunk);
-            foreach ($results as $result) {
-                if ($result['correction']) {
-                    $allCorrections[] = $result['correction'];
-                }
-            }
-        }
-
-        return $allCorrections;
-    }
-
-    /**
-     * Validate a chunk of addresses concurrently using HTTP pool.
-     *
-     * @param  array<Address>  $addresses
-     * @return array<array{address_id: int, success: bool, correction: ?AddressCorrection, error: ?string}>
-     */
-    protected function validateConcurrentChunk(array $addresses): array
-    {
-        if (empty($addresses)) {
-            return [];
-        }
-
-        // Get a single access token for all requests
+        // Get a single access token for all requests in this batch
         $accessToken = $this->fetchAccessToken();
         $baseUrl = $this->carrier->getBaseUrl();
         $timeout = $this->carrier->timeout_seconds;
 
-        // Build concurrent requests
-        $responses = Http::pool(function ($pool) use ($addresses, $accessToken, $baseUrl, $timeout) {
-            foreach ($addresses as $index => $address) {
+        // Use the parent's concurrent processing with carrier settings
+        $results = $this->processConcurrently(
+            $addresses,
+            // Request builder
+            function ($pool, $address, $index) use ($accessToken, $baseUrl, $timeout) {
                 $pool->as($index)
                     ->withToken($accessToken)
                     ->timeout($timeout)
@@ -381,48 +356,55 @@ class UpsCarrier extends AbstractCarrier
                             'AddressKeyFormat' => $this->formatAddressForRequest($address),
                         ],
                     ]);
+            },
+            // Response parser
+            function ($address, $response) {
+                return $this->parseResponse($address, $response->json());
             }
-        });
+        );
 
-        // Process all responses
-        $results = [];
-        foreach ($addresses as $index => $address) {
-            $response = $responses[$index] ?? null;
-
-            try {
-                if ($response && $response->successful()) {
-                    $correction = $this->parseResponse($address, $response->json());
-                    $results[] = [
-                        'address_id' => $address->id,
-                        'success' => true,
-                        'correction' => $correction,
-                        'error' => null,
-                    ];
-                } else {
-                    $errorMsg = $response ? 'API error: '.$response->status() : 'No response';
-                    $results[] = [
-                        'address_id' => $address->id,
-                        'success' => false,
-                        'correction' => null,
-                        'error' => $errorMsg,
-                    ];
-                }
-            } catch (Exception $e) {
-                Log::error('UPS Concurrent Validation Error', [
-                    'address_id' => $address->id,
-                    'error' => $e->getMessage(),
-                ]);
-                $results[] = [
-                    'address_id' => $address->id,
-                    'success' => false,
-                    'correction' => null,
-                    'error' => $e->getMessage(),
-                ];
+        // Extract corrections from results
+        $corrections = [];
+        foreach ($results as $result) {
+            if ($result['correction']) {
+                $corrections[] = $result['correction'];
             }
         }
 
-        $this->markConnected();
+        return $corrections;
+    }
 
-        return $results;
+    /**
+     * Validate addresses concurrently and return detailed results.
+     *
+     * @param  array<Address>  $addresses
+     * @return array<array{address_id: int, success: bool, correction: ?AddressCorrection, error: ?string}>
+     */
+    public function validateAddressesConcurrently(array $addresses): array
+    {
+        if (empty($addresses)) {
+            return [];
+        }
+
+        $accessToken = $this->fetchAccessToken();
+        $baseUrl = $this->carrier->getBaseUrl();
+        $timeout = $this->carrier->timeout_seconds;
+
+        return $this->processConcurrently(
+            $addresses,
+            function ($pool, $address, $index) use ($accessToken, $baseUrl, $timeout) {
+                $pool->as($index)
+                    ->withToken($accessToken)
+                    ->timeout($timeout)
+                    ->post($baseUrl.'/api/addressvalidation/v1/3', [
+                        'XAVRequest' => [
+                            'AddressKeyFormat' => $this->formatAddressForRequest($address),
+                        ],
+                    ]);
+            },
+            function ($address, $response) {
+                return $this->parseResponse($address, $response->json());
+            }
+        );
     }
 }
