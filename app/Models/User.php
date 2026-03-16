@@ -27,6 +27,10 @@ class User extends Authenticatable implements FilamentUser
         'email',
         'password',
         'is_admin',
+        'auth_type',
+        'ldap_guid',
+        'ldap_domain',
+        'ldap_synced_at',
     ];
 
     /**
@@ -52,7 +56,24 @@ class User extends Authenticatable implements FilamentUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_admin' => 'boolean',
+            'ldap_synced_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Check if this is an LDAP user.
+     */
+    public function isLdapUser(): bool
+    {
+        return $this->auth_type === 'ldap';
+    }
+
+    /**
+     * Check if this is a local user.
+     */
+    public function isLocalUser(): bool
+    {
+        return $this->auth_type === 'local' || empty($this->auth_type);
     }
 
     /**
