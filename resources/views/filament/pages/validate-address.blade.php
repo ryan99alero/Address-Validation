@@ -102,8 +102,9 @@
                         'lng' => $metadata['longitude'],
                     ] : null,
                 ];
-            } elseif ($carrierSlug === 'fedex' && isset($rawResponse['output']['resolvedAddresses'][0])) {
-                $fedexData = $rawResponse['output']['resolvedAddresses'][0];
+            } elseif ($carrierSlug === 'fedex') {
+                // FedEx stores the resolved address directly (not wrapped in output.resolvedAddresses)
+                $fedexData = $rawResponse['output']['resolvedAddresses'][0] ?? $rawResponse;
                 $attrs = $fedexData['attributes'] ?? [];
 
                 $analysisData = [
