@@ -6,6 +6,7 @@ use App\Models\Address;
 use App\Models\AddressCorrection;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
+use App\Models\TransitTime;
 use App\Services\ExportService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -30,7 +31,8 @@ class ProcessExportBatch implements ShouldQueue
         public ?int $templateId = null,
         public bool $useImportMapping = true,
         public string $filterStatus = 'all',
-        public ?string $filename = null
+        public ?string $filename = null,
+        public string $sortBy = 'original'
     ) {}
 
     public function handle(): void
@@ -119,7 +121,7 @@ class ProcessExportBatch implements ShouldQueue
         foreach ($mappings as $mapping) {
             $headers[] = $mapping['source'] ?? '';
         }
-        fputcsv($handle, $headers);
+        fputcsv($handle, $headers, ',', '"', '');
 
         // Get address IDs that match the filter first (memory efficient)
         $addressIds = $this->getFilteredAddressIds();
@@ -164,7 +166,7 @@ class ProcessExportBatch implements ShouldQueue
                         $row[] = $exportService->getExportFieldValue($address, $target) ?? '';
                     }
                 }
-                fputcsv($handle, $row);
+                fputcsv($handle, $row, ',', '"', '');
                 $rowCount++;
             }
 
@@ -194,6 +196,11 @@ class ProcessExportBatch implements ShouldQueue
         $exportService = app(ExportService::class);
         $fields = $template->ordered_fields;
 
+        // Check if any transit time fields are requested
+        $needsTransitTimes = collect($fields)->contains(
+            fn ($field) => str_starts_with($field['field'] ?? '', 'transit_')
+        );
+
         // Open file for writing
         $handle = fopen($filePath, 'w');
         if (! $handle) {
@@ -206,7 +213,7 @@ class ProcessExportBatch implements ShouldQueue
             foreach ($fields as $field) {
                 $headers[] = $field['header'] ?? $field['field'];
             }
-            fputcsv($handle, $headers);
+            fputcsv($handle, $headers, ',', '"', '');
         }
 
         // Get address IDs that match the filter first
@@ -229,19 +236,32 @@ class ProcessExportBatch implements ShouldQueue
                 ->groupBy('address_id')
                 ->map(fn ($group) => $group->first());
 
+            // Load transit times if needed
+            $transitTimes = collect();
+            if ($needsTransitTimes) {
+                $transitTimes = TransitTime::whereIn('address_id', $addressIdList)
+                    ->get()
+                    ->groupBy('address_id');
+            }
+
             foreach ($addresses as $address) {
                 // Manually attach the latest correction
                 $address->setRelation('latestCorrection', $corrections->get($address->id));
+
+                // Attach transit times if loaded
+                if ($needsTransitTimes) {
+                    $address->setRelation('transitTimes', $transitTimes->get($address->id, collect()));
+                }
 
                 $row = [];
                 foreach ($fields as $field) {
                     $row[] = $exportService->getFieldValue($address, $field['field']) ?? '';
                 }
-                fputcsv($handle, $row);
+                fputcsv($handle, $row, ',', '"', '');
                 $rowCount++;
             }
 
-            unset($addresses, $corrections);
+            unset($addresses, $corrections, $transitTimes);
             gc_collect_cycles();
         }
 
@@ -262,21 +282,43 @@ class ProcessExportBatch implements ShouldQueue
     {
         $query = $this->batch->addresses()->select('addresses.id');
 
-        // Apply filter using efficient JOIN instead of whereHas
-        if ($this->filterStatus !== 'all') {
-            $query->join('address_corrections as ac', function ($join) {
+        // Join corrections for filtering or sorting by delivery date
+        $needsCorrectionsJoin = $this->filterStatus !== 'all' ||
+            in_array($this->sortBy, ['delivery_date_asc', 'delivery_date_desc']);
+
+        if ($needsCorrectionsJoin) {
+            $query->leftJoin('address_corrections as ac', function ($join) {
                 $join->on('ac.address_id', '=', 'addresses.id')
                     ->whereRaw('ac.id = (SELECT MAX(id) FROM address_corrections WHERE address_id = addresses.id)');
             });
 
+            // Apply status filter
             if ($this->filterStatus === 'validated') {
-                // Already joined, so we have validated addresses
+                $query->whereNotNull('ac.id');
             } elseif (in_array($this->filterStatus, ['valid', 'invalid', 'ambiguous'])) {
                 $query->where('ac.validation_status', $this->filterStatus);
             }
         }
 
-        return $query->pluck('addresses.id')->toArray();
+        // Join transit times for delivery date sorting
+        if (in_array($this->sortBy, ['delivery_date_asc', 'delivery_date_desc'])) {
+            // Get the delivery date from ship_via_code's service or recommended_delivery_date
+            $query->leftJoin('transit_times as tt', function ($join) {
+                $join->on('tt.address_id', '=', 'addresses.id');
+            });
+        }
+
+        // Apply sorting
+        match ($this->sortBy) {
+            'delivery_date_asc' => $query->orderByRaw('COALESCE(addresses.estimated_delivery_date, tt.delivery_date) ASC'),
+            'delivery_date_desc' => $query->orderByRaw('COALESCE(addresses.estimated_delivery_date, tt.delivery_date) DESC'),
+            'ship_via_code' => $query->orderBy('addresses.ship_via_code'),
+            'state' => $query->orderByRaw('COALESCE(ac.corrected_state, addresses.state)'),
+            'postal_code' => $query->orderByRaw('COALESCE(ac.corrected_postal_code, addresses.postal_code)'),
+            default => $query->orderBy('addresses.source_row_number'), // original order
+        };
+
+        return $query->distinct()->pluck('addresses.id')->toArray();
     }
 
     public function failed(\Throwable $exception): void

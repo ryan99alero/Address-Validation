@@ -17,6 +17,7 @@ class ImportFieldTemplate extends Model
         'name',
         'description',
         'field_mappings',
+        'ship_via_code_field',
         'is_default',
         'is_shared',
         'created_by',

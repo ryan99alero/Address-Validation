@@ -24,6 +24,13 @@ class Address extends Model
         'state',
         'postal_code',
         'country_code',
+        'ship_via_code',
+        'ship_via_code_id',
+        'requested_ship_date',
+        'required_on_site_date',
+        'recommended_service',
+        'estimated_delivery_date',
+        'can_meet_required_date',
         'source',
         'source_row_number',
         'import_batch_id',
@@ -34,6 +41,19 @@ class Address extends Model
         'extra_11', 'extra_12', 'extra_13', 'extra_14', 'extra_15',
         'extra_16', 'extra_17', 'extra_18', 'extra_19', 'extra_20',
     ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'requested_ship_date' => 'date',
+            'required_on_site_date' => 'date',
+            'estimated_delivery_date' => 'date',
+            'can_meet_required_date' => 'boolean',
+        ];
+    }
 
     /**
      * Standard system fields for mapping.
@@ -52,6 +72,9 @@ class Address extends Model
             'state' => 'State/Province',
             'postal_code' => 'Postal/ZIP Code',
             'country_code' => 'Country Code',
+            'ship_via_code' => 'Ship Via Code',
+            'requested_ship_date' => 'Requested Ship Date',
+            'required_on_site_date' => 'Required On-Site Date',
         ];
     }
 
@@ -108,6 +131,24 @@ class Address extends Model
     public function latestCorrection(): HasOne
     {
         return $this->hasOne(AddressCorrection::class)->latestOfMany('validated_at');
+    }
+
+    public function transitTimes(): HasMany
+    {
+        return $this->hasMany(TransitTime::class);
+    }
+
+    public function shipViaCodeRecord(): BelongsTo
+    {
+        return $this->belongsTo(ShipViaCode::class, 'ship_via_code_id');
+    }
+
+    /**
+     * Get transit time for a specific service type.
+     */
+    public function getTransitTimeForService(string $serviceType): ?TransitTime
+    {
+        return $this->transitTimes->firstWhere('service_type', $serviceType);
     }
 
     // Scopes

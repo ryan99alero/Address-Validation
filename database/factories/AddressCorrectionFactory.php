@@ -2,7 +2,9 @@
 
 namespace Database\Factories;
 
+use App\Models\Address;
 use App\Models\AddressCorrection;
+use App\Models\Carrier;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -18,6 +20,8 @@ class AddressCorrectionFactory extends Factory
     public function definition(): array
     {
         return [
+            'address_id' => Address::factory(),
+            'carrier_id' => Carrier::factory(),
             'validation_status' => AddressCorrection::STATUS_VALID,
             'corrected_address_line_1' => fake()->streetAddress(),
             'corrected_address_line_2' => fake()->optional()->secondaryAddress(),

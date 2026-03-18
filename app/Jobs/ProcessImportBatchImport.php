@@ -49,6 +49,7 @@ class ProcessImportBatchImport implements ShouldQueue
 
         $this->batch->update([
             'status' => ImportBatch::STATUS_PROCESSING,
+            'processing_phase' => ImportBatch::PHASE_IMPORTING,
             'started_at' => now(),
         ]);
 

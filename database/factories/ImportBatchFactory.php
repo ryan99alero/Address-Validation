@@ -18,7 +18,13 @@ class ImportBatchFactory extends Factory
     public function definition(): array
     {
         return [
-            //
+            'original_filename' => fake()->word().'.csv',
+            'file_path' => 'imports/'.fake()->uuid().'.csv',
+            'status' => 'pending',
+            'total_rows' => fake()->numberBetween(10, 100),
+            'processed_rows' => 0,
+            'successful_rows' => 0,
+            'failed_rows' => 0,
         ];
     }
 }

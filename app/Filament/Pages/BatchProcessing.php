@@ -6,6 +6,7 @@ use App\Jobs\ProcessExportBatch;
 use App\Jobs\ProcessImportBatchImport;
 use App\Jobs\ProcessImportBatchValidation;
 use App\Models\Carrier;
+use App\Models\CompanySetting;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
 use App\Models\ImportFieldTemplate;
@@ -65,6 +66,8 @@ class BatchProcessing extends Page implements HasSchemas
     public ?string $lastProcessedFile = null;
 
     public ?string $originalFilename = null;
+
+    public ?string $shipViaCodeColumn = null;
 
     // ===== EXPORT PROPERTIES =====
     public ?array $exportData = [];
@@ -146,6 +149,28 @@ class BatchProcessing extends Page implements HasSchemas
                             ->label('Automatically start validation after import')
                             ->default(true)
                             ->helperText('If checked, address validation will begin immediately after import'),
+                        Checkbox::make('include_transit_times')
+                            ->label('Include Time in Transit (FedEx only)')
+                            ->default(false)
+                            ->live()
+                            ->afterStateUpdated(function ($state, callable $set) {
+                                if ($state) {
+                                    $company = CompanySetting::instance();
+                                    if ($company->postal_code) {
+                                        $set('origin_postal_code', $company->postal_code);
+                                    }
+                                }
+                            })
+                            ->helperText('Fetch FedEx shipping service options and delivery estimates'),
+                        TextInput::make('origin_postal_code')
+                            ->label('Origin ZIP Code')
+                            ->placeholder('e.g., 38017')
+                            ->maxLength(10)
+                            ->visible(fn ($get) => $get('include_transit_times'))
+                            ->required(fn ($get) => $get('include_transit_times'))
+                            ->helperText(fn () => CompanySetting::instance()->hasAddress()
+                                ? 'Default from Company Setup: '.CompanySetting::instance()->formatted_address
+                                : 'Configure default in Settings > Company Setup'),
                     ]),
             ])
             ->statePath('uploadData');
@@ -215,6 +240,12 @@ class BatchProcessing extends Page implements HasSchemas
                             ])
                             ->default('all')
                             ->helperText('Filter which addresses to include in the export'),
+
+                        Select::make('sort_by')
+                            ->label('Sort By')
+                            ->options(ExportTemplate::getSortOptions())
+                            ->default('original')
+                            ->helperText('Choose how to sort the exported addresses'),
 
                         TextInput::make('filename')
                             ->label('Custom Filename')
@@ -288,6 +319,9 @@ class BatchProcessing extends Page implements HasSchemas
                 'status' => ImportBatch::STATUS_MAPPING,
                 'total_rows' => $totalRows,
                 'carrier_id' => $data['carrier_id'],
+                'include_transit_times' => $data['include_transit_times'] ?? false,
+                'origin_postal_code' => $data['origin_postal_code'] ?? null,
+                'origin_country_code' => 'US',
                 'imported_by' => auth()->id(),
             ]);
 
@@ -391,6 +425,7 @@ class BatchProcessing extends Page implements HasSchemas
 
         $this->batch->update([
             'field_mappings' => $this->mappings,
+            'ship_via_code_column' => $this->shipViaCodeColumn,
             'status' => ImportBatch::STATUS_PROCESSING,
             'started_at' => now(),
         ]);
@@ -573,12 +608,14 @@ class BatchProcessing extends Page implements HasSchemas
         $this->updateExportBatchStats((string) $batch->id);
 
         $filterStatus = $data['filter_status'] ?? 'all';
+        $sortBy = $data['sort_by'] ?? 'original';
         $filename = $data['filename'] ?? null;
 
         Log::info('BatchProcessing: Dispatching export job', [
             'batch_id' => $batch->id,
             'use_import_mapping' => $useImportMapping,
             'filter_status' => $filterStatus,
+            'sort_by' => $sortBy,
         ]);
 
         // Dispatch background job
@@ -587,7 +624,8 @@ class BatchProcessing extends Page implements HasSchemas
             $useImportMapping ? null : (int) $templateId,
             $useImportMapping,
             $filterStatus,
-            $filename
+            $filename,
+            $sortBy
         );
 
         Notification::make()

@@ -101,6 +101,42 @@ class ExportTemplate extends Model
             'confidence_score' => 'Confidence Score',
             'carrier' => 'Carrier Used',
             'validated_at' => 'Validated At',
+
+            // Ship Via Code Fields (based on their specified service)
+            'ship_via_code' => 'Ship Via Code (Original)',
+            'ship_via_service' => 'Ship Via Service Name',
+            'ship_via_delivery_date' => 'Ship Via Delivery Date',
+
+            // Ship Dates & Service Recommendation
+            'requested_ship_date' => 'Requested Ship Date',
+            'required_on_site_date' => 'Required On-Site Date',
+            'recommended_service' => 'Recommended Service',
+            'estimated_delivery_date' => 'Estimated Delivery Date',
+            'can_meet_required_date' => 'Can Meet Required Date',
+
+            // Fastest Available Service
+            'fastest_service' => 'Fastest Service Available',
+            'fastest_delivery_date' => 'Fastest Delivery Date',
+
+            // Distance
+            'distance_miles' => 'Distance (Miles)',
+        ];
+    }
+
+    /**
+     * Get available sort options for export.
+     *
+     * @return array<string, string>
+     */
+    public static function getSortOptions(): array
+    {
+        return [
+            'original' => 'Original Order',
+            'delivery_date_asc' => 'Delivery Date (Earliest First)',
+            'delivery_date_desc' => 'Delivery Date (Latest First)',
+            'ship_via_code' => 'Ship Via Code',
+            'state' => 'State',
+            'postal_code' => 'Postal Code',
         ];
     }
 

@@ -422,6 +422,149 @@
                     <span>{{ $this->result->validated_at?->format('M j, Y g:i A') ?? 'Unknown' }}</span>
                 </div>
             </x-filament::section>
+
+            {{-- Transit Times Section --}}
+            @if($this->transitTimes && $this->transitTimes->isNotEmpty())
+                <x-filament::section class="mt-6" collapsible>
+                    <x-slot name="heading">
+                        <div class="flex items-center gap-2">
+                            <x-filament::icon icon="heroicon-o-clock" class="h-5 w-5 text-primary-500" />
+                            <span class="text-sm font-medium">Shipping Options & Transit Times</span>
+                            <x-filament::badge color="info" size="sm">{{ $this->transitTimes->count() }} services</x-filament::badge>
+                        </div>
+                    </x-slot>
+
+                    <div class="space-y-3">
+                        {{-- Express Services --}}
+                        @php $expressServices = $this->transitTimes->filter(fn($t) => !in_array($t->service_type, ['FEDEX_GROUND', 'GROUND_HOME_DELIVERY', 'SMART_POST'])); @endphp
+                        @if($expressServices->isNotEmpty())
+                            <div>
+                                <h4 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 font-medium">Express Services</h4>
+                                <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+                                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                                        <thead class="bg-gray-50 dark:bg-gray-800">
+                                            <tr>
+                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Service</th>
+                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Transit Time</th>
+                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Delivery By</th>
+                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Cutoff</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                                            @foreach($expressServices as $transit)
+                                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
+                                                    <td class="px-4 py-2 whitespace-nowrap">
+                                                        <span class="font-medium text-gray-900 dark:text-white">{{ $transit->service_label }}</span>
+                                                    </td>
+                                                    <td class="px-4 py-2 whitespace-nowrap text-gray-600 dark:text-gray-400">
+                                                        {{ $transit->transit_range }}
+                                                    </td>
+                                                    <td class="px-4 py-2 whitespace-nowrap">
+                                                        @if($transit->formatted_delivery_date)
+                                                            <span class="text-gray-900 dark:text-white">{{ $transit->formatted_delivery_date }}</span>
+                                                            @if($transit->formatted_delivery_time)
+                                                                <span class="text-gray-500 dark:text-gray-400 text-xs ml-1">by {{ $transit->formatted_delivery_time }}</span>
+                                                            @endif
+                                                        @else
+                                                            <span class="text-gray-400">—</span>
+                                                        @endif
+                                                    </td>
+                                                    <td class="px-4 py-2 whitespace-nowrap text-gray-600 dark:text-gray-400">
+                                                        @if($transit->cutoff_time)
+                                                            {{ \Carbon\Carbon::parse($transit->cutoff_time)->format('g:i A') }}
+                                                        @else
+                                                            —
+                                                        @endif
+                                                    </td>
+                                                </tr>
+                                            @endforeach
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        @endif
+
+                        {{-- Ground Services --}}
+                        @php $groundServices = $this->transitTimes->filter(fn($t) => in_array($t->service_type, ['FEDEX_GROUND', 'GROUND_HOME_DELIVERY'])); @endphp
+                        @if($groundServices->isNotEmpty())
+                            <div>
+                                <h4 class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2 font-medium">Ground Services</h4>
+                                <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+                                    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                                        <thead class="bg-gray-50 dark:bg-gray-800">
+                                            <tr>
+                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Service</th>
+                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Transit Time</th>
+                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Delivery By</th>
+                                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Distance</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                                            @foreach($groundServices as $transit)
+                                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800">
+                                                    <td class="px-4 py-2 whitespace-nowrap">
+                                                        <span class="font-medium text-gray-900 dark:text-white">{{ $transit->service_label }}</span>
+                                                    </td>
+                                                    <td class="px-4 py-2 whitespace-nowrap text-gray-600 dark:text-gray-400">
+                                                        {{ $transit->transit_range }}
+                                                    </td>
+                                                    <td class="px-4 py-2 whitespace-nowrap">
+                                                        @if($transit->formatted_delivery_date)
+                                                            <span class="text-gray-900 dark:text-white">{{ $transit->formatted_delivery_date }}</span>
+                                                        @else
+                                                            <span class="text-gray-400">—</span>
+                                                        @endif
+                                                    </td>
+                                                    <td class="px-4 py-2 whitespace-nowrap text-gray-600 dark:text-gray-400">
+                                                        {{ $transit->formatted_distance ?? '—' }}
+                                                    </td>
+                                                </tr>
+                                            @endforeach
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        @endif
+                    </div>
+
+                    {{-- Transit Times Footer --}}
+                    <div class="mt-4 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                        <div class="flex items-center gap-2">
+                            <x-filament::icon icon="heroicon-m-map-pin" class="h-4 w-4" />
+                            <span>From: <strong>{{ $this->data['origin_postal_code'] ?? 'Unknown' }}</strong></span>
+                        </div>
+                        <x-filament::button
+                            size="xs"
+                            color="gray"
+                            wire:click="refreshTransitTimes"
+                            wire:loading.attr="disabled"
+                            icon="heroicon-o-arrow-path"
+                        >
+                            <span wire:loading.remove wire:target="refreshTransitTimes">Refresh</span>
+                            <span wire:loading wire:target="refreshTransitTimes">Loading...</span>
+                        </x-filament::button>
+                    </div>
+                </x-filament::section>
+            @elseif($this->result?->isValid() && ($this->data['include_transit_times'] ?? false) && !empty($this->data['origin_postal_code']))
+                {{-- Show loading state or prompt to fetch --}}
+                <x-filament::section class="mt-6">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                            <x-filament::icon icon="heroicon-o-clock" class="h-5 w-5" />
+                            <span>Transit times available</span>
+                        </div>
+                        <x-filament::button
+                            size="sm"
+                            wire:click="refreshTransitTimes"
+                            wire:loading.attr="disabled"
+                            icon="heroicon-o-arrow-path"
+                        >
+                            <span wire:loading.remove wire:target="refreshTransitTimes">Fetch Transit Times</span>
+                            <span wire:loading wire:target="refreshTransitTimes">Loading...</span>
+                        </x-filament::button>
+                    </div>
+                </x-filament::section>
+            @endif
         </div>
 
         {{-- Candidates Modal --}}

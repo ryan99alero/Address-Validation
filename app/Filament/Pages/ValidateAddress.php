@@ -5,9 +5,14 @@ namespace App\Filament\Pages;
 use App\Models\Address;
 use App\Models\AddressCorrection;
 use App\Models\Carrier;
+use App\Models\CompanySetting;
+use App\Models\ShipViaCode;
+use App\Models\TransitTime;
 use App\Services\AddressValidationService;
+use App\Services\FedExServiceAvailabilityService;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -17,6 +22,7 @@ use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Support\Collection;
 
 class ValidateAddress extends Page implements HasSchemas
 {
@@ -39,6 +45,15 @@ class ValidateAddress extends Page implements HasSchemas
     public bool $showCandidatesModal = false;
 
     public int $selectedCandidateIndex = 0;
+
+    /**
+     * @var Collection<int, TransitTime>|null
+     */
+    public ?Collection $transitTimes = null;
+
+    public bool $isLoadingTransitTimes = false;
+
+    public ?int $selectedShipViaCodeId = null;
 
     public function mount(): void
     {
@@ -102,6 +117,47 @@ class ValidateAddress extends Page implements HasSchemas
                             ->maxLength(255)
                             ->helperText('Your internal reference number'),
                     ]),
+
+                Section::make('Transit Time Options')
+                    ->description('Optionally fetch shipping service options and delivery estimates.')
+                    ->columns(2)
+                    ->collapsible()
+                    ->collapsed()
+                    ->schema([
+                        Checkbox::make('include_transit_times')
+                            ->label('Include Time in Transit (FedEx)')
+                            ->default(false)
+                            ->live()
+                            ->afterStateUpdated(function ($state, callable $set) {
+                                if ($state) {
+                                    $company = CompanySetting::instance();
+                                    if ($company->postal_code) {
+                                        $set('origin_postal_code', $company->postal_code);
+                                    }
+                                }
+                            })
+                            ->helperText('Fetch available shipping services and estimated delivery dates'),
+                        TextInput::make('origin_postal_code')
+                            ->label('Ship From ZIP Code')
+                            ->placeholder('e.g., 38017')
+                            ->maxLength(10)
+                            ->visible(fn ($get) => $get('include_transit_times'))
+                            ->required(fn ($get) => $get('include_transit_times'))
+                            ->helperText(fn () => CompanySetting::instance()->hasAddress()
+                                ? 'Default: '.CompanySetting::instance()->city.', '.CompanySetting::instance()->state
+                                : 'Configure default in Settings > Company Setup'),
+                        Select::make('ship_via_code_id')
+                            ->label('Ship Method (for specific transit time)')
+                            ->options(fn () => ShipViaCode::where('is_active', true)
+                                ->whereNotNull('service_type')
+                                ->get()
+                                ->mapWithKeys(fn ($code) => [$code->id => $code->service_name.' ('.$code->code.')']))
+                            ->searchable()
+                            ->placeholder('Select to show specific transit time')
+                            ->visible(fn ($get) => $get('include_transit_times'))
+                            ->helperText('Optional: Select a ship method to highlight its transit time')
+                            ->columnSpanFull(),
+                    ]),
             ])
             ->statePath('data');
     }
@@ -133,6 +189,7 @@ class ValidateAddress extends Page implements HasSchemas
 
             $this->savedAddress = $address;
             $this->result = $correction;
+            $this->transitTimes = null;
 
             if ($correction->isValid()) {
                 Notification::make()
@@ -140,6 +197,14 @@ class ValidateAddress extends Page implements HasSchemas
                     ->body('The address has been validated successfully.')
                     ->success()
                     ->send();
+
+                // Fetch transit times if enabled and address is valid
+                $includeTransitTimes = $data['include_transit_times'] ?? false;
+                $originPostalCode = $data['origin_postal_code'] ?? null;
+
+                if ($includeTransitTimes && $originPostalCode) {
+                    $this->fetchTransitTimes($address, $originPostalCode);
+                }
             } elseif ($correction->isAmbiguous()) {
                 Notification::make()
                     ->title('Address Ambiguous')
@@ -163,12 +228,86 @@ class ValidateAddress extends Page implements HasSchemas
         }
     }
 
+    /**
+     * Fetch transit times for an address.
+     */
+    public function fetchTransitTimes(Address $address, string $originPostalCode): void
+    {
+        $this->isLoadingTransitTimes = true;
+
+        try {
+            $fedexCarrier = Carrier::where('slug', 'fedex')->where('is_active', true)->first();
+
+            if (! $fedexCarrier) {
+                Notification::make()
+                    ->title('Transit Times Unavailable')
+                    ->body('FedEx carrier is not configured or inactive.')
+                    ->warning()
+                    ->send();
+
+                return;
+            }
+
+            $transitService = new FedExServiceAvailabilityService($fedexCarrier);
+            $this->transitTimes = $transitService->getTransitTimes($address, $originPostalCode);
+
+            if ($this->transitTimes->isNotEmpty()) {
+                Notification::make()
+                    ->title('Transit Times Retrieved')
+                    ->body('Found '.$this->transitTimes->count().' shipping options.')
+                    ->success()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title('No Transit Times')
+                    ->body('No shipping options available for this route.')
+                    ->warning()
+                    ->send();
+            }
+
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Transit Times Error')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        } finally {
+            $this->isLoadingTransitTimes = false;
+        }
+    }
+
+    /**
+     * Manually refresh transit times.
+     */
+    public function refreshTransitTimes(): void
+    {
+        if (! $this->savedAddress) {
+            return;
+        }
+
+        $originPostalCode = $this->data['origin_postal_code'] ?? null;
+
+        if (! $originPostalCode) {
+            Notification::make()
+                ->title('Origin Required')
+                ->body('Please enter an origin ZIP code.')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $this->fetchTransitTimes($this->savedAddress, $originPostalCode);
+    }
+
     public function clearResult(): void
     {
         $this->result = null;
         $this->savedAddress = null;
         $this->showCandidatesModal = false;
         $this->selectedCandidateIndex = 0;
+        $this->transitTimes = null;
+        $this->isLoadingTransitTimes = false;
     }
 
     public function openCandidatesModal(): void
@@ -216,6 +355,58 @@ class ValidateAddress extends Page implements HasSchemas
     public function getAllCandidates(): array
     {
         return $this->result?->getAllCandidates() ?? [];
+    }
+
+    /**
+     * Get the transit time for the selected ship method.
+     */
+    public function getSelectedTransitTime(): ?TransitTime
+    {
+        $shipViaCodeId = $this->data['ship_via_code_id'] ?? null;
+
+        if (! $shipViaCodeId || ! $this->transitTimes || $this->transitTimes->isEmpty()) {
+            return null;
+        }
+
+        $shipViaCode = ShipViaCode::find($shipViaCodeId);
+
+        if (! $shipViaCode || ! $shipViaCode->service_type) {
+            return null;
+        }
+
+        return $this->transitTimes->firstWhere('service_type', $shipViaCode->service_type);
+    }
+
+    /**
+     * Get available ship methods with their transit times.
+     *
+     * @return array<int, array{ship_via_code: ShipViaCode, transit_time: ?TransitTime}>
+     */
+    public function getShipMethodsWithTransitTimes(): array
+    {
+        if (! $this->transitTimes || $this->transitTimes->isEmpty()) {
+            return [];
+        }
+
+        $shipViaCodes = ShipViaCode::where('is_active', true)
+            ->whereNotNull('service_type')
+            ->with('carrier')
+            ->get();
+
+        $result = [];
+
+        foreach ($shipViaCodes as $code) {
+            $transitTime = $this->transitTimes->firstWhere('service_type', $code->service_type);
+
+            if ($transitTime) {
+                $result[] = [
+                    'ship_via_code' => $code,
+                    'transit_time' => $transitTime,
+                ];
+            }
+        }
+
+        return $result;
     }
 
     protected function getFormActions(): array

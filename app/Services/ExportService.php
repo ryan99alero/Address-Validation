@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Address;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
+use App\Models\TransitTime;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithHeadings;
@@ -81,6 +82,21 @@ class ExportService
     {
         $correction = $address->latestCorrection;
 
+        // Handle ship via code fields
+        if (str_starts_with($field, 'ship_via_')) {
+            return $this->getShipViaFieldValue($address, $field);
+        }
+
+        // Handle fastest service fields
+        if (str_starts_with($field, 'fastest_')) {
+            return $this->getFastestServiceFieldValue($address, $field);
+        }
+
+        // Handle legacy transit_ fields for backwards compatibility
+        if (str_starts_with($field, 'transit_')) {
+            return $this->getTransitTimeFieldValue($address, $field);
+        }
+
         return match ($field) {
             // Original address fields
             'external_reference' => $address->external_reference,
@@ -110,6 +126,16 @@ class ExportService
             'carrier' => $correction?->carrier?->name,
             'validated_at' => $correction?->validated_at?->format('Y-m-d H:i:s'),
 
+            // Ship dates & recommendation fields
+            'requested_ship_date' => $address->requested_ship_date?->format('Y-m-d'),
+            'required_on_site_date' => $address->required_on_site_date?->format('Y-m-d'),
+            'recommended_service' => $address->recommended_service,
+            'estimated_delivery_date' => $address->estimated_delivery_date?->format('Y-m-d'),
+            'can_meet_required_date' => $address->can_meet_required_date === null ? '' : ($address->can_meet_required_date ? 'Yes' : 'No'),
+
+            // Distance
+            'distance_miles' => $this->getDistanceValue($address),
+
             // Extra fields (pass-through)
             'extra_1' => $address->extra_1,
             'extra_2' => $address->extra_2,
@@ -134,6 +160,162 @@ class ExportService
 
             default => null,
         };
+    }
+
+    /**
+     * Get ship via code field value.
+     */
+    protected function getShipViaFieldValue(Address $address, string $field): ?string
+    {
+        // Load ship via code record if needed
+        if (! $address->relationLoaded('shipViaCodeRecord')) {
+            $address->load('shipViaCodeRecord');
+        }
+
+        $shipViaCode = $address->shipViaCodeRecord;
+
+        // Load transit times if needed for delivery date
+        if (! $address->relationLoaded('transitTimes')) {
+            $address->load('transitTimes');
+        }
+
+        return match ($field) {
+            'ship_via_code' => $address->ship_via_code,
+            'ship_via_service' => $shipViaCode?->service_name,
+            'ship_via_delivery_date' => $this->getShipViaDeliveryDate($address),
+            default => null,
+        };
+    }
+
+    /**
+     * Get delivery date for the address's ship via code service.
+     */
+    protected function getShipViaDeliveryDate(Address $address): ?string
+    {
+        $shipViaCode = $address->shipViaCodeRecord;
+
+        if (! $shipViaCode || ! $shipViaCode->service_type) {
+            return null;
+        }
+
+        // Find transit time matching the ship via code's service type
+        $transitTime = $address->transitTimes->firstWhere('service_type', $shipViaCode->service_type);
+
+        return $transitTime?->delivery_date?->format('Y-m-d');
+    }
+
+    /**
+     * Get fastest service field value.
+     */
+    protected function getFastestServiceFieldValue(Address $address, string $field): ?string
+    {
+        // Load transit times if needed
+        if (! $address->relationLoaded('transitTimes')) {
+            $address->load('transitTimes');
+        }
+
+        $fastestService = $this->getFastestService($address->transitTimes);
+
+        return match ($field) {
+            'fastest_service' => $fastestService?->service_label,
+            'fastest_delivery_date' => $fastestService?->delivery_date?->format('Y-m-d'),
+            default => null,
+        };
+    }
+
+    /**
+     * Get distance value from transit times.
+     */
+    protected function getDistanceValue(Address $address): ?string
+    {
+        if (! $address->relationLoaded('transitTimes')) {
+            $address->load('transitTimes');
+        }
+
+        return $address->transitTimes->first()?->formatted_distance;
+    }
+
+    /**
+     * Get transit time field value from an address.
+     */
+    protected function getTransitTimeFieldValue(Address $address, string $field): ?string
+    {
+        // Load transit times if not already loaded
+        if (! $address->relationLoaded('transitTimes')) {
+            $address->load('transitTimes');
+        }
+
+        $transitTimes = $address->transitTimes;
+
+        if ($transitTimes->isEmpty()) {
+            return null;
+        }
+
+        // Map field names to service types
+        $serviceTypeMap = [
+            'transit_ground' => 'FEDEX_GROUND',
+            'transit_home_delivery' => 'GROUND_HOME_DELIVERY',
+            'transit_express_saver' => 'FEDEX_EXPRESS_SAVER',
+            'transit_2day' => 'FEDEX_2_DAY',
+            'transit_2day_am' => 'FEDEX_2_DAY_AM',
+            'transit_standard_overnight' => 'STANDARD_OVERNIGHT',
+            'transit_priority_overnight' => 'PRIORITY_OVERNIGHT',
+            'transit_first_overnight' => 'FIRST_OVERNIGHT',
+        ];
+
+        // Handle specific service transit times
+        foreach ($serviceTypeMap as $prefix => $serviceType) {
+            if (str_starts_with($field, $prefix)) {
+                $transitTime = $transitTimes->firstWhere('service_type', $serviceType);
+
+                if (! $transitTime) {
+                    return null;
+                }
+
+                if (str_ends_with($field, '_days')) {
+                    return $transitTime->transit_range;
+                }
+                if (str_ends_with($field, '_date')) {
+                    return $transitTime->delivery_date?->format('Y-m-d');
+                }
+            }
+        }
+
+        // Handle special fields
+        return match ($field) {
+            'transit_fastest_service' => $this->getFastestService($transitTimes)?->service_label,
+            'transit_fastest_delivery_date' => $this->getFastestService($transitTimes)?->delivery_date?->format('Y-m-d'),
+            'transit_distance_miles' => $transitTimes->first()?->formatted_distance,
+            default => null,
+        };
+    }
+
+    /**
+     * Get the fastest delivery service from transit times.
+     */
+    protected function getFastestService(Collection $transitTimes): ?TransitTime
+    {
+        // Priority order for fastest services (overnight first, then express, then ground)
+        $priorityOrder = [
+            'FIRST_OVERNIGHT',
+            'PRIORITY_OVERNIGHT',
+            'STANDARD_OVERNIGHT',
+            'FEDEX_2_DAY_AM',
+            'FEDEX_2_DAY',
+            'FEDEX_EXPRESS_SAVER',
+            'GROUND_HOME_DELIVERY',
+            'FEDEX_GROUND',
+        ];
+
+        foreach ($priorityOrder as $serviceType) {
+            $transitTime = $transitTimes->firstWhere('service_type', $serviceType);
+            if ($transitTime) {
+                return $transitTime;
+            }
+        }
+
+        // Return first available if none match priority
+        return $transitTimes->first();
     }
 
     /**

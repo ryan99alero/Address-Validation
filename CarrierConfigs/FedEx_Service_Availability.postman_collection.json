@@ -1,0 +1,1084 @@
+{
+  "info": {
+    "_postman_id": "a3f8c2d1-9e4b-5a6c-8d7f-1b2c3d4e5f6a",
+    "name": "FedEx Service Availability",
+    "description": "FedEx Service Availability API - Retrieve transit times, available services, packaging options, and special service options between origin and destination.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "8255341"
+  },
+  "item": [
+    {
+      "name": "Transit Times",
+      "item": [
+        {
+          "name": "Get Transit Times - Domestic Ground",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});",
+                  "",
+                  "pm.test(\"Response has transitTimes\", function () {",
+                  "    pm.expect(jsonData.output).to.have.property('transitTimes');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75063\",\n                \"city\": \"IRVING\",\n                \"stateOrProvinceCode\": \"TX\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"recipients\": [\n            {\n                \"address\": {\n                    \"postalCode\": \"38017\",\n                    \"city\": \"COLLIERVILLE\",\n                    \"stateOrProvinceCode\": \"TN\",\n                    \"countryCode\": \"US\"\n                }\n            }\n        ],\n        \"packagingType\": \"YOUR_PACKAGING\",\n        \"requestedPackageLineItems\": [\n            {\n                \"weight\": {\n                    \"units\": \"LB\",\n                    \"value\": \"10\"\n                }\n            }\n        ]\n    },\n    \"carrierCodes\": [\n        \"FDXG\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/transittimes",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "transittimes"
+              ]
+            },
+            "description": "Get transit times for FedEx Ground domestic shipment."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Transit Times - Domestic Express",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75063\",\n                \"city\": \"IRVING\",\n                \"stateOrProvinceCode\": \"TX\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"recipients\": [\n            {\n                \"address\": {\n                    \"postalCode\": \"38017\",\n                    \"city\": \"COLLIERVILLE\",\n                    \"stateOrProvinceCode\": \"TN\",\n                    \"countryCode\": \"US\"\n                }\n            }\n        ],\n        \"packagingType\": \"YOUR_PACKAGING\",\n        \"requestedPackageLineItems\": [\n            {\n                \"weight\": {\n                    \"units\": \"LB\",\n                    \"value\": \"10\"\n                }\n            }\n        ]\n    },\n    \"carrierCodes\": [\n        \"FDXE\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/transittimes",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "transittimes"
+              ]
+            },
+            "description": "Get transit times for FedEx Express domestic shipment."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Transit Times - International",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75063\",\n                \"city\": \"IRVING\",\n                \"stateOrProvinceCode\": \"TX\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"recipients\": [\n            {\n                \"address\": {\n                    \"postalCode\": \"M1M1M1\",\n                    \"city\": \"TORONTO\",\n                    \"stateOrProvinceCode\": \"ON\",\n                    \"countryCode\": \"CA\"\n                }\n            }\n        ],\n        \"packagingType\": \"YOUR_PACKAGING\",\n        \"requestedPackageLineItems\": [\n            {\n                \"weight\": {\n                    \"units\": \"LB\",\n                    \"value\": \"10\"\n                },\n                \"dimensions\": {\n                    \"length\": \"10\",\n                    \"width\": \"10\",\n                    \"height\": \"10\",\n                    \"units\": \"IN\"\n                }\n            }\n        ],\n        \"customsClearanceDetail\": {\n            \"commodities\": [\n                {\n                    \"name\": \"Sample Goods\",\n                    \"numberOfPieces\": 1,\n                    \"description\": \"Sample merchandise\",\n                    \"weight\": {\n                        \"units\": \"LB\",\n                        \"value\": 10\n                    },\n                    \"quantity\": 1,\n                    \"customsValue\": {\n                        \"currency\": \"USD\",\n                        \"amount\": 100\n                    }\n                }\n            ]\n        }\n    },\n    \"carrierCodes\": [\n        \"FDXE\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/transittimes",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "transittimes"
+              ]
+            },
+            "description": "Get transit times for international shipment (US to Canada)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Transit Times - With Ship Date",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}",
+                  "",
+                  "// Set ship date to tomorrow",
+                  "var tomorrow = new Date();",
+                  "tomorrow.setDate(tomorrow.getDate() + 1);",
+                  "var shipDate = tomorrow.toISOString().split('T')[0];",
+                  "pm.collectionVariables.set(\"ship_date\", shipDate);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75063\",\n                \"city\": \"IRVING\",\n                \"stateOrProvinceCode\": \"TX\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"recipients\": [\n            {\n                \"address\": {\n                    \"postalCode\": \"38017\",\n                    \"city\": \"COLLIERVILLE\",\n                    \"stateOrProvinceCode\": \"TN\",\n                    \"countryCode\": \"US\"\n                }\n            }\n        ],\n        \"shipDatestamp\": \"{{ship_date}}\",\n        \"packagingType\": \"YOUR_PACKAGING\",\n        \"requestedPackageLineItems\": [\n            {\n                \"weight\": {\n                    \"units\": \"LB\",\n                    \"value\": \"10\"\n                }\n            }\n        ]\n    },\n    \"carrierCodes\": [\n        \"FDXE\",\n        \"FDXG\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/transittimes",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "transittimes"
+              ]
+            },
+            "description": "Get transit times with a specific ship date. Pre-request script auto-populates tomorrow's date."
+          },
+          "response": []
+        }
+      ],
+      "description": "Retrieve estimated transit times for shipments between origin and destination."
+    },
+    {
+      "name": "Package and Service Options",
+      "item": [
+        {
+          "name": "Get Package Options - Domestic Ground",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75063\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"recipients\": [\n            {\n                \"address\": {\n                    \"postalCode\": \"38017\",\n                    \"countryCode\": \"US\"\n                }\n            }\n        ],\n        \"pickupType\": \"USE_SCHEDULED_PICKUP\"\n    },\n    \"carrierCodes\": [\n        \"FDXG\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/packageandserviceoptions",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "packageandserviceoptions"
+              ]
+            },
+            "description": "Get available packaging options for FedEx Ground domestic shipment."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Package Options - Domestic Express",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75063\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"recipients\": [\n            {\n                \"address\": {\n                    \"postalCode\": \"38017\",\n                    \"countryCode\": \"US\"\n                }\n            }\n        ],\n        \"pickupType\": \"USE_SCHEDULED_PICKUP\"\n    },\n    \"carrierCodes\": [\n        \"FDXE\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/packageandserviceoptions",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "packageandserviceoptions"
+              ]
+            },
+            "description": "Get available packaging options for FedEx Express domestic shipment."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Package Options - International",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75063\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"recipients\": [\n            {\n                \"address\": {\n                    \"postalCode\": \"M1M1M1\",\n                    \"countryCode\": \"CA\"\n                }\n            }\n        ],\n        \"pickupType\": \"USE_SCHEDULED_PICKUP\"\n    },\n    \"carrierCodes\": [\n        \"FDXE\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/packageandserviceoptions",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "packageandserviceoptions"
+              ]
+            },
+            "description": "Get available packaging options for international shipment."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Package Options - Dropoff Location",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75063\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"recipients\": [\n            {\n                \"address\": {\n                    \"postalCode\": \"38017\",\n                    \"countryCode\": \"US\"\n                }\n            }\n        ],\n        \"pickupType\": \"DROPOFF_AT_FEDEX_LOCATION\"\n    },\n    \"carrierCodes\": [\n        \"FDXE\",\n        \"FDXG\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/packageandserviceoptions",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "packageandserviceoptions"
+              ]
+            },
+            "description": "Get available packaging options when dropping off at a FedEx location."
+          },
+          "response": []
+        }
+      ],
+      "description": "Retrieve available FedEx services and packaging type combinations between origin and destination."
+    },
+    {
+      "name": "Special Service Options",
+      "item": [
+        {
+          "name": "Get Special Services - Domestic Ground",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75063\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"recipient\": {\n            \"address\": {\n                \"postalCode\": \"12345\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"packagingType\": \"YOUR_PACKAGING\",\n        \"requestedPackageLineItems\": [\n            {\n                \"weight\": {\n                    \"units\": \"LB\",\n                    \"value\": \"100\"\n                }\n            }\n        ]\n    },\n    \"carrierCodes\": [\n        \"FDXG\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/specialserviceoptions",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "specialserviceoptions"
+              ]
+            },
+            "description": "Get available special service options for FedEx Ground domestic shipment (signature options, return types, etc.)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Special Services - Domestic Express",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75063\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"recipient\": {\n            \"address\": {\n                \"postalCode\": \"12345\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"packagingType\": \"YOUR_PACKAGING\",\n        \"requestedPackageLineItems\": [\n            {\n                \"weight\": {\n                    \"units\": \"LB\",\n                    \"value\": \"100\"\n                }\n            }\n        ]\n    },\n    \"carrierCodes\": [\n        \"FDXE\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/specialserviceoptions",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "specialserviceoptions"
+              ]
+            },
+            "description": "Get available special service options for FedEx Express domestic shipment."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Special Services - International Express",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75008\",\n                \"countryCode\": \"FR\"\n            }\n        },\n        \"recipient\": {\n            \"address\": {\n                \"postalCode\": \"12345\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"packagingType\": \"YOUR_PACKAGING\",\n        \"requestedPackageLineItems\": [\n            {\n                \"weight\": {\n                    \"units\": \"LB\",\n                    \"value\": \"100\"\n                }\n            }\n        ]\n    },\n    \"carrierCodes\": [\n        \"FDXE\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/specialserviceoptions",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "specialserviceoptions"
+              ]
+            },
+            "description": "Get available special service options for international Express shipment (France to US)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Special Services - Express Freight (Heavy)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var token = pm.collectionVariables.get(\"fedex_access_token\");",
+                  "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+                  "    var globalToken = pm.globals.get(\"fedex_access_token\");",
+                  "    if (globalToken) {",
+                  "        pm.collectionVariables.set(\"fedex_access_token\", globalToken);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has output\", function () {",
+                  "    pm.expect(jsonData).to.have.property('output');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{fedex_access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "x-locale",
+                "value": "en_US",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedShipment\": {\n        \"shipper\": {\n            \"address\": {\n                \"postalCode\": \"75008\",\n                \"countryCode\": \"FR\"\n            }\n        },\n        \"recipient\": {\n            \"address\": {\n                \"postalCode\": \"12345\",\n                \"countryCode\": \"US\"\n            }\n        },\n        \"packagingType\": \"YOUR_PACKAGING\",\n        \"requestedPackageLineItems\": [\n            {\n                \"weight\": {\n                    \"units\": \"LB\",\n                    \"value\": \"151\"\n                }\n            }\n        ]\n    },\n    \"carrierCodes\": [\n        \"FDXE\"\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{fedex_base_url}}/availability/v1/specialserviceoptions",
+              "host": [
+                "{{fedex_base_url}}"
+              ],
+              "path": [
+                "availability",
+                "v1",
+                "specialserviceoptions"
+              ]
+            },
+            "description": "Get available special service options for Express Freight shipment (over 150 lbs)."
+          },
+          "response": []
+        }
+      ],
+      "description": "Retrieve available special services, delivery signature options, and return shipment types."
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "fedex_base_url",
+      "value": "https://apis-sandbox.fedex.com",
+      "type": "string"
+    },
+    {
+      "key": "fedex_access_token",
+      "value": "WILL_BE_AUTO_POPULATED",
+      "type": "string"
+    },
+    {
+      "key": "ship_date",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

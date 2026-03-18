@@ -70,6 +70,28 @@
                         </div>
                     </div>
 
+                    {{-- Ship Via Code Column Selection --}}
+                    <div class="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                        <div class="flex flex-wrap gap-4 items-end">
+                            <div class="flex-1 min-w-[250px]">
+                                <label class="block text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">
+                                    <x-filament::icon icon="heroicon-o-truck" class="w-4 h-4 inline mr-1" />
+                                    Ship Via Code Column (Optional)
+                                </label>
+                                <select wire:model="shipViaCodeColumn" class="w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-800 shadow-sm">
+                                    <option value="">-- None (Skip transit time lookup) --</option>
+                                    @foreach($this->headers as $index => $header)
+                                        <option value="{{ $header }}">{{ $header }}</option>
+                                    @endforeach
+                                </select>
+                                <p class="mt-1 text-xs text-blue-600 dark:text-blue-400">
+                                    Select the column containing ship method codes (e.g., 5137, FDG) for transit time lookup.
+                                    <a href="{{ route('filament.admin.resources.ship-via-codes.index') }}" class="underline hover:text-blue-800 dark:hover:text-blue-200">Manage codes</a>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
                     {{-- Field Mapping Table --}}
                     <div class="overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -164,26 +186,28 @@
             {{-- Step 3: Processing Complete --}}
             @if($this->importStep === 3)
                 @php
-                    $stillValidating = $this->batch &&
+                    $isFullyComplete = $this->batch?->isFullyComplete();
+                    $stillProcessing = $this->batch &&
                         !$this->batch->isCancelled() &&
-                        ($this->batch->validated_rows ?? 0) < ($this->batch->successful_rows ?? 0);
+                        !$this->batch->isFailed() &&
+                        !$isFullyComplete;
                 @endphp
-                <div @if($stillValidating) wire:poll.3s="refreshBatchProgress" @endif>
+                <div @if($stillProcessing) wire:poll.2s="refreshBatchProgress" @endif>
                 <x-filament::section>
                     <x-slot name="heading">
                         <div class="flex items-center gap-2">
                             @if($this->batch?->isCancelled())
                                 <x-filament::icon icon="heroicon-o-stop-circle" class="h-6 w-6 text-warning-500" />
-                                <span class="text-warning-600 dark:text-warning-400">Validation Cancelled</span>
-                            @elseif($this->batch?->isCompleted())
+                                <span class="text-warning-600 dark:text-warning-400">Processing Cancelled</span>
+                            @elseif($isFullyComplete)
                                 <x-filament::icon icon="heroicon-o-check-circle" class="h-6 w-6 text-success-500" />
-                                <span class="text-success-600 dark:text-success-400">Import Complete</span>
+                                <span class="text-success-600 dark:text-success-400">Processing Complete</span>
                             @elseif($this->batch?->isFailed())
                                 <x-filament::icon icon="heroicon-o-x-circle" class="h-6 w-6 text-danger-500" />
                                 <span class="text-danger-600 dark:text-danger-400">Import Failed</span>
                             @else
                                 <x-filament::icon icon="heroicon-o-arrow-path" class="h-6 w-6 text-primary-500 animate-spin" />
-                                <span class="text-primary-600 dark:text-primary-400">Processing...</span>
+                                <span class="text-primary-600 dark:text-primary-400">{{ $this->batch?->getPhaseLabel() ?? 'Processing...' }}</span>
                             @endif
                         </div>
                     </x-slot>
@@ -209,34 +233,121 @@
                             </div>
                         </div>
 
-                        {{-- Validation Progress (if auto_validate was enabled) --}}
-                        @if($this->batch->successful_rows > 0)
+                        {{-- Processing Progress - Shows all phases --}}
+                        @if($this->batch->successful_rows > 0 || $this->batch->processing_phase)
                             @php
-                                $validatedRows = $this->batch->validated_rows ?? 0;
-                                $totalToValidate = $this->batch->successful_rows;
-                                $validationProgress = $totalToValidate > 0 ? round(($validatedRows / $totalToValidate) * 100) : 0;
-                                $isValidating = $validatedRows < $totalToValidate && $validatedRows > 0;
+                                $phase = $this->batch->processing_phase;
+                                $overallProgress = $this->batch->getOverallProgress();
+                                $phaseProgress = $this->batch->getPhaseProgress();
+                                $includeTransit = $this->batch->include_transit_times;
+
+                                // Phase indicators
+                                $importComplete = $this->batch->processed_rows >= $this->batch->total_rows;
+                                $validationComplete = ($this->batch->validated_rows ?? 0) >= ($this->batch->successful_rows ?? 1);
+                                $transitComplete = !$includeTransit || $phase === \App\Models\ImportBatch::PHASE_COMPLETE;
                             @endphp
 
                             <div class="mt-6">
-                                <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Validation Progress</h4>
-                                <div class="bg-gray-200 dark:bg-gray-700 rounded-full h-4 overflow-hidden">
-                                    <div
-                                        class="h-full transition-all duration-500 {{ $validationProgress >= 100 ? 'bg-success-500' : 'bg-primary-500' }}"
-                                        style="width: {{ $validationProgress }}%"
-                                    ></div>
-                                </div>
-                                <div class="mt-2 flex justify-between text-sm text-gray-600 dark:text-gray-400">
-                                    <span>{{ $validatedRows }} / {{ $totalToValidate }} addresses validated</span>
-                                    <span>{{ $validationProgress }}%</span>
+                                {{-- Overall Progress Bar --}}
+                                <div class="mb-4">
+                                    <div class="flex justify-between text-sm text-gray-600 dark:text-gray-400 mb-1">
+                                        <span class="font-medium">Overall Progress</span>
+                                        <span>{{ $overallProgress }}%</span>
+                                    </div>
+                                    <div class="bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                                        <div
+                                            class="h-full transition-all duration-500 {{ $overallProgress >= 100 ? 'bg-success-500' : 'bg-primary-500' }}"
+                                            style="width: {{ $overallProgress }}%"
+                                        ></div>
+                                    </div>
                                 </div>
 
-                                @if($isValidating)
-                                    <div class="mt-2 flex items-center justify-between">
-                                        <div class="flex items-center gap-2 text-sm text-primary-600 dark:text-primary-400">
-                                            <x-filament::icon icon="heroicon-o-arrow-path" class="h-4 w-4 animate-spin" />
-                                            <span>Validation in progress...</span>
+                                {{-- Phase Steps --}}
+                                <div class="space-y-3">
+                                    {{-- Step 1: Import --}}
+                                    <div class="flex items-center gap-3 p-3 rounded-lg {{ $phase === \App\Models\ImportBatch::PHASE_IMPORTING ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800' : ($importComplete ? 'bg-success-50 dark:bg-success-900/20' : 'bg-gray-50 dark:bg-gray-800') }}">
+                                        <div class="flex-shrink-0">
+                                            @if($importComplete)
+                                                <x-filament::icon icon="heroicon-o-check-circle" class="h-5 w-5 text-success-500" />
+                                            @elseif($phase === \App\Models\ImportBatch::PHASE_IMPORTING)
+                                                <x-filament::icon icon="heroicon-o-arrow-path" class="h-5 w-5 text-primary-500 animate-spin" />
+                                            @else
+                                                <x-filament::icon icon="heroicon-o-clock" class="h-5 w-5 text-gray-400" />
+                                            @endif
                                         </div>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex justify-between text-sm">
+                                                <span class="font-medium {{ $phase === \App\Models\ImportBatch::PHASE_IMPORTING ? 'text-primary-700 dark:text-primary-300' : '' }}">
+                                                    1. Importing Records
+                                                </span>
+                                                <span class="text-gray-500">{{ $this->batch->processed_rows ?? 0 }} / {{ $this->batch->total_rows }}</span>
+                                            </div>
+                                            @if($phase === \App\Models\ImportBatch::PHASE_IMPORTING)
+                                                <div class="mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5 overflow-hidden">
+                                                    <div class="h-full bg-primary-500 transition-all" style="width: {{ $this->batch->total_rows > 0 ? round(($this->batch->processed_rows / $this->batch->total_rows) * 100) : 0 }}%"></div>
+                                                </div>
+                                            @endif
+                                        </div>
+                                    </div>
+
+                                    {{-- Step 2: Validation --}}
+                                    <div class="flex items-center gap-3 p-3 rounded-lg {{ $phase === \App\Models\ImportBatch::PHASE_VALIDATING ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800' : ($validationComplete ? 'bg-success-50 dark:bg-success-900/20' : 'bg-gray-50 dark:bg-gray-800') }}">
+                                        <div class="flex-shrink-0">
+                                            @if($validationComplete)
+                                                <x-filament::icon icon="heroicon-o-check-circle" class="h-5 w-5 text-success-500" />
+                                            @elseif($phase === \App\Models\ImportBatch::PHASE_VALIDATING)
+                                                <x-filament::icon icon="heroicon-o-arrow-path" class="h-5 w-5 text-primary-500 animate-spin" />
+                                            @else
+                                                <x-filament::icon icon="heroicon-o-clock" class="h-5 w-5 text-gray-400" />
+                                            @endif
+                                        </div>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex justify-between text-sm">
+                                                <span class="font-medium {{ $phase === \App\Models\ImportBatch::PHASE_VALIDATING ? 'text-primary-700 dark:text-primary-300' : '' }}">
+                                                    2. Validating Addresses
+                                                </span>
+                                                <span class="text-gray-500">{{ $this->batch->validated_rows ?? 0 }} / {{ $this->batch->successful_rows ?? 0 }}</span>
+                                            </div>
+                                            @if($phase === \App\Models\ImportBatch::PHASE_VALIDATING)
+                                                <div class="mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5 overflow-hidden">
+                                                    <div class="h-full bg-primary-500 transition-all" style="width: {{ ($this->batch->successful_rows ?? 0) > 0 ? round((($this->batch->validated_rows ?? 0) / $this->batch->successful_rows) * 100) : 0 }}%"></div>
+                                                </div>
+                                            @endif
+                                        </div>
+                                    </div>
+
+                                    {{-- Step 3: Transit Times (if enabled) --}}
+                                    @if($includeTransit)
+                                        <div class="flex items-center gap-3 p-3 rounded-lg {{ $phase === \App\Models\ImportBatch::PHASE_TRANSIT_TIMES ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800' : ($transitComplete ? 'bg-success-50 dark:bg-success-900/20' : 'bg-gray-50 dark:bg-gray-800') }}">
+                                            <div class="flex-shrink-0">
+                                                @if($transitComplete)
+                                                    <x-filament::icon icon="heroicon-o-check-circle" class="h-5 w-5 text-success-500" />
+                                                @elseif($phase === \App\Models\ImportBatch::PHASE_TRANSIT_TIMES)
+                                                    <x-filament::icon icon="heroicon-o-arrow-path" class="h-5 w-5 text-primary-500 animate-spin" />
+                                                @else
+                                                    <x-filament::icon icon="heroicon-o-clock" class="h-5 w-5 text-gray-400" />
+                                                @endif
+                                            </div>
+                                            <div class="flex-1 min-w-0">
+                                                <div class="flex justify-between text-sm">
+                                                    <span class="font-medium {{ $phase === \App\Models\ImportBatch::PHASE_TRANSIT_TIMES ? 'text-primary-700 dark:text-primary-300' : '' }}">
+                                                        3. Fetching Transit Times
+                                                    </span>
+                                                    <span class="text-gray-500">{{ $this->batch->transit_time_rows ?? 0 }} / {{ $this->batch->total_for_transit ?? 0 }}</span>
+                                                </div>
+                                                @if($phase === \App\Models\ImportBatch::PHASE_TRANSIT_TIMES)
+                                                    <div class="mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5 overflow-hidden">
+                                                        <div class="h-full bg-primary-500 transition-all" style="width: {{ ($this->batch->total_for_transit ?? 0) > 0 ? round((($this->batch->transit_time_rows ?? 0) / $this->batch->total_for_transit) * 100) : 0 }}%"></div>
+                                                    </div>
+                                                @endif
+                                            </div>
+                                        </div>
+                                    @endif
+                                </div>
+
+                                {{-- Cancel/Resume Actions --}}
+                                @if(!$isFullyComplete && !$this->batch?->isCancelled())
+                                    <div class="mt-4 flex justify-end">
                                         <x-filament::button
                                             type="button"
                                             wire:click="cancelValidation"
@@ -244,44 +355,37 @@
                                             size="sm"
                                             icon="heroicon-o-stop"
                                         >
-                                            Cancel
+                                            Cancel Processing
                                         </x-filament::button>
                                     </div>
                                 @elseif($this->batch?->isCancelled())
-                                    <div class="mt-2 flex items-center justify-between">
+                                    <div class="mt-4 flex items-center justify-between">
                                         <div class="flex items-center gap-2 text-sm text-warning-600 dark:text-warning-400">
                                             <x-filament::icon icon="heroicon-o-exclamation-triangle" class="h-4 w-4" />
-                                            <span>Validation cancelled ({{ $validatedRows }}/{{ $totalToValidate }} validated)</span>
+                                            <span>Processing was cancelled</span>
                                         </div>
-                                        @if($validatedRows < $totalToValidate)
-                                            <x-filament::button
-                                                type="button"
-                                                wire:click="resumeValidation"
-                                                color="primary"
-                                                size="sm"
-                                                icon="heroicon-o-play"
-                                            >
-                                                Resume
-                                            </x-filament::button>
-                                        @endif
-                                    </div>
-                                @elseif($validationProgress >= 100)
-                                    <div class="mt-2 flex items-center gap-2 text-sm text-success-600 dark:text-success-400">
-                                        <x-filament::icon icon="heroicon-o-check-circle" class="h-4 w-4" />
-                                        <span>Validation complete!</span>
+                                        <x-filament::button
+                                            type="button"
+                                            wire:click="resumeValidation"
+                                            color="primary"
+                                            size="sm"
+                                            icon="heroicon-o-play"
+                                        >
+                                            Resume
+                                        </x-filament::button>
                                     </div>
                                 @endif
                             </div>
                         @endif
 
-                        @if($this->batch->isCompleted())
+                        @if($isFullyComplete)
                             <div class="mt-6 p-4 bg-success-50 dark:bg-success-900/20 rounded-lg">
                                 <p class="text-success-700 dark:text-success-300">
-                                    Your addresses have been imported successfully.
-                                    @if(($this->batch->validated_rows ?? 0) > 0)
-                                        Validation is {{ ($this->batch->validated_rows ?? 0) >= ($this->batch->successful_rows ?? 0) ? 'complete' : 'in progress' }}.
+                                    All processing is complete! Your addresses have been imported, validated
+                                    @if($this->batch->include_transit_times)
+                                        , and transit times have been fetched
                                     @endif
-                                    Switch to the <strong>Export</strong> tab to download results.
+                                    . Switch to the <strong>Export</strong> tab to download results.
                                 </p>
                             </div>
 
@@ -298,7 +402,7 @@
                                 <x-filament::button
                                     type="button"
                                     wire:click="setActiveTab('export')"
-                                    color="gray"
+                                    color="primary"
                                     icon="heroicon-o-arrow-down-tray"
                                 >
                                     Go to Export

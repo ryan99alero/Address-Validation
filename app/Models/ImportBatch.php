@@ -25,6 +25,15 @@ class ImportBatch extends Model
 
     public const STATUS_CANCELLED = 'cancelled';
 
+    // Processing phases (more granular than status)
+    public const PHASE_IMPORTING = 'importing';
+
+    public const PHASE_VALIDATING = 'validating';
+
+    public const PHASE_TRANSIT_TIMES = 'fetching_transit_times';
+
+    public const PHASE_COMPLETE = 'complete';
+
     protected $fillable = [
         'name',
         'original_filename',
@@ -35,9 +44,16 @@ class ImportBatch extends Model
         'successful_rows',
         'failed_rows',
         'validated_rows',
+        'processing_phase',
+        'transit_time_rows',
+        'total_for_transit',
         'mapping_template_id',
         'field_mappings',
         'carrier_id',
+        'include_transit_times',
+        'origin_postal_code',
+        'origin_country_code',
+        'ship_via_code_column',
         'error_file_path',
         'export_file_path',
         'export_status',
@@ -58,7 +74,10 @@ class ImportBatch extends Model
             'successful_rows' => 'integer',
             'failed_rows' => 'integer',
             'validated_rows' => 'integer',
+            'transit_time_rows' => 'integer',
+            'total_for_transit' => 'integer',
             'field_mappings' => 'array',
+            'include_transit_times' => 'boolean',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',
             'export_completed_at' => 'datetime',
@@ -140,8 +159,100 @@ class ImportBatch extends Model
     {
         $this->update([
             'status' => self::STATUS_COMPLETED,
+            'processing_phase' => self::PHASE_COMPLETE,
             'completed_at' => now(),
         ]);
+    }
+
+    public function setPhase(string $phase): void
+    {
+        $this->update(['processing_phase' => $phase]);
+    }
+
+    /**
+     * Get the human-readable phase label.
+     */
+    public function getPhaseLabel(): string
+    {
+        return match ($this->processing_phase) {
+            self::PHASE_IMPORTING => 'Importing Records',
+            self::PHASE_VALIDATING => 'Validating Addresses',
+            self::PHASE_TRANSIT_TIMES => 'Fetching Transit Times',
+            self::PHASE_COMPLETE => 'Complete',
+            default => 'Processing',
+        };
+    }
+
+    /**
+     * Get the current phase progress percentage (0-100).
+     */
+    public function getPhaseProgress(): int
+    {
+        return match ($this->processing_phase) {
+            self::PHASE_IMPORTING => $this->total_rows > 0
+                ? (int) (($this->processed_rows / $this->total_rows) * 100)
+                : 0,
+            self::PHASE_VALIDATING => $this->successful_rows > 0
+                ? (int) (($this->validated_rows / $this->successful_rows) * 100)
+                : 0,
+            self::PHASE_TRANSIT_TIMES => $this->total_for_transit > 0
+                ? (int) (($this->transit_time_rows / $this->total_for_transit) * 100)
+                : 0,
+            self::PHASE_COMPLETE => 100,
+            default => 0,
+        };
+    }
+
+    /**
+     * Get overall progress across all phases (0-100).
+     */
+    public function getOverallProgress(): int
+    {
+        // Weight: Import 20%, Validation 50%, Transit Times 30%
+        $includeTransit = $this->include_transit_times;
+
+        if ($includeTransit) {
+            $importWeight = 20;
+            $validationWeight = 50;
+            $transitWeight = 30;
+        } else {
+            $importWeight = 30;
+            $validationWeight = 70;
+            $transitWeight = 0;
+        }
+
+        $importProgress = $this->total_rows > 0
+            ? ($this->processed_rows / $this->total_rows) * $importWeight
+            : 0;
+
+        $validationProgress = $this->successful_rows > 0
+            ? ($this->validated_rows / $this->successful_rows) * $validationWeight
+            : 0;
+
+        $transitProgress = 0;
+        if ($includeTransit && $this->total_for_transit > 0) {
+            $transitProgress = ($this->transit_time_rows / $this->total_for_transit) * $transitWeight;
+        } elseif ($includeTransit && $this->processing_phase === self::PHASE_COMPLETE) {
+            $transitProgress = $transitWeight;
+        }
+
+        return (int) min(100, $importProgress + $validationProgress + $transitProgress);
+    }
+
+    /**
+     * Check if currently in a specific phase.
+     */
+    public function isInPhase(string $phase): bool
+    {
+        return $this->processing_phase === $phase;
+    }
+
+    /**
+     * Check if all processing is truly complete.
+     */
+    public function isFullyComplete(): bool
+    {
+        return $this->processing_phase === self::PHASE_COMPLETE;
     }
 
     public function markFailed(): void
