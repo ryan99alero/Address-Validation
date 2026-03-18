@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Models\CompanySetting;
+use App\Services\DynamicFieldService;
 use BackedEnum;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -36,6 +37,7 @@ class CompanySetup extends Page implements HasSchemas
     public function mount(): void
     {
         $settings = CompanySetting::instance();
+        $dynamicFieldService = app(DynamicFieldService::class);
 
         $this->form->fill([
             'company_name' => $settings->company_name,
@@ -50,6 +52,8 @@ class CompanySetup extends Page implements HasSchemas
             'country_code' => $settings->country_code ?? 'US',
             'ups_account_number' => $settings->ups_account_number,
             'fedex_account_number' => $settings->fedex_account_number,
+            'extra_field_count' => $settings->extra_field_count ?? 20,
+            'current_extra_field_count' => $dynamicFieldService->getCurrentExtraFieldCount(),
         ]);
     }
 
@@ -126,6 +130,23 @@ class CompanySetup extends Page implements HasSchemas
                             ->maxLength(50)
                             ->helperText('9-digit account number'),
                     ]),
+
+                Section::make('Import/Export Settings')
+                    ->description('Configure how batch imports and exports work.')
+                    ->columns(2)
+                    ->schema([
+                        TextInput::make('extra_field_count')
+                            ->label('Extra Field Count')
+                            ->numeric()
+                            ->minValue(20)
+                            ->maxValue(100)
+                            ->required()
+                            ->helperText('Number of extra pass-through fields available for imports. Increase if your files have more columns than available fields.'),
+                        TextInput::make('current_extra_field_count')
+                            ->label('Current DB Fields')
+                            ->disabled()
+                            ->helperText('Number of extra fields currently in the database.'),
+                    ]),
             ])
             ->statePath('data');
     }
@@ -133,14 +154,43 @@ class CompanySetup extends Page implements HasSchemas
     public function save(): void
     {
         $data = $this->form->getState();
+        $dynamicFieldService = app(DynamicFieldService::class);
+
+        // Check if extra field count is being increased
+        $newExtraFieldCount = (int) ($data['extra_field_count'] ?? 20);
+        $currentDbCount = $dynamicFieldService->getCurrentExtraFieldCount();
+
+        // Remove the display-only field before saving
+        unset($data['current_extra_field_count']);
 
         $settings = CompanySetting::instance();
         $settings->update($data);
 
-        Notification::make()
-            ->title('Settings Saved')
-            ->body('Company settings have been updated successfully.')
-            ->success()
-            ->send();
+        // Expand database columns if needed
+        $fieldsAdded = 0;
+        if ($newExtraFieldCount > $currentDbCount) {
+            $result = $dynamicFieldService->expandExtraFields($newExtraFieldCount);
+            $fieldsAdded = $result['added'];
+        }
+
+        if ($fieldsAdded > 0) {
+            Notification::make()
+                ->title('Settings Saved')
+                ->body("Company settings updated. Added {$fieldsAdded} new extra fields (extra_".($currentDbCount + 1)." through extra_{$newExtraFieldCount}).")
+                ->success()
+                ->send();
+        } else {
+            Notification::make()
+                ->title('Settings Saved')
+                ->body('Company settings have been updated successfully.')
+                ->success()
+                ->send();
+        }
+
+        // Refresh form to show updated current count
+        $this->form->fill([
+            ...$data,
+            'current_extra_field_count' => $dynamicFieldService->getCurrentExtraFieldCount(),
+        ]);
     }
 }

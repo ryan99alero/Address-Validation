@@ -3,6 +3,7 @@
 namespace App\Filament\Actions;
 
 use App\Models\Carrier;
+use App\Models\CompanySetting;
 use App\Models\ImportBatch;
 use App\Models\ImportFieldTemplate;
 use App\Services\ImportService;
@@ -481,8 +482,9 @@ class AddressImportAction extends Action
             'external_reference' => 'External Reference',
         ];
 
-        // Add extra fields
-        for ($i = 1; $i <= 20; $i++) {
+        // Add extra fields (dynamic count from settings)
+        $extraFieldCount = CompanySetting::instance()->getExtraFieldCount();
+        for ($i = 1; $i <= $extraFieldCount; $i++) {
             $fields["extra_{$i}"] = "Extra Field {$i}";
         }
 

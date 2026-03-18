@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Models\CompanySetting;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
 use App\Services\ImportService;
@@ -424,8 +425,9 @@ class ExportTemplateBuilder extends Page implements HasSchemas
         // Add standard fields
         $fields = array_merge($fields, ExportTemplate::getAvailableFields());
 
-        // Add extra fields
-        for ($i = 1; $i <= 20; $i++) {
+        // Add extra fields (dynamic count from settings)
+        $extraFieldCount = CompanySetting::instance()->getExtraFieldCount();
+        for ($i = 1; $i <= $extraFieldCount; $i++) {
             $fields["extra_{$i}"] = "Extra Field {$i}";
         }
 

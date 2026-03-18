@@ -14,33 +14,13 @@ class Address extends Model
     /** @use HasFactory<AddressFactory> */
     use HasFactory;
 
-    protected $fillable = [
-        'external_reference',
-        'name',
-        'company',
-        'address_line_1',
-        'address_line_2',
-        'city',
-        'state',
-        'postal_code',
-        'country_code',
-        'ship_via_code',
-        'ship_via_code_id',
-        'requested_ship_date',
-        'required_on_site_date',
-        'recommended_service',
-        'estimated_delivery_date',
-        'can_meet_required_date',
-        'source',
-        'source_row_number',
-        'import_batch_id',
-        'created_by',
-        // Extra fields for custom data pass-through
-        'extra_1', 'extra_2', 'extra_3', 'extra_4', 'extra_5',
-        'extra_6', 'extra_7', 'extra_8', 'extra_9', 'extra_10',
-        'extra_11', 'extra_12', 'extra_13', 'extra_14', 'extra_15',
-        'extra_16', 'extra_17', 'extra_18', 'extra_19', 'extra_20',
-    ];
+    /**
+     * Use guarded instead of fillable to allow dynamic extra fields.
+     * Only protect id and timestamps.
+     *
+     * @var array<string>
+     */
+    protected $guarded = ['id', 'created_at', 'updated_at'];
 
     /**
      * @return array<string, string>

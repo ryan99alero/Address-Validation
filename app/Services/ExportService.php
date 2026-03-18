@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Address;
+use App\Models\CompanySetting;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
 use App\Models\TransitTime;
@@ -425,8 +426,9 @@ class ExportService
     {
         $fields = ExportTemplate::getAvailableFields();
 
-        // Add extra fields
-        for ($i = 1; $i <= 20; $i++) {
+        // Add extra fields (dynamic count from settings)
+        $extraFieldCount = CompanySetting::instance()->getExtraFieldCount();
+        for ($i = 1; $i <= $extraFieldCount; $i++) {
             $fields["extra_{$i}"] = "Extra Field {$i}";
         }
 

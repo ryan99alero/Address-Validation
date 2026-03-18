@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Address;
+use App\Models\CompanySetting;
 use App\Models\ImportBatch;
 use App\Models\ImportFieldTemplate;
 use App\Models\ShipViaCode;
@@ -513,8 +514,9 @@ class ImportService
         // Add address system fields
         $fields = array_merge($fields, Address::getSystemFields());
 
-        // Add extra fields for explicit mapping
-        for ($i = 1; $i <= 20; $i++) {
+        // Add extra fields for explicit mapping (dynamic count from settings)
+        $extraFieldCount = CompanySetting::instance()->getExtraFieldCount();
+        for ($i = 1; $i <= $extraFieldCount; $i++) {
             $fields["extra_{$i}"] = "Extra Field {$i}";
         }
 

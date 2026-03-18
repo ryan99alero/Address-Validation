@@ -19,7 +19,26 @@ class CompanySetting extends Model
         'country_code',
         'ups_account_number',
         'fedex_account_number',
+        'extra_field_count',
     ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'extra_field_count' => 'integer',
+        ];
+    }
+
+    /**
+     * Get the configured extra field count (default 20).
+     */
+    public function getExtraFieldCount(): int
+    {
+        return $this->extra_field_count ?? 20;
+    }
 
     /**
      * Get the singleton company settings instance.
