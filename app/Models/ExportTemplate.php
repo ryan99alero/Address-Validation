@@ -105,6 +105,7 @@ class ExportTemplate extends Model
             // Ship Via Code Fields (based on their specified service)
             'ship_via_code' => 'Ship Via Code (Original)',
             'ship_via_service' => 'Ship Via Service Name',
+            'ship_via_transit_days' => 'Ship Via Transit Days',
             'ship_via_delivery_date' => 'Ship Via Delivery Date',
 
             // Ship Dates & Service Recommendation

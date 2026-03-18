@@ -182,9 +182,27 @@ class ExportService
         return match ($field) {
             'ship_via_code' => $address->ship_via_code,
             'ship_via_service' => $shipViaCode?->service_name,
+            'ship_via_transit_days' => $this->getShipViaTransitDays($address),
             'ship_via_delivery_date' => $this->getShipViaDeliveryDate($address),
             default => null,
         };
+    }
+
+    /**
+     * Get transit days for the address's ship via code service.
+     */
+    protected function getShipViaTransitDays(Address $address): ?string
+    {
+        $shipViaCode = $address->shipViaCodeRecord;
+
+        if (! $shipViaCode || ! $shipViaCode->service_type) {
+            return null;
+        }
+
+        // Find transit time matching the ship via code's service type
+        $transitTime = $address->transitTimes->firstWhere('service_type', $shipViaCode->service_type);
+
+        return $transitTime?->transit_range;
     }
 
     /**

@@ -197,56 +197,49 @@ class ProcessImportBatchValidation implements ShouldQueue
 
         $processed = 0;
         $failed = 0;
-        $chunkSize = 50; // Process in chunks to manage memory and allow cancellation checks
+
+        // Use carrier's concurrent request setting, default to 10
+        $concurrentRequests = $fedexCarrier->concurrent_requests ?? 10;
+        $chunkSize = $concurrentRequests * 5; // Process 5 concurrent batches at a time
+
+        Log::info('ProcessImportBatchValidation: Using concurrent transit time fetching', [
+            'batch_id' => $this->batch->id,
+            'concurrent_requests' => $concurrentRequests,
+            'chunk_size' => $chunkSize,
+        ]);
 
         // Process in chunks using cursor for memory efficiency
         $this->batch->addresses()
             ->whereHas('corrections', fn ($q) => $q->where('validation_status', 'valid'))
             ->with('latestCorrection')
-            ->chunk($chunkSize, function ($addresses) use ($transitService, &$processed, &$failed) {
+            ->chunk($chunkSize, function ($addresses) use ($transitService, $concurrentRequests, &$processed, &$failed) {
                 // Check if cancelled at chunk boundary
                 $this->batch->refresh();
                 if ($this->batch->isCancelled()) {
                     return false; // Stop chunking
                 }
 
-                foreach ($addresses as $address) {
-                    try {
-                        $transitService->getTransitTimes(
-                            $address,
-                            $this->batch->origin_postal_code,
-                            $this->batch->origin_country_code ?? 'US'
-                        );
-                        $processed++;
+                // Use concurrent batch processing
+                $result = $transitService->getTransitTimesBatch(
+                    $addresses,
+                    $this->batch->origin_postal_code,
+                    $this->batch->origin_country_code ?? 'US',
+                    $concurrentRequests
+                );
 
-                        // Update progress every 10 addresses
-                        if ($processed % 10 === 0) {
-                            $this->batch->update(['transit_time_rows' => $processed]);
-                        }
+                $processed += $result['processed'];
+                $failed += $result['failed'];
 
-                        // Small delay to avoid rate limiting (100ms between requests)
-                        usleep(100000);
-                    } catch (\Exception $e) {
-                        Log::warning('ProcessImportBatchValidation: Transit time fetch failed', [
-                            'address_id' => $address->id,
-                            'error' => $e->getMessage(),
-                        ]);
-                        $failed++;
+                // Update progress after each chunk
+                $this->batch->update(['transit_time_rows' => $processed]);
 
-                        // Still count as processed for progress
-                        if (($processed + $failed) % 10 === 0) {
-                            $this->batch->update(['transit_time_rows' => $processed]);
-                        }
+                // If we get too many consecutive failures, stop trying
+                if ($failed > 10 && $processed === 0) {
+                    Log::error('ProcessImportBatchValidation: Too many transit time failures, stopping', [
+                        'batch_id' => $this->batch->id,
+                    ]);
 
-                        // If we get too many consecutive failures, stop trying
-                        if ($failed > 10 && $processed === 0) {
-                            Log::error('ProcessImportBatchValidation: Too many transit time failures, stopping', [
-                                'batch_id' => $this->batch->id,
-                            ]);
-
-                            return false; // Stop chunking
-                        }
-                    }
+                    return false; // Stop chunking
                 }
 
                 return true; // Continue to next chunk

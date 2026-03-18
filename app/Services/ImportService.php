@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Address;
 use App\Models\ImportBatch;
 use App\Models\ImportFieldTemplate;
+use App\Models\ShipViaCode;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Facades\Excel;
@@ -268,6 +269,14 @@ class ImportService
             // Parse address_line_1 to extract suite/unit info into address_line_2
             if (! empty($addressData['address_line_1'])) {
                 $addressData = $this->parseAddressLine($addressData);
+            }
+
+            // Look up ship_via_code_id if ship_via_code is provided
+            if (! empty($addressData['ship_via_code'])) {
+                $shipViaCode = ShipViaCode::lookup($addressData['ship_via_code']);
+                if ($shipViaCode) {
+                    $addressData['ship_via_code_id'] = $shipViaCode->id;
+                }
             }
 
             // Only create if we have at least address_line_1

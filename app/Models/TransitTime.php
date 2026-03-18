@@ -126,7 +126,45 @@ class TransitTime extends Model
             return "{$days}+ Days";
         }
 
+        // Calculate from delivery_date if available
+        if ($this->delivery_date) {
+            $days = $this->getCalculatedTransitDays();
+            if ($days !== null) {
+                return "{$days} ".($days === 1 ? 'Day' : 'Days');
+            }
+        }
+
         return 'N/A';
+    }
+
+    /**
+     * Calculate transit days from ship date to delivery date.
+     */
+    public function getCalculatedTransitDays(): ?int
+    {
+        if (! $this->delivery_date) {
+            return null;
+        }
+
+        // Use address's requested_ship_date, or calculated_at date, or today
+        $shipDate = $this->address?->requested_ship_date
+            ?? $this->calculated_at?->startOfDay()
+            ?? now()->startOfDay();
+
+        // Calculate business days (excluding weekends)
+        $days = 0;
+        $current = $shipDate->copy();
+        $deliveryDate = $this->delivery_date->startOfDay();
+
+        while ($current->lt($deliveryDate)) {
+            $current->addDay();
+            // Only count weekdays
+            if (! $current->isWeekend()) {
+                $days++;
+            }
+        }
+
+        return max(1, $days);
     }
 
     /**

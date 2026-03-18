@@ -8,6 +8,7 @@ use App\Models\CompanySetting;
 use App\Models\TransitTime;
 use Carbon\Carbon;
 use Exception;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -51,7 +52,7 @@ class FedExServiceAvailabilityService
     }
 
     /**
-     * Get transit times for multiple addresses.
+     * Get transit times for multiple addresses (sequential - for small batches).
      *
      * @param  Collection<int, Address>  $addresses
      * @return Collection<int, Collection<int, TransitTime>>
@@ -81,6 +82,132 @@ class FedExServiceAvailabilityService
         }
 
         return $results;
+    }
+
+    /**
+     * Get transit times for multiple addresses using concurrent HTTP requests.
+     * Much faster for large batches - processes up to $concurrentRequests at a time.
+     *
+     * @param  Collection<int, Address>  $addresses
+     * @param  int  $concurrentRequests  Number of concurrent API calls (default: 10)
+     * @return array{processed: int, failed: int}
+     */
+    public function getTransitTimesBatch(
+        Collection $addresses,
+        string $originPostalCode,
+        string $originCountryCode = 'US',
+        int $concurrentRequests = 10
+    ): array {
+        if ($addresses->isEmpty()) {
+            return ['processed' => 0, 'failed' => 0];
+        }
+
+        $accessToken = $this->getAccessToken();
+        $baseUrl = $this->carrier->getBaseUrl();
+        $timeout = $this->carrier->timeout_seconds;
+
+        // Build shipper address once
+        $shipperAddress = $this->buildShipperAddress($originPostalCode, $originCountryCode);
+
+        $processed = 0;
+        $failed = 0;
+
+        // Process in concurrent batches
+        foreach ($addresses->chunk($concurrentRequests) as $chunk) {
+            // Build the address array with index for reference
+            $addressArray = $chunk->values()->all();
+
+            // Make concurrent requests using HTTP pool
+            $responses = Http::pool(function (Pool $pool) use (
+                $addressArray,
+                $accessToken,
+                $baseUrl,
+                $timeout,
+                $shipperAddress
+            ) {
+                foreach ($addressArray as $index => $address) {
+                    $payload = $this->buildPayloadForAddress($address, $shipperAddress);
+
+                    $pool->as($index)
+                        ->withToken($accessToken)
+                        ->timeout($timeout)
+                        ->acceptJson()
+                        ->post("{$baseUrl}/availability/v1/transittimes", $payload);
+                }
+            });
+
+            // Process responses
+            foreach ($addressArray as $index => $address) {
+                try {
+                    $response = $responses[$index];
+
+                    if ($response->successful()) {
+                        $this->parseTransitTimesResponse(
+                            $address,
+                            $response->json(),
+                            $originPostalCode,
+                            $originCountryCode
+                        );
+                        $processed++;
+                    } else {
+                        Log::warning('FedEx Transit Times API Error', [
+                            'address_id' => $address->id,
+                            'status' => $response->status(),
+                            'error' => $response->body(),
+                        ]);
+                        $failed++;
+                    }
+                } catch (Exception $e) {
+                    Log::warning('FedEx Transit Times Exception', [
+                        'address_id' => $address->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                    $failed++;
+                }
+            }
+        }
+
+        return ['processed' => $processed, 'failed' => $failed];
+    }
+
+    /**
+     * Build API payload for a single address.
+     *
+     * @param  array<string, string>  $shipperAddress
+     * @return array<string, mixed>
+     */
+    protected function buildPayloadForAddress(Address $address, array $shipperAddress): array
+    {
+        // Use corrected address if available, otherwise original
+        $correction = $address->latestCorrection;
+        $destinationPostalCode = $correction?->corrected_postal_code ?? $address->postal_code;
+        $destinationCountryCode = $correction?->corrected_country_code ?? $address->country_code ?? 'US';
+
+        return [
+            'requestedShipment' => [
+                'shipper' => [
+                    'address' => $shipperAddress,
+                ],
+                'recipients' => [
+                    [
+                        'address' => [
+                            'postalCode' => $destinationPostalCode,
+                            'countryCode' => $destinationCountryCode,
+                        ],
+                    ],
+                ],
+                'packagingType' => 'YOUR_PACKAGING',
+                'requestedPackageLineItems' => [
+                    [
+                        'weight' => [
+                            'units' => 'LB',
+                            'value' => '1',
+                        ],
+                    ],
+                ],
+            ],
+            'carrierCodes' => ['FDXE', 'FDXG'],
+        ];
     }
 
     /**

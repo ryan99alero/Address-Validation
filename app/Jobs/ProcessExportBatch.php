@@ -282,9 +282,9 @@ class ProcessExportBatch implements ShouldQueue
     {
         $query = $this->batch->addresses()->select('addresses.id');
 
-        // Join corrections for filtering or sorting by delivery date
+        // Join corrections for filtering or sorting
         $needsCorrectionsJoin = $this->filterStatus !== 'all' ||
-            in_array($this->sortBy, ['delivery_date_asc', 'delivery_date_desc']);
+            in_array($this->sortBy, ['delivery_date_asc', 'delivery_date_desc', 'state', 'postal_code']);
 
         if ($needsCorrectionsJoin) {
             $query->leftJoin('address_corrections as ac', function ($join) {
@@ -300,25 +300,41 @@ class ProcessExportBatch implements ShouldQueue
             }
         }
 
-        // Join transit times for delivery date sorting
+        // Join transit times for delivery date sorting - use MIN to get earliest delivery
         if (in_array($this->sortBy, ['delivery_date_asc', 'delivery_date_desc'])) {
-            // Get the delivery date from ship_via_code's service or recommended_delivery_date
             $query->leftJoin('transit_times as tt', function ($join) {
                 $join->on('tt.address_id', '=', 'addresses.id');
             });
         }
 
-        // Apply sorting
+        // Use GROUP BY to handle potential duplicates from joins
+        $query->groupBy('addresses.id');
+
+        // Apply sorting - add sort columns to select for MySQL compatibility
         match ($this->sortBy) {
-            'delivery_date_asc' => $query->orderByRaw('COALESCE(addresses.estimated_delivery_date, tt.delivery_date) ASC'),
-            'delivery_date_desc' => $query->orderByRaw('COALESCE(addresses.estimated_delivery_date, tt.delivery_date) DESC'),
-            'ship_via_code' => $query->orderBy('addresses.ship_via_code'),
-            'state' => $query->orderByRaw('COALESCE(ac.corrected_state, addresses.state)'),
-            'postal_code' => $query->orderByRaw('COALESCE(ac.corrected_postal_code, addresses.postal_code)'),
-            default => $query->orderBy('addresses.source_row_number'), // original order
+            'delivery_date_asc' => $query
+                ->selectRaw('MIN(COALESCE(addresses.estimated_delivery_date, tt.delivery_date)) as sort_date')
+                ->orderByRaw('sort_date ASC'),
+            'delivery_date_desc' => $query
+                ->selectRaw('MIN(COALESCE(addresses.estimated_delivery_date, tt.delivery_date)) as sort_date')
+                ->orderByRaw('sort_date DESC'),
+            'ship_via_code' => $query
+                ->addSelect('addresses.ship_via_code')
+                ->groupBy('addresses.ship_via_code')
+                ->orderBy('addresses.ship_via_code'),
+            'state' => $query
+                ->selectRaw('COALESCE(ac.corrected_state, addresses.state) as sort_state')
+                ->orderByRaw('sort_state'),
+            'postal_code' => $query
+                ->selectRaw('COALESCE(ac.corrected_postal_code, addresses.postal_code) as sort_postal')
+                ->orderByRaw('sort_postal'),
+            default => $query
+                ->addSelect('addresses.source_row_number')
+                ->groupBy('addresses.source_row_number')
+                ->orderBy('addresses.source_row_number'),
         };
 
-        return $query->distinct()->pluck('addresses.id')->toArray();
+        return $query->pluck('addresses.id')->toArray();
     }
 
     public function failed(\Throwable $exception): void
