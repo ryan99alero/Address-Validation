@@ -360,14 +360,15 @@ class ExportTemplateBuilder extends Page implements HasSchemas
                 $field = "extra_{$nextExtraId}";
                 $nextExtraId++;
 
-                // Cap at 20 extra fields
-                if ($nextExtraId > 20) {
+                // Cap at configured extra field count
+                $maxExtraFields = CompanySetting::instance()->getExtraFieldCount();
+                if ($nextExtraId > $maxExtraFields) {
                     Notification::make()
                         ->title('Warning')
-                        ->body('Maximum of 20 PassThrough fields allowed. Some fields were not mapped.')
+                        ->body("Maximum of {$maxExtraFields} PassThrough fields allowed. Some fields were not mapped.")
                         ->warning()
                         ->send();
-                    $nextExtraId = 20;
+                    $nextExtraId = $maxExtraFields;
                 }
             }
 

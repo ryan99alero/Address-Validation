@@ -747,15 +747,45 @@ class ImportService
      *
      * @param  array<int, array<string, string>>  $mappings
      */
-    public function saveMappingTemplate(string $name, array $mappings, ?string $description = null): ImportFieldTemplate
-    {
+    public function saveMappingTemplate(
+        string $name,
+        array $mappings,
+        ?string $description = null,
+        ?string $shipViaCodeField = null
+    ): ImportFieldTemplate {
         return ImportFieldTemplate::create([
             'name' => $name,
             'description' => $description,
             'field_mappings' => $mappings,
+            'ship_via_code_field' => $shipViaCodeField,
             'is_default' => false,
             'created_by' => auth()->id(),
         ]);
+    }
+
+    /**
+     * Update an existing mapping template.
+     *
+     * @param  array<int, array<string, string>>  $mappings
+     */
+    public function updateMappingTemplate(
+        ImportFieldTemplate $template,
+        array $mappings,
+        ?string $shipViaCodeField = null,
+        ?string $description = null
+    ): ImportFieldTemplate {
+        $data = [
+            'field_mappings' => $mappings,
+            'ship_via_code_field' => $shipViaCodeField,
+        ];
+
+        if ($description !== null) {
+            $data['description'] = $description;
+        }
+
+        $template->update($data);
+
+        return $template->fresh();
     }
 }
 

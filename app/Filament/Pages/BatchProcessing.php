@@ -361,6 +361,11 @@ class BatchProcessing extends Page implements HasSchemas
             }
         }
 
+        // Load ship via code field if saved in template
+        if ($template->ship_via_code_field) {
+            $this->shipViaCodeColumn = $template->ship_via_code_field;
+        }
+
         Notification::make()
             ->title('Template Loaded')
             ->body("Applied mappings from '{$template->name}'")
@@ -384,7 +389,8 @@ class BatchProcessing extends Page implements HasSchemas
         $template = $importService->saveMappingTemplate(
             $this->newTemplateName,
             $this->mappings,
-            'Created from batch import on '.now()->format('Y-m-d H:i')
+            'Created from batch import on '.now()->format('Y-m-d H:i'),
+            $this->shipViaCodeColumn
         );
 
         $this->selectedTemplateId = (string) $template->id;
@@ -395,6 +401,50 @@ class BatchProcessing extends Page implements HasSchemas
             ->body("Template '{$template->name}' has been saved.")
             ->success()
             ->send();
+    }
+
+    public function updateTemplate(): void
+    {
+        if (! $this->selectedTemplateId) {
+            Notification::make()
+                ->title('Error')
+                ->body('No template selected to update.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $template = ImportFieldTemplate::find($this->selectedTemplateId);
+
+        if (! $template) {
+            Notification::make()
+                ->title('Error')
+                ->body('Template not found.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $importService = app(ImportService::class);
+        $importService->updateMappingTemplate(
+            $template,
+            $this->mappings,
+            $this->shipViaCodeColumn,
+            'Updated from batch import on '.now()->format('Y-m-d H:i')
+        );
+
+        Notification::make()
+            ->title('Template Updated')
+            ->body("Template '{$template->name}' has been updated.")
+            ->success()
+            ->send();
+    }
+
+    public function canUpdateTemplate(): bool
+    {
+        return ! empty($this->selectedTemplateId) && empty($this->newTemplateName);
     }
 
     public function startProcessing(): void

@@ -58,6 +58,14 @@
                                     <option value="{{ $id }}">{{ $name }}</option>
                                 @endforeach
                             </select>
+                            @if($this->selectedTemplateId && empty($this->newTemplateName))
+                                <div class="mt-2">
+                                    <x-filament::button type="button" wire:click="updateTemplate" size="sm" color="warning">
+                                        <x-filament::icon icon="heroicon-o-arrow-path" class="w-4 h-4 mr-1" />
+                                        Update Template
+                                    </x-filament::button>
+                                </div>
+                            @endif
                         </div>
                         <div class="flex-1 min-w-[200px]">
                             <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Save as New Template</label>

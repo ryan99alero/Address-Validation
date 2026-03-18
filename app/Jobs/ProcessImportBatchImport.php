@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Address;
 use App\Models\ImportBatch;
+use App\Models\ShipViaCode;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -224,6 +225,14 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
                 // Parse address line for suite extraction
                 if (! empty($addressData['address_line_1'])) {
                     $addressData = $this->parseAddressLine($addressData);
+                }
+
+                // Look up ship_via_code_id if ship_via_code is provided
+                if (! empty($addressData['ship_via_code'])) {
+                    $shipViaCode = ShipViaCode::lookup($addressData['ship_via_code']);
+                    if ($shipViaCode) {
+                        $addressData['ship_via_code_id'] = $shipViaCode->id;
+                    }
                 }
 
                 // Only create if we have address_line_1
