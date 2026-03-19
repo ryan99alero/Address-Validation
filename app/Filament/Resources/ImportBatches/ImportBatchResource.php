@@ -13,6 +13,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class ImportBatchResource extends Resource
 {
@@ -32,6 +33,12 @@ class ImportBatchResource extends Resource
     public static function table(Table $table): Table
     {
         return ImportBatchesTable::configure($table);
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()
+            ->where('imported_by', auth()->id());
     }
 
     public static function getRelations(): array

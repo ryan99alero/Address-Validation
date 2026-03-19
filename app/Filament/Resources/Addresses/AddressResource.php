@@ -14,6 +14,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class AddressResource extends Resource
 {
@@ -33,6 +34,17 @@ class AddressResource extends Resource
     public static function table(Table $table): Table
     {
         return AddressesTable::configure($table);
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()
+            ->where(function (Builder $query) {
+                $query->where('created_by', auth()->id())
+                    ->orWhereHas('importBatch', function (Builder $q) {
+                        $q->where('imported_by', auth()->id());
+                    });
+            });
     }
 
     public static function getRelations(): array

@@ -13,6 +13,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use UnitEnum;
 
 class ImportFieldTemplateResource extends Resource
@@ -35,6 +36,15 @@ class ImportFieldTemplateResource extends Resource
     public static function table(Table $table): Table
     {
         return ImportFieldTemplatesTable::configure($table);
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()
+            ->where(function (Builder $query) {
+                $query->where('created_by', auth()->id())
+                    ->orWhere('is_shared', true);
+            });
     }
 
     public static function getRelations(): array
