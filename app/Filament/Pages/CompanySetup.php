@@ -44,6 +44,7 @@ class CompanySetup extends Page implements HasSchemas
             'contact_name' => $settings->contact_name,
             'phone' => $settings->phone,
             'email' => $settings->email,
+            'support_email' => $settings->support_email,
             'address_line_1' => $settings->address_line_1,
             'address_line_2' => $settings->address_line_2,
             'city' => $settings->city,
@@ -77,6 +78,10 @@ class CompanySetup extends Page implements HasSchemas
                             ->maxLength(50),
                         TextInput::make('email')
                             ->label('Email Address')
+                            ->email()
+                            ->maxLength(255),
+                        TextInput::make('support_email')
+                            ->label('Support Email')
                             ->email()
                             ->maxLength(255),
                     ]),

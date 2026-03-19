@@ -11,6 +11,7 @@ class CompanySetting extends Model
         'contact_name',
         'phone',
         'email',
+        'support_email',
         'address_line_1',
         'address_line_2',
         'city',
