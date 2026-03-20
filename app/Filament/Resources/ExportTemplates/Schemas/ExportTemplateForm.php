@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ExportTemplates\Schemas;
 
+use App\Models\CompanySetting;
 use App\Models\ExportTemplate;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -15,7 +16,7 @@ class ExportTemplateForm
 {
     public static function configure(Schema $schema): Schema
     {
-        $availableFields = ExportTemplate::getAvailableFields();
+        $availableFields = self::getAllAvailableFields();
 
         return $schema
             ->components([
@@ -65,11 +66,16 @@ class ExportTemplateForm
                             ->reorderable()
                             ->collapsible()
                             ->defaultItems(0)
-                            ->itemLabel(fn (array $state): ?string => isset($state['field'])
-                                ? ($availableFields[$state['field']] ?? $state['field']).
-                                  ($state['header'] ? " → {$state['header']}" : '')
-                                : null
-                            ),
+                            ->itemLabel(function (array $state) use ($availableFields): ?string {
+                                if (! isset($state['field'])) {
+                                    return null;
+                                }
+
+                                $fieldLabel = $availableFields[$state['field']] ?? $state['field'];
+                                $headerSuffix = ! empty($state['header']) ? " → {$state['header']}" : '';
+
+                                return $fieldLabel.$headerSuffix;
+                            }),
                     ]),
 
                 Section::make('Sharing')
@@ -79,5 +85,24 @@ class ExportTemplateForm
                             ->helperText('Allow other users to use this template'),
                     ]),
             ]);
+    }
+
+    /**
+     * Get all available fields including extra fields.
+     *
+     * @return array<string, string>
+     */
+    public static function getAllAvailableFields(): array
+    {
+        // Start with standard export fields
+        $fields = ExportTemplate::getAvailableFields();
+
+        // Add extra fields based on company settings
+        $extraFieldCount = CompanySetting::instance()->getExtraFieldCount();
+        for ($i = 1; $i <= $extraFieldCount; $i++) {
+            $fields["extra_{$i}"] = "Extra Field {$i}";
+        }
+
+        return $fields;
     }
 }

@@ -284,6 +284,93 @@ class ExportTemplateBuilder extends Page implements HasSchemas
         ];
     }
 
+    /**
+     * Get the list of transit time fields.
+     *
+     * @return array<int, array{header: string, field: string}>
+     */
+    public static function getTransitTimeFields(): array
+    {
+        return [
+            // Ship dates
+            ['header' => 'Requested Ship Date', 'field' => 'requested_ship_date'],
+            ['header' => 'Required On-Site Date', 'field' => 'required_on_site_date'],
+
+            // Ship Via analysis (when ship via code is provided)
+            ['header' => 'Ship Via Service', 'field' => 'ship_via_service'],
+            ['header' => 'Ship Via Transit Days', 'field' => 'ship_via_transit_days'],
+            ['header' => 'Ship Via Delivery Date', 'field' => 'ship_via_delivery_date'],
+            ['header' => 'Ship Via Meets Deadline', 'field' => 'ship_via_meets_deadline'],
+
+            // Recommendations (when dates are provided without ship via)
+            ['header' => 'Recommended Service', 'field' => 'recommended_service'],
+            ['header' => 'Estimated Delivery Date', 'field' => 'estimated_delivery_date'],
+            ['header' => 'Can Meet Required Date', 'field' => 'can_meet_required_date'],
+
+            // Alternative suggestion (when ship via doesn't meet deadline)
+            ['header' => 'Suggested Service', 'field' => 'suggested_service'],
+            ['header' => 'Suggested Delivery Date', 'field' => 'suggested_delivery_date'],
+
+            // Fastest service (always calculated)
+            ['header' => 'Fastest Service', 'field' => 'fastest_service'],
+            ['header' => 'Fastest Delivery Date', 'field' => 'fastest_delivery_date'],
+
+            // Distance
+            ['header' => 'Distance (Miles)', 'field' => 'distance_miles'],
+        ];
+    }
+
+    public function addTransitTimeFields(): void
+    {
+        $transitFields = self::getTransitTimeFields();
+
+        // Get existing field names to avoid duplicates
+        $existingFields = collect($this->fieldMappings)
+            ->pluck('field')
+            ->filter()
+            ->toArray();
+
+        // Filter to only fields not already added
+        $fieldsToAdd = array_filter($transitFields, function ($field) use ($existingFields) {
+            return ! in_array($field['field'], $existingFields, true);
+        });
+
+        if (empty($fieldsToAdd)) {
+            Notification::make()
+                ->title('No Fields Added')
+                ->body('All transit time fields are already in the template.')
+                ->info()
+                ->send();
+
+            return;
+        }
+
+        $position = count($this->fieldMappings);
+
+        foreach ($fieldsToAdd as $field) {
+            $this->fieldMappings[] = [
+                'position' => $position,
+                'header' => $field['header'],
+                'field' => $field['field'],
+            ];
+            $position++;
+        }
+
+        $addedCount = count($fieldsToAdd);
+        $skippedCount = count($transitFields) - $addedCount;
+
+        $message = "Added {$addedCount} transit time fields to the template.";
+        if ($skippedCount > 0) {
+            $message .= " ({$skippedCount} already existed)";
+        }
+
+        Notification::make()
+            ->title('Transit Time Fields Added')
+            ->body($message)
+            ->success()
+            ->send();
+    }
+
     public function removeColumn(int $index): void
     {
         if (isset($this->fieldMappings[$index])) {

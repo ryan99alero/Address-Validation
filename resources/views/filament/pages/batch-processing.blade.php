@@ -246,21 +246,26 @@
                             @php
                                 $phase = $this->batch->processing_phase;
                                 $overallProgress = $this->batch->getOverallProgress();
-                                $phaseProgress = $this->batch->getPhaseProgress();
                                 $includeTransit = $this->batch->include_transit_times;
 
+                                // Phase percentages
+                                $importPercent = $this->batch->getImportPhasePercent();
+                                $validationPercent = $this->batch->getValidationPhasePercent();
+                                $transitPercent = $this->batch->getTransitPhasePercent();
+
                                 // Phase indicators
-                                $importComplete = $this->batch->processed_rows >= $this->batch->total_rows;
-                                $validationComplete = ($this->batch->validated_rows ?? 0) >= ($this->batch->successful_rows ?? 1);
-                                $transitComplete = !$includeTransit || $phase === \App\Models\ImportBatch::PHASE_COMPLETE;
+                                $importComplete = $importPercent >= 100;
+                                $validationComplete = $validationPercent >= 100;
+                                $transitComplete = !$includeTransit || in_array($phase, [\App\Models\ImportBatch::PHASE_RECOMMENDATIONS, \App\Models\ImportBatch::PHASE_COMPLETE]);
+                                $recommendationsComplete = $phase === \App\Models\ImportBatch::PHASE_COMPLETE;
                             @endphp
 
                             <div class="mt-6">
                                 {{-- Overall Progress Bar --}}
                                 <div class="mb-4">
-                                    <div class="flex justify-between text-sm text-gray-600 dark:text-gray-400 mb-1">
-                                        <span class="font-medium">Overall Progress</span>
-                                        <span>{{ $overallProgress }}%</span>
+                                    <div class="flex justify-between items-center mb-1">
+                                        <span class="text-sm font-medium text-gray-600 dark:text-gray-400">Overall Progress</span>
+                                        <span class="text-lg font-bold text-gray-900 dark:text-white">{{ $overallProgress }}%</span>
                                     </div>
                                     <div class="bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
                                         <div
@@ -288,11 +293,11 @@
                                                 <span class="font-medium {{ $phase === \App\Models\ImportBatch::PHASE_IMPORTING ? 'text-primary-700 dark:text-primary-300' : '' }}">
                                                     1. Importing Records
                                                 </span>
-                                                <span class="text-gray-500">{{ $this->batch->processed_rows ?? 0 }} / {{ $this->batch->total_rows }}</span>
+                                                <span class="text-gray-500">{{ $this->batch->processed_rows ?? 0 }} / {{ $this->batch->total_rows }} <span class="font-semibold">({{ $importPercent }}%)</span></span>
                                             </div>
                                             @if($phase === \App\Models\ImportBatch::PHASE_IMPORTING)
                                                 <div class="mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5 overflow-hidden">
-                                                    <div class="h-full bg-primary-500 transition-all" style="width: {{ $this->batch->total_rows > 0 ? round(($this->batch->processed_rows / $this->batch->total_rows) * 100) : 0 }}%"></div>
+                                                    <div class="h-full bg-primary-500 transition-all" style="width: {{ $importPercent }}%"></div>
                                                 </div>
                                             @endif
                                         </div>
@@ -314,11 +319,11 @@
                                                 <span class="font-medium {{ $phase === \App\Models\ImportBatch::PHASE_VALIDATING ? 'text-primary-700 dark:text-primary-300' : '' }}">
                                                     2. Validating Addresses
                                                 </span>
-                                                <span class="text-gray-500">{{ $this->batch->validated_rows ?? 0 }} / {{ $this->batch->successful_rows ?? 0 }}</span>
+                                                <span class="text-gray-500">{{ $this->batch->validated_rows ?? 0 }} / {{ $this->batch->successful_rows ?? 0 }} <span class="font-semibold">({{ $validationPercent }}%)</span></span>
                                             </div>
                                             @if($phase === \App\Models\ImportBatch::PHASE_VALIDATING)
                                                 <div class="mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5 overflow-hidden">
-                                                    <div class="h-full bg-primary-500 transition-all" style="width: {{ ($this->batch->successful_rows ?? 0) > 0 ? round((($this->batch->validated_rows ?? 0) / $this->batch->successful_rows) * 100) : 0 }}%"></div>
+                                                    <div class="h-full bg-primary-500 transition-all" style="width: {{ $validationPercent }}%"></div>
                                                 </div>
                                             @endif
                                         </div>
@@ -341,11 +346,45 @@
                                                     <span class="font-medium {{ $phase === \App\Models\ImportBatch::PHASE_TRANSIT_TIMES ? 'text-primary-700 dark:text-primary-300' : '' }}">
                                                         3. Fetching Transit Times
                                                     </span>
-                                                    <span class="text-gray-500">{{ $this->batch->transit_time_rows ?? 0 }} / {{ $this->batch->total_for_transit ?? 0 }}</span>
+                                                    <span class="text-gray-500">{{ $this->batch->transit_time_rows ?? 0 }} / {{ $this->batch->total_for_transit ?? 0 }} <span class="font-semibold">({{ $transitPercent }}%)</span></span>
                                                 </div>
                                                 @if($phase === \App\Models\ImportBatch::PHASE_TRANSIT_TIMES)
                                                     <div class="mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5 overflow-hidden">
-                                                        <div class="h-full bg-primary-500 transition-all" style="width: {{ ($this->batch->total_for_transit ?? 0) > 0 ? round((($this->batch->transit_time_rows ?? 0) / $this->batch->total_for_transit) * 100) : 0 }}%"></div>
+                                                        <div class="h-full bg-primary-500 transition-all" style="width: {{ $transitPercent }}%"></div>
+                                                    </div>
+                                                @endif
+                                            </div>
+                                        </div>
+
+                                        {{-- Step 4: Recommendations --}}
+                                        <div class="flex items-center gap-3 p-3 rounded-lg {{ $phase === \App\Models\ImportBatch::PHASE_RECOMMENDATIONS ? 'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800' : ($recommendationsComplete ? 'bg-success-50 dark:bg-success-900/20' : 'bg-gray-50 dark:bg-gray-800') }}">
+                                            <div class="flex-shrink-0">
+                                                @if($recommendationsComplete)
+                                                    <x-filament::icon icon="heroicon-o-check-circle" class="h-5 w-5 text-success-500" />
+                                                @elseif($phase === \App\Models\ImportBatch::PHASE_RECOMMENDATIONS)
+                                                    <x-filament::icon icon="heroicon-o-arrow-path" class="h-5 w-5 text-primary-500 animate-spin" />
+                                                @else
+                                                    <x-filament::icon icon="heroicon-o-clock" class="h-5 w-5 text-gray-400" />
+                                                @endif
+                                            </div>
+                                            <div class="flex-1 min-w-0">
+                                                <div class="flex justify-between text-sm">
+                                                    <span class="font-medium {{ $phase === \App\Models\ImportBatch::PHASE_RECOMMENDATIONS ? 'text-primary-700 dark:text-primary-300' : '' }}">
+                                                        4. Calculating Recommendations
+                                                    </span>
+                                                    <span class="text-gray-500">
+                                                        @if($recommendationsComplete)
+                                                            <span class="font-semibold">(100%)</span>
+                                                        @elseif($phase === \App\Models\ImportBatch::PHASE_RECOMMENDATIONS)
+                                                            <span class="font-semibold">(Processing...)</span>
+                                                        @else
+                                                            <span class="font-semibold">(0%)</span>
+                                                        @endif
+                                                    </span>
+                                                </div>
+                                                @if($phase === \App\Models\ImportBatch::PHASE_RECOMMENDATIONS)
+                                                    <div class="mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5 overflow-hidden">
+                                                        <div class="h-full bg-primary-500 transition-all animate-pulse" style="width: 50%"></div>
                                                     </div>
                                                 @endif
                                             </div>
@@ -433,16 +472,67 @@
         @if($activeTab === 'export')
             {{-- Export Progress Banner - Always visible when export is running --}}
             @if($this->selectedExportBatch && in_array($this->selectedExportBatch->export_status, ['pending', 'processing']))
-                <div class="mb-6 p-4 bg-primary-50 dark:bg-primary-900/30 border border-primary-200 dark:border-primary-800 rounded-lg" wire:poll.2s="refreshExportStatus">
-                    <div class="flex items-center gap-3">
+                @php
+                    $exportPhase = $this->selectedExportBatch->export_phase;
+                    $exportPercent = $this->selectedExportBatch->getExportProgressPercent();
+                    $exportPhaseLabel = $this->selectedExportBatch->getExportPhaseLabel();
+                    $exportTotal = $this->selectedExportBatch->export_total_rows ?? 0;
+                    $exportProcessed = $this->selectedExportBatch->export_processed_rows ?? 0;
+                @endphp
+                <div class="mb-6 p-4 bg-primary-50 dark:bg-primary-900/30 border border-primary-200 dark:border-primary-800 rounded-lg" wire:poll.1s="refreshExportStatus">
+                    <div class="flex items-center gap-3 mb-3">
                         <x-filament::icon icon="heroicon-o-arrow-path" class="h-6 w-6 animate-spin text-primary-600" />
-                        <div>
+                        <div class="flex-1">
                             <p class="font-medium text-primary-700 dark:text-primary-300">
                                 Export in progress: {{ $this->selectedExportBatch->display_name }}
                             </p>
                             <p class="text-sm text-primary-600 dark:text-primary-400">
-                                Processing {{ number_format($this->totalAddresses) }} addresses. This may take several minutes for large batches...
+                                {{ $exportPhaseLabel }}
+                                @if($exportTotal > 0)
+                                    - {{ number_format($exportProcessed) }} / {{ number_format($exportTotal) }} rows
+                                @endif
                             </p>
+                        </div>
+                        <span class="text-2xl font-bold text-primary-700 dark:text-primary-300">{{ $exportPercent }}%</span>
+                    </div>
+                    {{-- Progress bar --}}
+                    <div class="bg-primary-200 dark:bg-primary-800 rounded-full h-2 overflow-hidden">
+                        <div
+                            class="h-full bg-primary-500 transition-all duration-300"
+                            style="width: {{ $exportPercent }}%"
+                        ></div>
+                    </div>
+                    {{-- Phase steps --}}
+                    <div class="mt-3 flex items-center gap-6 text-xs text-primary-600 dark:text-primary-400">
+                        <div class="flex items-center gap-1">
+                            @if($exportPhase === \App\Models\ImportBatch::EXPORT_PHASE_PREPARING)
+                                <x-filament::icon icon="heroicon-o-arrow-path" class="h-3 w-3 animate-spin" />
+                            @elseif(in_array($exportPhase, [\App\Models\ImportBatch::EXPORT_PHASE_LOADING, \App\Models\ImportBatch::EXPORT_PHASE_WRITING, \App\Models\ImportBatch::EXPORT_PHASE_COMPLETE]))
+                                <x-filament::icon icon="heroicon-o-check-circle" class="h-3 w-3 text-success-500" />
+                            @else
+                                <x-filament::icon icon="heroicon-o-clock" class="h-3 w-3" />
+                            @endif
+                            <span>Preparing</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            @if($exportPhase === \App\Models\ImportBatch::EXPORT_PHASE_LOADING)
+                                <x-filament::icon icon="heroicon-o-arrow-path" class="h-3 w-3 animate-spin" />
+                            @elseif(in_array($exportPhase, [\App\Models\ImportBatch::EXPORT_PHASE_WRITING, \App\Models\ImportBatch::EXPORT_PHASE_COMPLETE]))
+                                <x-filament::icon icon="heroicon-o-check-circle" class="h-3 w-3 text-success-500" />
+                            @else
+                                <x-filament::icon icon="heroicon-o-clock" class="h-3 w-3" />
+                            @endif
+                            <span>Loading Data</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            @if($exportPhase === \App\Models\ImportBatch::EXPORT_PHASE_WRITING)
+                                <x-filament::icon icon="heroicon-o-arrow-path" class="h-3 w-3 animate-spin" />
+                            @elseif($exportPhase === \App\Models\ImportBatch::EXPORT_PHASE_COMPLETE)
+                                <x-filament::icon icon="heroicon-o-check-circle" class="h-3 w-3 text-success-500" />
+                            @else
+                                <x-filament::icon icon="heroicon-o-clock" class="h-3 w-3" />
+                            @endif
+                            <span>Writing Rows</span>
                         </div>
                     </div>
                 </div>
@@ -530,18 +620,33 @@
 
                         {{-- Export Status Section --}}
                         @if($this->selectedExportBatch->export_status)
+                            @php
+                                $inlineExportPhase = $this->selectedExportBatch->export_phase;
+                                $inlineExportPercent = $this->selectedExportBatch->getExportProgressPercent();
+                                $inlineExportTotal = $this->selectedExportBatch->export_total_rows ?? 0;
+                                $inlineExportProcessed = $this->selectedExportBatch->export_processed_rows ?? 0;
+                            @endphp
                             <div class="mt-4 p-4 rounded-lg {{ match($this->selectedExportBatch->export_status) {
                                 'completed' => 'bg-success-50 dark:bg-success-900/20',
                                 'processing', 'pending' => 'bg-primary-50 dark:bg-primary-900/20',
                                 'failed' => 'bg-danger-50 dark:bg-danger-900/20',
                                 default => 'bg-gray-50 dark:bg-gray-800'
-                            } }}" @if(in_array($this->selectedExportBatch->export_status, ['pending', 'processing'])) wire:poll.2s="refreshExportStatus" @endif>
+                            } }}" @if(in_array($this->selectedExportBatch->export_status, ['pending', 'processing'])) wire:poll.1s="refreshExportStatus" @endif>
                                 @if($this->selectedExportBatch->export_status === 'processing' || $this->selectedExportBatch->export_status === 'pending')
-                                    <div class="flex items-center gap-3">
-                                        <x-filament::icon icon="heroicon-o-arrow-path" class="h-5 w-5 animate-spin text-primary-600" />
-                                        <span class="text-primary-700 dark:text-primary-300 font-medium">
-                                            Export in progress... This may take a few minutes for large batches.
-                                        </span>
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div class="flex items-center gap-3">
+                                            <x-filament::icon icon="heroicon-o-arrow-path" class="h-5 w-5 animate-spin text-primary-600" />
+                                            <span class="text-primary-700 dark:text-primary-300 font-medium">
+                                                {{ $this->selectedExportBatch->getExportPhaseLabel() }}
+                                                @if($inlineExportTotal > 0)
+                                                    - {{ number_format($inlineExportProcessed) }} / {{ number_format($inlineExportTotal) }} rows
+                                                @endif
+                                            </span>
+                                        </div>
+                                        <span class="text-lg font-bold text-primary-700 dark:text-primary-300">{{ $inlineExportPercent }}%</span>
+                                    </div>
+                                    <div class="bg-primary-200 dark:bg-primary-700 rounded-full h-1.5 overflow-hidden">
+                                        <div class="h-full bg-primary-500 transition-all duration-300" style="width: {{ $inlineExportPercent }}%"></div>
                                     </div>
                                 @elseif($this->selectedExportBatch->export_status === 'completed')
                                     <div class="flex items-center justify-between">

@@ -154,7 +154,7 @@
                     </table>
                 </div>
 
-                <div class="mt-4 flex justify-start">
+                <div class="mt-4 flex justify-start gap-2">
                     <x-filament::button
                         wire:click="addColumn"
                         icon="heroicon-o-plus"
@@ -162,6 +162,14 @@
                         size="sm"
                     >
                         Add Column
+                    </x-filament::button>
+                    <x-filament::button
+                        wire:click="addTransitTimeFields"
+                        icon="heroicon-o-clock"
+                        color="info"
+                        size="sm"
+                    >
+                        Add Transit Time Fields
                     </x-filament::button>
                 </div>
             </x-filament::section>

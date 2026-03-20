@@ -1,9 +1,11 @@
 <?php
 
+use App\Jobs\ProcessExportBatch;
 use App\Models\Address;
 use App\Models\AddressCorrection;
 use App\Models\Carrier;
 use App\Models\ExportTemplate;
+use App\Models\ImportBatch;
 use App\Services\ExportService;
 
 describe('ExportService field value extraction', function () {
@@ -164,5 +166,70 @@ describe('ExportService available fields', function () {
         for ($i = 1; $i <= 20; $i++) {
             expect($fields)->toHaveKey("extra_{$i}");
         }
+    });
+});
+
+describe('ProcessExportBatch with validation fields', function () {
+    it('returns validation fields to append for basic batch', function () {
+        $batch = ImportBatch::factory()->create([
+            'include_transit_times' => false,
+            'field_mappings' => [
+                ['source' => 'Name', 'target' => 'name', 'position' => 0],
+            ],
+        ]);
+
+        $job = new ProcessExportBatch(
+            batch: $batch,
+            appendValidationFields: true
+        );
+
+        // Use reflection to call protected method
+        $reflection = new ReflectionClass($job);
+        $method = $reflection->getMethod('getValidationFieldsToAppend');
+        $method->setAccessible(true);
+
+        $fields = $method->invoke($job);
+
+        // Should have core validation fields
+        $fieldNames = array_column($fields, 'field');
+        expect($fieldNames)->toContain('corrected_address_line_1');
+        expect($fieldNames)->toContain('validation_status');
+        expect($fieldNames)->toContain('is_residential');
+        expect($fieldNames)->toContain('carrier');
+
+        // Should NOT have transit time fields
+        expect($fieldNames)->not->toContain('ship_via_service');
+        expect($fieldNames)->not->toContain('fastest_service');
+    });
+
+    it('includes transit time fields when batch has them enabled', function () {
+        $batch = ImportBatch::factory()->create([
+            'include_transit_times' => true,
+            'field_mappings' => [
+                ['source' => 'Name', 'target' => 'name', 'position' => 0],
+            ],
+        ]);
+
+        $job = new ProcessExportBatch(
+            batch: $batch,
+            appendValidationFields: true
+        );
+
+        $reflection = new ReflectionClass($job);
+        $method = $reflection->getMethod('getValidationFieldsToAppend');
+        $method->setAccessible(true);
+
+        $fields = $method->invoke($job);
+        $fieldNames = array_column($fields, 'field');
+
+        // Should have core validation fields
+        expect($fieldNames)->toContain('corrected_address_line_1');
+
+        // Should also have transit time fields
+        expect($fieldNames)->toContain('ship_via_service');
+        expect($fieldNames)->toContain('ship_via_transit_days');
+        expect($fieldNames)->toContain('recommended_service');
+        expect($fieldNames)->toContain('fastest_service');
+        expect($fieldNames)->toContain('distance_miles');
     });
 });

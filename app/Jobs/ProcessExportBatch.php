@@ -32,7 +32,8 @@ class ProcessExportBatch implements ShouldQueue
         public bool $useImportMapping = true,
         public string $filterStatus = 'all',
         public ?string $filename = null,
-        public string $sortBy = 'original'
+        public string $sortBy = 'original',
+        public bool $appendValidationFields = false
     ) {}
 
     public function handle(): void
@@ -48,12 +49,14 @@ class ProcessExportBatch implements ShouldQueue
         Log::info('ProcessExportBatch: Starting', [
             'batch_id' => $this->batch->id,
             'use_import_mapping' => $this->useImportMapping,
+            'append_validation_fields' => $this->appendValidationFields,
             'filter_status' => $this->filterStatus,
+            'sort_by' => $this->sortBy,
+            'template_id' => $this->templateId,
         ]);
 
-        $this->batch->update([
-            'export_status' => 'processing',
-        ]);
+        // Reset export progress tracking
+        $this->batch->resetExportProgress();
 
         try {
             // Generate filename
@@ -66,7 +69,9 @@ class ProcessExportBatch implements ShouldQueue
 
             $fullPath = Storage::disk('local')->path($filePath);
 
-            if ($this->useImportMapping) {
+            if ($this->appendValidationFields) {
+                $this->exportUsingImportMappingWithValidation($fullPath);
+            } elseif ($this->useImportMapping) {
                 $this->exportUsingImportMapping($fullPath);
             } else {
                 $this->exportUsingTemplate($fullPath);
@@ -75,6 +80,7 @@ class ProcessExportBatch implements ShouldQueue
             $this->batch->update([
                 'export_file_path' => $filePath,
                 'export_status' => 'completed',
+                'export_phase' => ImportBatch::EXPORT_PHASE_COMPLETE,
                 'export_completed_at' => now(),
             ]);
 
@@ -124,23 +130,19 @@ class ProcessExportBatch implements ShouldQueue
         fputcsv($handle, $headers, ',', '"', '');
 
         // Get address IDs that match the filter first (memory efficient)
+        $this->batch->setExportPhase(ImportBatch::EXPORT_PHASE_LOADING);
         $addressIds = $this->getFilteredAddressIds();
+
+        // Set total rows for progress tracking
+        $this->batch->setExportPhase(ImportBatch::EXPORT_PHASE_WRITING, count($addressIds));
 
         // Process in chunks using just IDs - much more memory efficient
         $rowCount = 0;
         $chunkSize = 200;
-        $memoryWarningThreshold = 800 * 1024 * 1024; // 800MB warning
 
         foreach (array_chunk($addressIds, $chunkSize) as $idChunk) {
-            // Check memory usage before processing chunk
-            $memoryUsage = memory_get_usage(true);
-            if ($memoryUsage > $memoryWarningThreshold) {
-                Log::warning('ProcessExportBatch: High memory usage', [
-                    'batch_id' => $this->batch->id,
-                    'memory_mb' => round($memoryUsage / 1024 / 1024, 2),
-                    'rows_processed' => $rowCount,
-                ]);
-            }
+            // Reconnect to ensure fresh connection (prevents timeout between chunks)
+            DB::reconnect();
 
             // Load just this chunk - avoid eager loading latestCorrection due to complex subquery
             $addresses = Address::whereIn('id', $idChunk)->get();
@@ -170,17 +172,173 @@ class ProcessExportBatch implements ShouldQueue
                 $rowCount++;
             }
 
-            // Explicitly clear references
+            // Update progress after each chunk
+            $this->batch->refresh();
+            $this->batch->incrementExportProgress(count($idChunk));
+
+            // Clear memory
             unset($addresses, $corrections);
             gc_collect_cycles();
         }
 
         fclose($handle);
+    }
 
-        Log::info('ProcessExportBatch: Wrote rows', [
-            'batch_id' => $this->batch->id,
-            'rows' => $rowCount,
-        ]);
+    /**
+     * Export using import field mappings PLUS append validation/correction fields.
+     * This keeps the original file structure and adds new columns at the end.
+     */
+    protected function exportUsingImportMappingWithValidation(string $filePath): void
+    {
+        $mappings = $this->batch->field_mappings ?? [];
+
+        // Sort mappings by position
+        usort($mappings, fn ($a, $b) => ($a['position'] ?? 0) <=> ($b['position'] ?? 0));
+
+        // Define validation fields to append
+        $validationFields = $this->getValidationFieldsToAppend();
+
+        $exportService = app(ExportService::class);
+
+        // Open file for writing
+        $handle = fopen($filePath, 'w');
+        if (! $handle) {
+            throw new \Exception('Could not open export file for writing');
+        }
+
+        // Write header row - original headers + validation headers
+        $headers = [];
+        foreach ($mappings as $mapping) {
+            $headers[] = $mapping['source'] ?? '';
+        }
+        foreach ($validationFields as $field) {
+            $headers[] = $field['header'];
+        }
+        fputcsv($handle, $headers, ',', '"', '');
+
+        // Get address IDs that match the filter
+        $this->batch->setExportPhase(ImportBatch::EXPORT_PHASE_LOADING);
+        $addressIds = $this->getFilteredAddressIds();
+
+        // Set total rows for progress tracking
+        $this->batch->setExportPhase(ImportBatch::EXPORT_PHASE_WRITING, count($addressIds));
+
+        // Process in chunks
+        $rowCount = 0;
+        $chunkSize = 200;
+
+        foreach (array_chunk($addressIds, $chunkSize) as $idChunk) {
+            // Reconnect to ensure fresh connection (prevents timeout between chunks)
+            DB::reconnect();
+
+            // Load addresses - eager load shipViaCodeRecord if transit times enabled
+            $addressQuery = Address::whereIn('id', $idChunk);
+            if ($this->batch->include_transit_times) {
+                $addressQuery->with('shipViaCodeRecord');
+            }
+            $addresses = $addressQuery->get();
+
+            // Load corrections separately
+            $addressIdList = $addresses->pluck('id')->toArray();
+            $corrections = AddressCorrection::whereIn('address_id', $addressIdList)
+                ->with('carrier')
+                ->orderBy('validated_at', 'desc')
+                ->get()
+                ->groupBy('address_id')
+                ->map(fn ($group) => $group->first());
+
+            // Load transit times if batch has them enabled
+            $transitTimes = collect();
+            if ($this->batch->include_transit_times) {
+                $transitTimes = TransitTime::whereIn('address_id', $addressIdList)
+                    ->get()
+                    ->groupBy('address_id');
+            }
+
+            foreach ($addresses as $address) {
+
+                $address->setRelation('latestCorrection', $corrections->get($address->id));
+
+                if ($this->batch->include_transit_times) {
+                    $address->setRelation('transitTimes', $transitTimes->get($address->id, collect()));
+                }
+
+                // Build row: original mapped fields + validation fields
+                $row = [];
+
+                // Original import fields
+                foreach ($mappings as $mapping) {
+                    $target = $mapping['target'] ?? '';
+                    if (empty($target)) {
+                        $row[] = '';
+                    } else {
+                        $row[] = $exportService->getExportFieldValue($address, $target) ?? '';
+                    }
+                }
+
+                // Append validation fields
+                foreach ($validationFields as $field) {
+                    $row[] = $exportService->getFieldValue($address, $field['field']) ?? '';
+                }
+
+                fputcsv($handle, $row, ',', '"', '');
+                $rowCount++;
+            }
+
+            // Update progress after each chunk
+            $this->batch->refresh();
+            $this->batch->incrementExportProgress(count($idChunk));
+
+            // Clear memory
+            unset($addresses, $corrections, $transitTimes);
+            gc_collect_cycles();
+        }
+
+        fclose($handle);
+    }
+
+    /**
+     * Get the validation fields to append based on batch configuration.
+     *
+     * @return array<array{field: string, header: string}>
+     */
+    protected function getValidationFieldsToAppend(): array
+    {
+        // Core validation fields always included
+        $fields = [
+            ['field' => 'corrected_address_line_1', 'header' => 'Corrected Address Line 1'],
+            ['field' => 'corrected_address_line_2', 'header' => 'Corrected Address Line 2'],
+            ['field' => 'corrected_city', 'header' => 'Corrected City'],
+            ['field' => 'corrected_state', 'header' => 'Corrected State'],
+            ['field' => 'corrected_postal_code', 'header' => 'Corrected Postal Code'],
+            ['field' => 'corrected_postal_code_ext', 'header' => 'Corrected ZIP+4'],
+            ['field' => 'validation_status', 'header' => 'Validation Status'],
+            ['field' => 'is_residential', 'header' => 'Is Residential'],
+            ['field' => 'classification', 'header' => 'Classification'],
+            ['field' => 'carrier', 'header' => 'Carrier Used'],
+        ];
+
+        // Add transit time fields if enabled for this batch
+        if ($this->batch->include_transit_times) {
+            $transitFields = [
+                ['field' => 'ship_via_service', 'header' => 'Ship Via Service'],
+                ['field' => 'ship_via_transit_days', 'header' => 'Ship Via Transit Days'],
+                ['field' => 'ship_via_delivery_date', 'header' => 'Ship Via Delivery Date'],
+                ['field' => 'ship_via_meets_deadline', 'header' => 'Ship Via Meets Deadline'],
+                ['field' => 'recommended_service', 'header' => 'Recommended Service'],
+                ['field' => 'estimated_delivery_date', 'header' => 'Estimated Delivery Date'],
+                ['field' => 'can_meet_required_date', 'header' => 'Can Meet Required Date'],
+                ['field' => 'suggested_service', 'header' => 'Suggested Service'],
+                ['field' => 'suggested_delivery_date', 'header' => 'Suggested Delivery Date'],
+                ['field' => 'fastest_service', 'header' => 'Fastest Service'],
+                ['field' => 'fastest_delivery_date', 'header' => 'Fastest Delivery Date'],
+                ['field' => 'distance_miles', 'header' => 'Distance (Miles)'],
+            ];
+
+            $fields = array_merge($fields, $transitFields);
+        }
+
+        return $fields;
     }
 
     /**
@@ -197,9 +355,22 @@ class ProcessExportBatch implements ShouldQueue
         $fields = $template->ordered_fields;
 
         // Check if any transit time fields are requested
-        $needsTransitTimes = collect($fields)->contains(
-            fn ($field) => str_starts_with($field['field'] ?? '', 'transit_')
-        );
+        // Transit-related fields include: transit_*, ship_via_*, fastest_*, distance_miles
+        $needsTransitTimes = collect($fields)->contains(function ($field) {
+            $fieldName = $field['field'] ?? '';
+
+            return str_starts_with($fieldName, 'transit_')
+                || str_starts_with($fieldName, 'ship_via_')
+                || str_starts_with($fieldName, 'fastest_')
+                || $fieldName === 'distance_miles';
+        });
+
+        // Check if ship_via_code fields need the shipViaCodeRecord relation
+        $needsShipViaCode = collect($fields)->contains(function ($field) {
+            $fieldName = $field['field'] ?? '';
+
+            return str_starts_with($fieldName, 'ship_via_');
+        });
 
         // Open file for writing
         $handle = fopen($filePath, 'w');
@@ -217,15 +388,26 @@ class ProcessExportBatch implements ShouldQueue
         }
 
         // Get address IDs that match the filter first
+        $this->batch->setExportPhase(ImportBatch::EXPORT_PHASE_LOADING);
         $addressIds = $this->getFilteredAddressIds();
+
+        // Set total rows for progress tracking
+        $this->batch->setExportPhase(ImportBatch::EXPORT_PHASE_WRITING, count($addressIds));
 
         // Process in chunks
         $rowCount = 0;
         $chunkSize = 200;
 
         foreach (array_chunk($addressIds, $chunkSize) as $idChunk) {
-            // Load addresses without eager loading to avoid ambiguous column issues
-            $addresses = Address::whereIn('id', $idChunk)->get();
+            // Reconnect to ensure fresh connection (prevents timeout between chunks)
+            DB::reconnect();
+
+            // Load addresses - eager load shipViaCodeRecord if needed
+            $addressQuery = Address::whereIn('id', $idChunk);
+            if ($needsShipViaCode) {
+                $addressQuery->with('shipViaCodeRecord');
+            }
+            $addresses = $addressQuery->get();
 
             // Load corrections separately with carrier
             $addressIdList = $addresses->pluck('id')->toArray();
@@ -261,16 +443,16 @@ class ProcessExportBatch implements ShouldQueue
                 $rowCount++;
             }
 
+            // Update progress after each chunk
+            $this->batch->refresh();
+            $this->batch->incrementExportProgress(count($idChunk));
+
+            // Clear memory
             unset($addresses, $corrections, $transitTimes);
             gc_collect_cycles();
         }
 
         fclose($handle);
-
-        Log::info('ProcessExportBatch: Wrote rows', [
-            'batch_id' => $this->batch->id,
-            'rows' => $rowCount,
-        ]);
     }
 
     /**

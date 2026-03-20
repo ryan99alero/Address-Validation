@@ -134,8 +134,14 @@ class ExportService
             'estimated_delivery_date' => $address->estimated_delivery_date?->format('Y-m-d'),
             'can_meet_required_date' => $address->can_meet_required_date === null ? '' : ($address->can_meet_required_date ? 'Yes' : 'No'),
 
-            // Distance
-            'distance_miles' => $this->getDistanceValue($address),
+            // Alternative suggestion when ship_via doesn't meet deadline
+            'suggested_service' => $address->suggested_service,
+            'suggested_delivery_date' => $address->suggested_delivery_date?->format('Y-m-d'),
+
+            // Distance - use stored value first, fallback to transit times
+            'distance_miles' => $address->distance_miles !== null
+                ? number_format((float) $address->distance_miles, 1)
+                : $this->getDistanceValue($address),
 
             // Extra fields (pass-through)
             'extra_1' => $address->extra_1,
@@ -165,59 +171,78 @@ class ExportService
 
     /**
      * Get ship via code field value.
+     * Prefers stored calculated values, falls back to on-the-fly calculation.
      */
     protected function getShipViaFieldValue(Address $address, string $field): ?string
     {
-        // Load ship via code record if needed
-        if (! $address->relationLoaded('shipViaCodeRecord')) {
-            $address->load('shipViaCodeRecord');
-        }
-
-        $shipViaCode = $address->shipViaCodeRecord;
-
-        // Load transit times if needed for delivery date
-        if (! $address->relationLoaded('transitTimes')) {
-            $address->load('transitTimes');
-        }
-
         return match ($field) {
             'ship_via_code' => $address->ship_via_code,
-            'ship_via_service' => $shipViaCode?->service_name,
-            'ship_via_transit_days' => $this->getShipViaTransitDays($address),
-            'ship_via_delivery_date' => $this->getShipViaDeliveryDate($address),
+            // Use stored values first (populated by ShippingRecommendationService)
+            'ship_via_service' => $address->ship_via_service_name
+                ?? $this->calculateShipViaService($address),
+            'ship_via_transit_days' => $address->ship_via_transit_days
+                ?? $this->calculateShipViaTransitDays($address),
+            'ship_via_delivery_date' => $address->ship_via_delivery_date?->format('Y-m-d')
+                ?? $this->calculateShipViaDeliveryDate($address),
+            'ship_via_meets_deadline' => $address->ship_via_meets_deadline === null
+                ? '' : ($address->ship_via_meets_deadline ? 'Yes' : 'No'),
             default => null,
         };
     }
 
     /**
-     * Get transit days for the address's ship via code service.
+     * Calculate ship via service name on-the-fly (fallback).
      */
-    protected function getShipViaTransitDays(Address $address): ?string
+    protected function calculateShipViaService(Address $address): ?string
     {
-        $shipViaCode = $address->shipViaCodeRecord;
+        if (! $address->relationLoaded('shipViaCodeRecord')) {
+            $address->load('shipViaCodeRecord');
+        }
 
+        return $address->shipViaCodeRecord?->service_name;
+    }
+
+    /**
+     * Calculate ship via transit days on-the-fly (fallback).
+     */
+    protected function calculateShipViaTransitDays(Address $address): ?string
+    {
+        if (! $address->relationLoaded('shipViaCodeRecord')) {
+            $address->load('shipViaCodeRecord');
+        }
+
+        $shipViaCode = $address->shipViaCodeRecord;
         if (! $shipViaCode || ! $shipViaCode->service_type) {
             return null;
         }
 
-        // Find transit time matching the ship via code's service type
+        if (! $address->relationLoaded('transitTimes')) {
+            $address->load('transitTimes');
+        }
+
         $transitTime = $address->transitTimes->firstWhere('service_type', $shipViaCode->service_type);
 
         return $transitTime?->transit_range;
     }
 
     /**
-     * Get delivery date for the address's ship via code service.
+     * Calculate ship via delivery date on-the-fly (fallback).
      */
-    protected function getShipViaDeliveryDate(Address $address): ?string
+    protected function calculateShipViaDeliveryDate(Address $address): ?string
     {
-        $shipViaCode = $address->shipViaCodeRecord;
+        if (! $address->relationLoaded('shipViaCodeRecord')) {
+            $address->load('shipViaCodeRecord');
+        }
 
+        $shipViaCode = $address->shipViaCodeRecord;
         if (! $shipViaCode || ! $shipViaCode->service_type) {
             return null;
         }
 
-        // Find transit time matching the ship via code's service type
+        if (! $address->relationLoaded('transitTimes')) {
+            $address->load('transitTimes');
+        }
+
         $transitTime = $address->transitTimes->firstWhere('service_type', $shipViaCode->service_type);
 
         return $transitTime?->delivery_date?->format('Y-m-d');
@@ -225,21 +250,42 @@ class ExportService
 
     /**
      * Get fastest service field value.
+     * Prefers stored values, falls back to on-the-fly calculation.
      */
     protected function getFastestServiceFieldValue(Address $address, string $field): ?string
     {
-        // Load transit times if needed
+        return match ($field) {
+            // Use stored values first (populated by ShippingRecommendationService)
+            'fastest_service' => $address->fastest_service
+                ?? $this->calculateFastestService($address),
+            'fastest_delivery_date' => $address->fastest_delivery_date?->format('Y-m-d')
+                ?? $this->calculateFastestDeliveryDate($address),
+            default => null,
+        };
+    }
+
+    /**
+     * Calculate fastest service on-the-fly (fallback).
+     */
+    protected function calculateFastestService(Address $address): ?string
+    {
         if (! $address->relationLoaded('transitTimes')) {
             $address->load('transitTimes');
         }
 
-        $fastestService = $this->getFastestService($address->transitTimes);
+        return $this->getFastestService($address->transitTimes)?->service_label;
+    }
 
-        return match ($field) {
-            'fastest_service' => $fastestService?->service_label,
-            'fastest_delivery_date' => $fastestService?->delivery_date?->format('Y-m-d'),
-            default => null,
-        };
+    /**
+     * Calculate fastest delivery date on-the-fly (fallback).
+     */
+    protected function calculateFastestDeliveryDate(Address $address): ?string
+    {
+        if (! $address->relationLoaded('transitTimes')) {
+            $address->load('transitTimes');
+        }
+
+        return $this->getFastestService($address->transitTimes)?->delivery_date?->format('Y-m-d');
     }
 
     /**

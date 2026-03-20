@@ -32,7 +32,18 @@ class ImportBatch extends Model
 
     public const PHASE_TRANSIT_TIMES = 'fetching_transit_times';
 
+    public const PHASE_RECOMMENDATIONS = 'calculating_recommendations';
+
     public const PHASE_COMPLETE = 'complete';
+
+    // Export phases
+    public const EXPORT_PHASE_PREPARING = 'preparing';
+
+    public const EXPORT_PHASE_LOADING = 'loading_data';
+
+    public const EXPORT_PHASE_WRITING = 'writing_rows';
+
+    public const EXPORT_PHASE_COMPLETE = 'complete';
 
     protected $fillable = [
         'name',
@@ -57,6 +68,9 @@ class ImportBatch extends Model
         'error_file_path',
         'export_file_path',
         'export_status',
+        'export_total_rows',
+        'export_processed_rows',
+        'export_phase',
         'export_completed_at',
         'imported_by',
         'started_at',
@@ -76,6 +90,8 @@ class ImportBatch extends Model
             'validated_rows' => 'integer',
             'transit_time_rows' => 'integer',
             'total_for_transit' => 'integer',
+            'export_total_rows' => 'integer',
+            'export_processed_rows' => 'integer',
             'field_mappings' => 'array',
             'include_transit_times' => 'boolean',
             'started_at' => 'datetime',
@@ -178,6 +194,7 @@ class ImportBatch extends Model
             self::PHASE_IMPORTING => 'Importing Records',
             self::PHASE_VALIDATING => 'Validating Addresses',
             self::PHASE_TRANSIT_TIMES => 'Fetching Transit Times',
+            self::PHASE_RECOMMENDATIONS => 'Calculating Recommendations',
             self::PHASE_COMPLETE => 'Complete',
             default => 'Processing',
         };
@@ -198,6 +215,8 @@ class ImportBatch extends Model
             self::PHASE_TRANSIT_TIMES => $this->total_for_transit > 0
                 ? (int) (($this->transit_time_rows / $this->total_for_transit) * 100)
                 : 0,
+            // Recommendations phase shows 50% (quick pass, no detailed tracking)
+            self::PHASE_RECOMMENDATIONS => 50,
             self::PHASE_COMPLETE => 100,
             default => 0,
         };
@@ -208,17 +227,19 @@ class ImportBatch extends Model
      */
     public function getOverallProgress(): int
     {
-        // Weight: Import 20%, Validation 50%, Transit Times 30%
+        // Weight: Import 15%, Validation 45%, Transit Times 30%, Recommendations 10%
         $includeTransit = $this->include_transit_times;
 
         if ($includeTransit) {
-            $importWeight = 20;
-            $validationWeight = 50;
+            $importWeight = 15;
+            $validationWeight = 45;
             $transitWeight = 30;
+            $recommendationsWeight = 10;
         } else {
             $importWeight = 30;
             $validationWeight = 70;
             $transitWeight = 0;
+            $recommendationsWeight = 0;
         }
 
         $importProgress = $this->total_rows > 0
@@ -232,11 +253,59 @@ class ImportBatch extends Model
         $transitProgress = 0;
         if ($includeTransit && $this->total_for_transit > 0) {
             $transitProgress = ($this->transit_time_rows / $this->total_for_transit) * $transitWeight;
-        } elseif ($includeTransit && $this->processing_phase === self::PHASE_COMPLETE) {
+        } elseif ($includeTransit && in_array($this->processing_phase, [self::PHASE_RECOMMENDATIONS, self::PHASE_COMPLETE])) {
+            // Transit times done if we're in recommendations or complete phase
             $transitProgress = $transitWeight;
         }
 
-        return (int) min(100, $importProgress + $validationProgress + $transitProgress);
+        // Recommendations progress
+        $recommendationsProgress = 0;
+        if ($includeTransit) {
+            if ($this->processing_phase === self::PHASE_COMPLETE) {
+                $recommendationsProgress = $recommendationsWeight;
+            } elseif ($this->processing_phase === self::PHASE_RECOMMENDATIONS) {
+                // Show 50% of recommendations weight while in progress
+                $recommendationsProgress = $recommendationsWeight * 0.5;
+            }
+        }
+
+        return (int) min(100, $importProgress + $validationProgress + $transitProgress + $recommendationsProgress);
+    }
+
+    /**
+     * Get the import phase percentage (0-100).
+     */
+    public function getImportPhasePercent(): int
+    {
+        if ($this->total_rows === 0) {
+            return 0;
+        }
+
+        return (int) min(100, ($this->processed_rows / $this->total_rows) * 100);
+    }
+
+    /**
+     * Get the validation phase percentage (0-100).
+     */
+    public function getValidationPhasePercent(): int
+    {
+        if (($this->successful_rows ?? 0) === 0) {
+            return 0;
+        }
+
+        return (int) min(100, (($this->validated_rows ?? 0) / $this->successful_rows) * 100);
+    }
+
+    /**
+     * Get the transit times phase percentage (0-100).
+     */
+    public function getTransitPhasePercent(): int
+    {
+        if (($this->total_for_transit ?? 0) === 0) {
+            return 0;
+        }
+
+        return (int) min(100, (($this->transit_time_rows ?? 0) / $this->total_for_transit) * 100);
     }
 
     /**
@@ -355,5 +424,86 @@ class ImportBatch extends Model
     public function scopeFailed($query)
     {
         return $query->where('status', self::STATUS_FAILED);
+    }
+
+    // Export progress methods
+
+    /**
+     * Get export progress percentage (0-100).
+     */
+    public function getExportProgressPercent(): int
+    {
+        if (($this->export_total_rows ?? 0) === 0) {
+            return 0;
+        }
+
+        return (int) min(100, (($this->export_processed_rows ?? 0) / $this->export_total_rows) * 100);
+    }
+
+    /**
+     * Get the export phase label.
+     */
+    public function getExportPhaseLabel(): string
+    {
+        return match ($this->export_phase) {
+            self::EXPORT_PHASE_PREPARING => 'Preparing Export',
+            self::EXPORT_PHASE_LOADING => 'Loading Data',
+            self::EXPORT_PHASE_WRITING => 'Writing Rows',
+            self::EXPORT_PHASE_COMPLETE => 'Export Complete',
+            default => 'Processing',
+        };
+    }
+
+    /**
+     * Check if export is in progress.
+     */
+    public function isExporting(): bool
+    {
+        return $this->export_status === 'processing';
+    }
+
+    /**
+     * Check if export completed successfully.
+     */
+    public function isExportComplete(): bool
+    {
+        return $this->export_status === 'completed';
+    }
+
+    /**
+     * Set export phase and optionally update progress.
+     */
+    public function setExportPhase(string $phase, ?int $totalRows = null): void
+    {
+        $data = ['export_phase' => $phase];
+
+        if ($totalRows !== null) {
+            $data['export_total_rows'] = $totalRows;
+        }
+
+        $this->update($data);
+    }
+
+    /**
+     * Increment export progress.
+     */
+    public function incrementExportProgress(int $count = 1): void
+    {
+        $this->increment('export_processed_rows', $count);
+    }
+
+    /**
+     * Reset export progress fields for a new export.
+     */
+    public function resetExportProgress(): void
+    {
+        $this->update([
+            'export_status' => 'processing',
+            'export_phase' => self::EXPORT_PHASE_PREPARING,
+            'export_total_rows' => null,
+            'export_processed_rows' => 0,
+            'export_file_path' => null,
+            'export_completed_at' => null,
+        ]);
     }
 }

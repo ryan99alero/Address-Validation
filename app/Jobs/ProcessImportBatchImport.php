@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Address;
 use App\Models\ImportBatch;
 use App\Models\ShipViaCode;
+use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -78,24 +79,35 @@ class ProcessImportBatchImport implements ShouldQueue
             // Update total_rows to actual count (listWorksheetInfo can be inaccurate)
             $actualTotalRows = $successCount + $failedCount;
 
-            $this->batch->update([
-                'total_rows' => $actualTotalRows,
-                'processed_rows' => $actualTotalRows,
-                'successful_rows' => $successCount,
-                'failed_rows' => $failedCount,
-                'status' => ImportBatch::STATUS_COMPLETED,
-                'completed_at' => now(),
-            ]);
-
             Log::info('ProcessImportBatchImport: Completed', [
                 'batch_id' => $this->batch->id,
                 'successful' => $successCount,
                 'failed' => $failedCount,
             ]);
 
-            // Auto-start validation if enabled
+            // Auto-start validation if enabled and we have successful rows
             if ($this->autoValidate && $successCount > 0) {
+                // Keep status as PROCESSING since validation will continue
+                $this->batch->update([
+                    'total_rows' => $actualTotalRows,
+                    'processed_rows' => $actualTotalRows,
+                    'successful_rows' => $successCount,
+                    'failed_rows' => $failedCount,
+                    'processing_phase' => ImportBatch::PHASE_VALIDATING,
+                ]);
+
                 ProcessImportBatchValidation::dispatch($this->batch);
+            } else {
+                // No validation - mark as completed
+                $this->batch->update([
+                    'total_rows' => $actualTotalRows,
+                    'processed_rows' => $actualTotalRows,
+                    'successful_rows' => $successCount,
+                    'failed_rows' => $failedCount,
+                    'status' => ImportBatch::STATUS_COMPLETED,
+                    'processing_phase' => ImportBatch::PHASE_COMPLETE,
+                    'completed_at' => now(),
+                ]);
             }
 
         } catch (\Exception $e) {
@@ -235,6 +247,9 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
                     }
                 }
 
+                // Sanitize date fields - handle Excel formulas and invalid values
+                $addressData = $this->sanitizeDateFields($addressData);
+
                 // Only create if we have address_line_1
                 if (! empty($addressData['address_line_1'])) {
                     // Use firstOrCreate to prevent duplicates if job retries
@@ -341,6 +356,77 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
                     ? trim($addressData['address_line_2']).', '.$unit
                     : $unit;
             }
+        }
+
+        return $addressData;
+    }
+
+    /**
+     * Sanitize date fields to handle Excel formulas and invalid values.
+     *
+     * Excel formulas (e.g., =AU358+6) should be skipped rather than throwing errors.
+     * Also handles Excel serial dates and various date string formats.
+     */
+    protected function sanitizeDateFields(array $addressData): array
+    {
+        $dateFields = ['requested_ship_date', 'required_on_site_date'];
+
+        foreach ($dateFields as $field) {
+            if (! isset($addressData[$field]) || $addressData[$field] === null || $addressData[$field] === '') {
+                unset($addressData[$field]);
+
+                continue;
+            }
+
+            $value = $addressData[$field];
+
+            // Skip Excel formulas (start with =)
+            if (is_string($value) && str_starts_with($value, '=')) {
+                unset($addressData[$field]);
+
+                continue;
+            }
+
+            // Handle numeric values (Excel serial dates)
+            if (is_numeric($value)) {
+                try {
+                    // Excel serial date: days since 1900-01-01 (with a bug for 1900 leap year)
+                    $excelBase = Carbon::createFromDate(1899, 12, 30);
+                    $date = $excelBase->copy()->addDays((int) $value);
+
+                    // Sanity check: date should be reasonable (1900-2100)
+                    if ($date->year >= 1900 && $date->year <= 2100) {
+                        $addressData[$field] = $date->toDateString();
+                    } else {
+                        unset($addressData[$field]);
+                    }
+                } catch (\Exception $e) {
+                    unset($addressData[$field]);
+                }
+
+                continue;
+            }
+
+            // Try to parse string dates
+            if (is_string($value)) {
+                try {
+                    $date = Carbon::parse($value);
+                    // Sanity check
+                    if ($date->year >= 1900 && $date->year <= 2100) {
+                        $addressData[$field] = $date->toDateString();
+                    } else {
+                        unset($addressData[$field]);
+                    }
+                } catch (\Exception $e) {
+                    // Can't parse - skip this field
+                    unset($addressData[$field]);
+                }
+
+                continue;
+            }
+
+            // If we get here with an unexpected type, skip it
+            unset($addressData[$field]);
         }
 
         return $addressData;

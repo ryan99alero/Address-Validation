@@ -17,6 +17,31 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Auto-Spawn Queue Workers
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the application will automatically spawn queue workers
+    | when jobs are dispatched. Workers use --stop-when-empty so they
+    | terminate when the queue is empty. Disable for production environments
+    | that use dedicated queue workers (e.g., Supervisor, Horizon).
+    |
+    */
+
+    'auto_spawn_workers' => env('QUEUE_AUTO_SPAWN_WORKERS', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Maximum Auto-Spawned Workers
+    |--------------------------------------------------------------------------
+    |
+    | The maximum number of workers that can be auto-spawned at once.
+    |
+    */
+
+    'max_auto_workers' => env('QUEUE_MAX_AUTO_WORKERS', 2),
+
+    /*
+    |--------------------------------------------------------------------------
     | Queue Connections
     |--------------------------------------------------------------------------
     |

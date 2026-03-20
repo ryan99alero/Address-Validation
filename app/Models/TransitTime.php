@@ -146,18 +146,26 @@ class TransitTime extends Model
             return null;
         }
 
-        // Use address's requested_ship_date, or calculated_at date, or today
-        $shipDate = $this->address?->requested_ship_date
-            ?? $this->calculated_at?->startOfDay()
-            ?? now()->startOfDay();
+        // Use address's requested_ship_date ONLY if already loaded (avoid lazy load)
+        // Otherwise use calculated_at date or today
+        $shipDate = null;
+        if ($this->relationLoaded('address') && $this->address?->requested_ship_date) {
+            $shipDate = $this->address->requested_ship_date;
+        }
+        $shipDate = $shipDate ?? $this->calculated_at?->startOfDay() ?? now()->startOfDay();
 
         // Calculate business days (excluding weekends)
         $days = 0;
         $current = $shipDate->copy();
         $deliveryDate = $this->delivery_date->startOfDay();
 
-        while ($current->lt($deliveryDate)) {
+        // Safety limit to prevent infinite loops (max 365 days)
+        $iterations = 0;
+        $maxIterations = 365;
+
+        while ($current->lt($deliveryDate) && $iterations < $maxIterations) {
             $current->addDay();
+            $iterations++;
             // Only count weekdays
             if (! $current->isWeekend()) {
                 $days++;

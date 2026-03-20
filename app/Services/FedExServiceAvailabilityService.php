@@ -183,8 +183,17 @@ class FedExServiceAvailabilityService
         $destinationPostalCode = $correction?->corrected_postal_code ?? $address->postal_code;
         $destinationCountryCode = $correction?->corrected_country_code ?? $address->country_code ?? 'US';
 
+        // Use requested ship date or today
+        $shipDate = $address->requested_ship_date ?? now();
+
+        // Ensure ship date is not in the past
+        if ($shipDate->isPast() && ! $shipDate->isToday()) {
+            $shipDate = now();
+        }
+
         return [
             'requestedShipment' => [
+                'shipDatestamp' => $shipDate->format('Y-m-d'),
                 'shipper' => [
                     'address' => $shipperAddress,
                 ],
@@ -223,39 +232,11 @@ class FedExServiceAvailabilityService
         $accessToken = $this->getAccessToken();
         $baseUrl = $this->carrier->getBaseUrl();
 
-        // Use corrected address if available, otherwise original
-        $correction = $address->latestCorrection;
-        $destinationPostalCode = $correction?->corrected_postal_code ?? $address->postal_code;
-        $destinationCountryCode = $correction?->corrected_country_code ?? $address->country_code ?? 'US';
-
         // Build shipper address - use full company address if available
         $shipperAddress = $this->buildShipperAddress($originPostalCode, $originCountryCode);
 
-        $payload = [
-            'requestedShipment' => [
-                'shipper' => [
-                    'address' => $shipperAddress,
-                ],
-                'recipients' => [
-                    [
-                        'address' => [
-                            'postalCode' => $destinationPostalCode,
-                            'countryCode' => $destinationCountryCode,
-                        ],
-                    ],
-                ],
-                'packagingType' => 'YOUR_PACKAGING',
-                'requestedPackageLineItems' => [
-                    [
-                        'weight' => [
-                            'units' => 'LB',
-                            'value' => '1',
-                        ],
-                    ],
-                ],
-            ],
-            'carrierCodes' => ['FDXE', 'FDXG'],
-        ];
+        // Use shared payload builder
+        $payload = $this->buildPayloadForAddress($address, $shipperAddress);
 
         $response = Http::withToken($accessToken)
             ->timeout($this->carrier->timeout_seconds)

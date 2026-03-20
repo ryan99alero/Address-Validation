@@ -6,6 +6,7 @@ use App\Models\Carrier;
 use App\Models\ImportBatch;
 use App\Services\AddressValidationService;
 use App\Services\FedExServiceAvailabilityService;
+use App\Services\ShippingRecommendationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -137,8 +138,10 @@ class ProcessImportBatchValidation implements ShouldQueue
                     // Continue to mark batch completed even if transit times fail
                 }
 
-                // Update service recommendations for addresses with required delivery dates
+                // Update service recommendations for addresses with transit times
                 try {
+                    // Update phase to recommendations
+                    $this->batch->update(['processing_phase' => ImportBatch::PHASE_RECOMMENDATIONS]);
                     $this->updateServiceRecommendations();
                 } catch (\Exception $e) {
                     Log::error('ProcessImportBatchValidation: Service recommendations failed', [
@@ -256,99 +259,54 @@ class ProcessImportBatchValidation implements ShouldQueue
     }
 
     /**
-     * Update service recommendations based on required delivery dates.
-     * Finds the most economical (cheapest) service that can meet each address's delivery requirement.
+     * Update service recommendations based on available data.
+     *
+     * Smart logic:
+     * - If ship_via present: Calculate transit info for that service
+     * - If dates present (no ship_via): Recommend best service to meet deadline
+     * - If both present: Validate ship_via meets deadline, suggest alternative if not
+     * - Always: Calculate fastest service, distance, and other calculable fields
      */
     protected function updateServiceRecommendations(): void
     {
-        // Service types ordered by cost (cheapest to most expensive)
-        // Ground services are cheapest, then express saver, then overnight services
-        $serviceEconomyOrder = [
-            'FEDEX_GROUND' => 1,
-            'GROUND_HOME_DELIVERY' => 1,
-            'SMART_POST' => 2,
-            'FEDEX_EXPRESS_SAVER' => 3,
-            'FEDEX_2_DAY' => 4,
-            'FEDEX_2_DAY_AM' => 5,
-            'STANDARD_OVERNIGHT' => 6,
-            'PRIORITY_OVERNIGHT' => 7,
-            'FIRST_OVERNIGHT' => 8,
-        ];
+        $recommendationService = new ShippingRecommendationService;
 
-        // Get addresses with required on-site dates and transit times
-        $addressesWithRequirements = $this->batch->addresses()
-            ->whereNotNull('required_on_site_date')
+        // Get ALL addresses with transit times
+        // Include shipViaCodeRecord for ship_via analysis
+        $addressesWithTransitTimes = $this->batch->addresses()
             ->whereHas('transitTimes')
-            ->with('transitTimes')
+            ->with(['transitTimes', 'shipViaCodeRecord'])
             ->get();
 
-        if ($addressesWithRequirements->isEmpty()) {
-            Log::info('ProcessImportBatchValidation: No addresses with required on-site dates', [
+        if ($addressesWithTransitTimes->isEmpty()) {
+            Log::info('ProcessImportBatchValidation: No addresses with transit times', [
                 'batch_id' => $this->batch->id,
             ]);
 
             return;
         }
 
+        // Count addresses with different data combinations
+        $withShipVia = $addressesWithTransitTimes->filter(fn ($a) => ! empty($a->ship_via_code))->count();
+        $withDates = $addressesWithTransitTimes->filter(fn ($a) => $a->required_on_site_date !== null)->count();
+        $withBoth = $addressesWithTransitTimes->filter(fn ($a) => ! empty($a->ship_via_code) && $a->required_on_site_date !== null)->count();
+
         Log::info('ProcessImportBatchValidation: Updating service recommendations', [
             'batch_id' => $this->batch->id,
-            'addresses_count' => $addressesWithRequirements->count(),
+            'addresses_count' => $addressesWithTransitTimes->count(),
+            'with_ship_via' => $withShipVia,
+            'with_dates' => $withDates,
+            'with_both' => $withBoth,
         ]);
 
-        $updated = 0;
-        $cannotMeet = 0;
-
-        foreach ($addressesWithRequirements as $address) {
-            $requiredDate = $address->required_on_site_date;
-            $transitTimes = $address->transitTimes;
-
-            if ($transitTimes->isEmpty()) {
-                continue;
-            }
-
-            // Find services that can meet the required date, sorted by economy
-            $eligibleServices = $transitTimes
-                ->filter(function ($transitTime) use ($requiredDate) {
-                    // Service is eligible if delivery_date is on or before required date
-                    return $transitTime->delivery_date &&
-                           $transitTime->delivery_date->lte($requiredDate);
-                })
-                ->sortBy(function ($transitTime) use ($serviceEconomyOrder) {
-                    // Sort by economy (lowest number = cheapest)
-                    return $serviceEconomyOrder[$transitTime->service_type] ?? 999;
-                });
-
-            if ($eligibleServices->isNotEmpty()) {
-                // Pick the most economical service that meets the requirement
-                $recommendedService = $eligibleServices->first();
-
-                $address->update([
-                    'recommended_service' => $recommendedService->service_label,
-                    'estimated_delivery_date' => $recommendedService->delivery_date,
-                    'can_meet_required_date' => true,
-                ]);
-                $updated++;
-            } else {
-                // No service can meet the required date - recommend the fastest available
-                $fastestService = $transitTimes
-                    ->sortBy(function ($transitTime) {
-                        return $transitTime->delivery_date ?? now()->addYears(10);
-                    })
-                    ->first();
-
-                $address->update([
-                    'recommended_service' => $fastestService?->service_label,
-                    'estimated_delivery_date' => $fastestService?->delivery_date,
-                    'can_meet_required_date' => false,
-                ]);
-                $cannotMeet++;
-            }
-        }
+        $result = $recommendationService->calculateRecommendationsBatch($addressesWithTransitTimes);
 
         Log::info('ProcessImportBatchValidation: Service recommendations completed', [
             'batch_id' => $this->batch->id,
-            'updated' => $updated,
-            'cannot_meet_required' => $cannotMeet,
+            'processed' => $result['processed'],
+            'with_recommendations' => $result['with_recommendations'],
+            'with_ship_via' => $result['with_ship_via'],
+            'with_suggestions' => $result['with_suggestions'],
         ]);
     }
 

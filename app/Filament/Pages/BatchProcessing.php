@@ -90,7 +90,23 @@ class BatchProcessing extends Page implements HasSchemas
         ]);
         $this->exportForm->fill([]);
 
-        // Check for active batch that's still being validated
+        // Check if a specific batch was requested via query parameter
+        $requestedBatchId = request()->query('batch');
+        if ($requestedBatchId) {
+            $requestedBatch = ImportBatch::query()
+                ->where('id', $requestedBatchId)
+                ->where('imported_by', auth()->id())
+                ->first();
+
+            if ($requestedBatch) {
+                $this->batch = $requestedBatch;
+                $this->importStep = 3;
+
+                return;
+            }
+        }
+
+        // Check for active batch that's still being processed
         $activeBatch = ImportBatch::query()
             ->where('imported_by', auth()->id())
             ->where(function ($query) {
@@ -209,7 +225,10 @@ class BatchProcessing extends Page implements HasSchemas
                         Select::make('template_id')
                             ->label('Export Template')
                             ->options(function () {
-                                $options = ['_import_mapping' => '📋 Use Import Field Mapping (Same as Import)'];
+                                $options = [
+                                    '_import_mapping' => '📋 Use Import Field Mapping (Same as Import)',
+                                    '_import_with_validation' => '📋 Use Original Import + Add Validation Fields',
+                                ];
 
                                 $templates = ExportTemplate::query()
                                     ->orderBy('name')
@@ -227,7 +246,7 @@ class BatchProcessing extends Page implements HasSchemas
                             })
                             ->searchable()
                             ->default('_import_mapping')
-                            ->helperText('Use import mapping for same format, or select a custom template'),
+                            ->helperText('Use import mapping for same format, or add validation fields to original'),
 
                         Select::make('filter_status')
                             ->label('Filter by Validation Status')
@@ -626,11 +645,12 @@ class BatchProcessing extends Page implements HasSchemas
             return;
         }
 
-        // Check if using import mapping or a custom template
+        // Check if using import mapping, import with validation, or a custom template
         $templateId = $data['template_id'] ?? '_import_mapping';
         $useImportMapping = $templateId === '_import_mapping';
+        $useImportWithValidation = $templateId === '_import_with_validation';
 
-        if (! $useImportMapping) {
+        if (! $useImportMapping && ! $useImportWithValidation) {
             $template = ExportTemplate::find($templateId);
             if (! $template) {
                 Notification::make()
@@ -664,6 +684,7 @@ class BatchProcessing extends Page implements HasSchemas
         Log::info('BatchProcessing: Dispatching export job', [
             'batch_id' => $batch->id,
             'use_import_mapping' => $useImportMapping,
+            'use_import_with_validation' => $useImportWithValidation,
             'filter_status' => $filterStatus,
             'sort_by' => $sortBy,
         ]);
@@ -671,11 +692,12 @@ class BatchProcessing extends Page implements HasSchemas
         // Dispatch background job
         ProcessExportBatch::dispatch(
             $batch,
-            $useImportMapping ? null : (int) $templateId,
+            ($useImportMapping || $useImportWithValidation) ? null : (int) $templateId,
             $useImportMapping,
             $filterStatus,
             $filename,
-            $sortBy
+            $sortBy,
+            $useImportWithValidation
         );
 
         Notification::make()

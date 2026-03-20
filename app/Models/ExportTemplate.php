@@ -102,11 +102,12 @@ class ExportTemplate extends Model
             'carrier' => 'Carrier Used',
             'validated_at' => 'Validated At',
 
-            // Ship Via Code Fields (based on their specified service)
+            // Ship Via Code Fields (stored/calculated from selected service)
             'ship_via_code' => 'Ship Via Code (Original)',
             'ship_via_service' => 'Ship Via Service Name',
             'ship_via_transit_days' => 'Ship Via Transit Days',
             'ship_via_delivery_date' => 'Ship Via Delivery Date',
+            'ship_via_meets_deadline' => 'Ship Via Meets Deadline',
 
             // Ship Dates & Service Recommendation
             'requested_ship_date' => 'Requested Ship Date',
@@ -114,6 +115,10 @@ class ExportTemplate extends Model
             'recommended_service' => 'Recommended Service',
             'estimated_delivery_date' => 'Estimated Delivery Date',
             'can_meet_required_date' => 'Can Meet Required Date',
+
+            // Alternative suggestion when ship_via doesn't meet deadline
+            'suggested_service' => 'Suggested Service (Alternative)',
+            'suggested_delivery_date' => 'Suggested Delivery Date',
 
             // Fastest Available Service
             'fastest_service' => 'Fastest Service Available',

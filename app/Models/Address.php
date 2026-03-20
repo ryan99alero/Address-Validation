@@ -32,6 +32,11 @@ class Address extends Model
             'required_on_site_date' => 'date',
             'estimated_delivery_date' => 'date',
             'can_meet_required_date' => 'boolean',
+            'fastest_delivery_date' => 'date',
+            'ship_via_delivery_date' => 'date',
+            'ship_via_meets_deadline' => 'boolean',
+            'suggested_delivery_date' => 'date',
+            'distance_miles' => 'decimal:2',
         ];
     }
 

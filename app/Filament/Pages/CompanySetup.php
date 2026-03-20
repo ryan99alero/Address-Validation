@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Models\CompanySetting;
 use App\Services\DynamicFieldService;
 use BackedEnum;
+use Carbon\Carbon;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -14,6 +15,8 @@ use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
 class CompanySetup extends Page implements HasSchemas
@@ -197,5 +200,36 @@ class CompanySetup extends Page implements HasSchemas
             ...$data,
             'current_extra_field_count' => $dynamicFieldService->getCurrentExtraFieldCount(),
         ]);
+    }
+
+    /**
+     * Get currently active/logged-in users from database sessions.
+     * Considers users active if they had activity within the session lifetime.
+     *
+     * @return Collection<int, object>
+     */
+    public function getActiveUsers(): Collection
+    {
+        $sessionLifetime = config('session.lifetime', 120);
+        $cutoff = Carbon::now()->subMinutes($sessionLifetime)->getTimestamp();
+
+        return DB::table('sessions')
+            ->join('users', 'sessions.user_id', '=', 'users.id')
+            ->where('sessions.last_activity', '>=', $cutoff)
+            ->whereNotNull('sessions.user_id')
+            ->select([
+                'users.id',
+                'users.name',
+                'users.email',
+                'sessions.ip_address',
+                'sessions.last_activity',
+            ])
+            ->orderByDesc('sessions.last_activity')
+            ->get()
+            ->map(function ($user) {
+                $user->last_active = Carbon::createFromTimestamp($user->last_activity)->diffForHumans();
+
+                return $user;
+            });
     }
 }
