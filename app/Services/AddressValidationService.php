@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\Address;
-use App\Models\AddressCorrection;
 use App\Models\Carrier;
 use App\Services\Carriers\CarrierInterface;
 use App\Services\Carriers\FedExCarrier;
@@ -50,7 +49,7 @@ class AddressValidationService
     /**
      * Validate a single address using the specified carrier.
      */
-    public function validateAddress(Address $address, string $carrierSlug): AddressCorrection
+    public function validateAddress(Address $address, string $carrierSlug): Address
     {
         $service = $this->getCarrierService($carrierSlug);
 
@@ -61,7 +60,7 @@ class AddressValidationService
      * Validate multiple addresses using the specified carrier.
      *
      * @param  array<Address>  $addresses
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     public function validateBatch(array $addresses, string $carrierSlug): array
     {
@@ -94,7 +93,7 @@ class AddressValidationService
      * Validate multiple addresses concurrently.
      *
      * @param  array<Address>  $addresses
-     * @return array<array{address_id: int, success: bool, correction: ?AddressCorrection, error: ?string}>
+     * @return array<array{address_id: int, success: bool, address: ?Address, error: ?string}>
      */
     public function validateAddressesConcurrently(array $addresses, string $carrierSlug): array
     {
@@ -109,18 +108,18 @@ class AddressValidationService
         $results = [];
         foreach ($addresses as $address) {
             try {
-                $correction = $service->validateAddress($address);
+                $validatedAddress = $service->validateAddress($address);
                 $results[] = [
                     'address_id' => $address->id,
                     'success' => true,
-                    'correction' => $correction,
+                    'address' => $validatedAddress,
                     'error' => null,
                 ];
             } catch (Exception $e) {
                 $results[] = [
                     'address_id' => $address->id,
                     'success' => false,
-                    'correction' => null,
+                    'address' => null,
                     'error' => $e->getMessage(),
                 ];
             }

@@ -4,7 +4,6 @@ namespace App\Filament\Resources\Addresses\Pages;
 
 use App\Filament\Resources\Addresses\AddressResource;
 use App\Models\Address;
-use App\Models\AddressCorrection;
 use App\Models\Carrier;
 use App\Services\AddressValidationService;
 use Filament\Actions\Action;
@@ -28,22 +27,24 @@ class ViewAddress extends ViewRecord
                 Section::make('Original Address')
                     ->columns(2)
                     ->schema([
-                        TextEntry::make('name')
+                        TextEntry::make('input_name')
                             ->label('Recipient Name'),
-                        TextEntry::make('company')
+                        TextEntry::make('input_company')
                             ->label('Company'),
-                        TextEntry::make('address_line_1')
+                        TextEntry::make('input_address_1')
                             ->label('Address Line 1')
                             ->columnSpanFull(),
-                        TextEntry::make('address_line_2')
+                        TextEntry::make('input_address_2')
                             ->label('Address Line 2')
                             ->columnSpanFull()
-                            ->hidden(fn (Address $record): bool => empty($record->address_line_2)),
-                        TextEntry::make('city'),
-                        TextEntry::make('state'),
-                        TextEntry::make('postal_code')
+                            ->hidden(fn (Address $record): bool => empty($record->input_address_2)),
+                        TextEntry::make('input_city')
+                            ->label('City'),
+                        TextEntry::make('input_state')
+                            ->label('State'),
+                        TextEntry::make('input_postal')
                             ->label('ZIP/Postal Code'),
-                        TextEntry::make('country_code')
+                        TextEntry::make('input_country')
                             ->label('Country'),
                         TextEntry::make('external_reference')
                             ->label('External Reference')
@@ -59,45 +60,46 @@ class ViewAddress extends ViewRecord
                     ]),
                 Section::make('Validation Result')
                     ->columns(2)
-                    ->visible(fn (Address $record): bool => $record->latestCorrection !== null)
+                    ->visible(fn (Address $record): bool => $record->validated_at !== null)
                     ->schema([
-                        TextEntry::make('latestCorrection.validation_status')
+                        TextEntry::make('validation_status')
                             ->label('Status')
                             ->badge()
                             ->color(fn (?string $state): string => match ($state) {
-                                AddressCorrection::STATUS_VALID => 'success',
-                                AddressCorrection::STATUS_INVALID => 'danger',
-                                AddressCorrection::STATUS_AMBIGUOUS => 'warning',
+                                'valid' => 'success',
+                                'invalid' => 'danger',
+                                'ambiguous' => 'warning',
                                 default => 'gray',
                             })
                             ->formatStateUsing(fn (?string $state): string => match ($state) {
-                                AddressCorrection::STATUS_VALID => 'Valid',
-                                AddressCorrection::STATUS_INVALID => 'Invalid',
-                                AddressCorrection::STATUS_AMBIGUOUS => 'Ambiguous',
+                                'valid' => 'Valid',
+                                'invalid' => 'Invalid',
+                                'ambiguous' => 'Ambiguous',
+                                'pending' => 'Pending',
                                 default => 'Unknown',
                             }),
-                        TextEntry::make('latestCorrection.carrier.name')
+                        TextEntry::make('validatedByCarrier.name')
                             ->label('Validated By'),
-                        TextEntry::make('latestCorrection.corrected_address_line_1')
+                        TextEntry::make('output_address_1')
                             ->label('Corrected Address Line 1')
                             ->columnSpanFull(),
-                        TextEntry::make('latestCorrection.corrected_address_line_2')
+                        TextEntry::make('output_address_2')
                             ->label('Corrected Address Line 2')
                             ->columnSpanFull()
-                            ->hidden(fn (Address $record): bool => empty($record->latestCorrection?->corrected_address_line_2)),
-                        TextEntry::make('latestCorrection.corrected_city')
+                            ->hidden(fn (Address $record): bool => empty($record->output_address_2)),
+                        TextEntry::make('output_city')
                             ->label('Corrected City'),
-                        TextEntry::make('latestCorrection.corrected_state')
+                        TextEntry::make('output_state')
                             ->label('Corrected State'),
-                        TextEntry::make('latestCorrection.corrected_postal_code')
+                        TextEntry::make('output_postal')
                             ->label('Corrected ZIP')
-                            ->formatStateUsing(fn (Address $record): string => $record->latestCorrection?->getFullPostalCode() ?? ''),
-                        TextEntry::make('latestCorrection.corrected_country_code')
+                            ->formatStateUsing(fn (Address $record): string => $record->getFullPostalCode() ?? ''),
+                        TextEntry::make('output_country')
                             ->label('Corrected Country'),
-                        TextEntry::make('latestCorrection.classification')
+                        TextEntry::make('classification')
                             ->label('Classification')
                             ->formatStateUsing(fn (?string $state): string => ucfirst($state ?? 'Unknown')),
-                        TextEntry::make('latestCorrection.is_residential')
+                        TextEntry::make('is_residential')
                             ->label('Residential')
                             ->badge()
                             ->color(fn (?bool $state): string => match ($state) {
@@ -110,10 +112,10 @@ class ViewAddress extends ViewRecord
                                 false => 'No',
                                 default => 'Unknown',
                             }),
-                        TextEntry::make('latestCorrection.confidence_score')
+                        TextEntry::make('confidence_score')
                             ->label('Confidence')
                             ->formatStateUsing(fn ($state): string => $state ? number_format($state * 100).'%' : 'N/A'),
-                        TextEntry::make('latestCorrection.validated_at')
+                        TextEntry::make('validated_at')
                             ->label('Validated At')
                             ->dateTime(),
                     ]),
@@ -149,13 +151,13 @@ class ViewAddress extends ViewRecord
 
                     try {
                         $validationService = app(AddressValidationService::class);
-                        $correction = $validationService->validateAddress($this->record, $carrier->slug);
+                        $result = $validationService->validateAddress($this->record, $carrier->slug);
 
                         $this->record->refresh();
 
                         Notification::make()
                             ->title('Validation Complete')
-                            ->body('Address has been validated. Status: '.ucfirst($correction->validation_status))
+                            ->body('Address has been validated. Status: '.ucfirst($this->record->validation_status))
                             ->success()
                             ->send();
                     } catch (\Exception $e) {

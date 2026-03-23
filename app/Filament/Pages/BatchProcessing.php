@@ -175,6 +175,9 @@ class BatchProcessing extends Page implements HasSchemas
                                     if ($company->postal_code) {
                                         $set('origin_postal_code', $company->postal_code);
                                     }
+                                } else {
+                                    // Clear BestWay if transit times disabled
+                                    $set('find_best_service', false);
                                 }
                             })
                             ->helperText('Fetch FedEx shipping service options and delivery estimates'),
@@ -187,6 +190,11 @@ class BatchProcessing extends Page implements HasSchemas
                             ->helperText(fn () => CompanySetting::instance()->hasAddress()
                                 ? 'Default from Company Setup: '.CompanySetting::instance()->formatted_address
                                 : 'Configure default in Settings > Company Setup'),
+                        Checkbox::make('find_best_service')
+                            ->label('Find Best Service (BestWay Optimization)')
+                            ->default(false)
+                            ->visible(fn ($get) => $get('include_transit_times'))
+                            ->helperText('Automatically select the most economical shipping service that meets the Required On-Site Date. Original ShipVia will be preserved in Previous_ShipViaCode.'),
                     ]),
             ])
             ->statePath('uploadData');
@@ -209,7 +217,7 @@ class BatchProcessing extends Page implements HasSchemas
                                     ->get()
                                     ->mapWithKeys(function (ImportBatch $batch) {
                                         $addressCount = $batch->addresses()->count();
-                                        $validatedCount = $batch->addresses()->whereHas('corrections')->count();
+                                        $validatedCount = $batch->addresses()->whereNotNull('validation_status')->count();
 
                                         return [
                                             $batch->id => "{$batch->display_name} ({$validatedCount}/{$addressCount} validated)",
@@ -341,6 +349,7 @@ class BatchProcessing extends Page implements HasSchemas
                 'include_transit_times' => $data['include_transit_times'] ?? false,
                 'origin_postal_code' => $data['origin_postal_code'] ?? null,
                 'origin_country_code' => 'US',
+                'find_best_service' => $data['find_best_service'] ?? false,
                 'imported_by' => auth()->id(),
             ]);
 
@@ -470,7 +479,8 @@ class BatchProcessing extends Page implements HasSchemas
     {
         $hasAddress = false;
         foreach ($this->mappings as $mapping) {
-            if ($mapping['target'] === 'address_line_1') {
+            // Check for both old and new field names for backward compatibility
+            if (in_array($mapping['target'], ['address_line_1', 'input_address_1'])) {
                 $hasAddress = true;
                 break;
             }
@@ -610,12 +620,12 @@ class BatchProcessing extends Page implements HasSchemas
         }
 
         $this->totalAddresses = $this->selectedExportBatch->addresses()->count();
-        $this->validatedAddresses = $this->selectedExportBatch->addresses()->whereHas('corrections')->count();
+        $this->validatedAddresses = $this->selectedExportBatch->addresses()->whereNotNull('validation_status')->count();
         $this->validAddresses = $this->selectedExportBatch->addresses()
-            ->whereHas('corrections', fn ($q) => $q->where('validation_status', 'valid'))
+            ->where('validation_status', 'valid')
             ->count();
         $this->invalidAddresses = $this->selectedExportBatch->addresses()
-            ->whereHas('corrections', fn ($q) => $q->where('validation_status', 'invalid'))
+            ->where('validation_status', 'invalid')
             ->count();
     }
 

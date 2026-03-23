@@ -82,6 +82,28 @@ class ShipViaCodeForm
                             ->helperText('Inactive codes will not be used for lookups')
                             ->columnSpanFull(),
                     ]),
+
+                Section::make('BestWay Configuration')
+                    ->description('Configure plant, payment type, and account for BestWay service matching.')
+                    ->columns(3)
+                    ->schema([
+                        TextInput::make('plant_id')
+                            ->label('Plant ID')
+                            ->maxLength(50)
+                            ->placeholder('e.g., Plant001')
+                            ->helperText('Plant identifier for routing'),
+                        Select::make('payment_type')
+                            ->label('Payment Type')
+                            ->options(ShipViaCode::getPaymentTypeOptions())
+                            ->live()
+                            ->helperText('Who pays for shipping'),
+                        TextInput::make('account_number')
+                            ->label('Account Number')
+                            ->maxLength(50)
+                            ->placeholder('e.g., 472023872')
+                            ->visible(fn (callable $get) => $get('payment_type') === ShipViaCode::PAYMENT_SENDER)
+                            ->helperText('Carrier account number when billing sender'),
+                    ]),
             ]);
     }
 }

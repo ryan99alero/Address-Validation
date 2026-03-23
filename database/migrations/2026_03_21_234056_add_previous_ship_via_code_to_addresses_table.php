@@ -12,8 +12,11 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('addresses', function (Blueprint $table) {
-            $table->unsignedInteger('source_row_number')->nullable()->after('source')
-                ->comment('Original row number from import file (1-based, excludes header)');
+            // Store original ship_via_code before BestWay optimization replaces it
+            $table->string('previous_ship_via_code', 50)->nullable()->after('ship_via_code');
+
+            // Flag to indicate if BestWay optimization was applied
+            $table->boolean('bestway_optimized')->default(false)->after('previous_ship_via_code');
         });
     }
 
@@ -23,7 +26,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('addresses', function (Blueprint $table) {
-            $table->dropColumn('source_row_number');
+            $table->dropColumn(['previous_ship_via_code', 'bestway_optimized']);
         });
     }
 };

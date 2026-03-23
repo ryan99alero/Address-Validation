@@ -6,7 +6,6 @@ use App\Models\Address;
 use App\Models\CompanySetting;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
-use App\Models\TransitTime;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithHeadings;
@@ -24,7 +23,8 @@ class ExportService
         ExportTemplate $template,
         ?string $filename = null
     ): BinaryFileResponse {
-        $addresses = $batch->addresses()->with('latestCorrection.carrier')->get();
+        // With denormalized schema, no eager loading needed!
+        $addresses = $batch->addresses()->get();
 
         return $this->export($addresses, $template, $filename ?? $this->generateFilename($batch, $template));
     }
@@ -55,7 +55,6 @@ class ExportService
         $fields = $template->ordered_fields;
         $rows = [];
 
-        // Add header row if enabled
         if ($template->include_header) {
             $headers = [];
             foreach ($fields as $field) {
@@ -64,7 +63,6 @@ class ExportService
             $rows[] = $headers;
         }
 
-        // Add data rows
         foreach ($addresses as $address) {
             $row = [];
             foreach ($fields as $field) {
@@ -78,309 +76,103 @@ class ExportService
 
     /**
      * Get a field value from an address record.
+     * With denormalized schema, all data is directly on the address.
      */
     public function getFieldValue(Address $address, string $field): ?string
     {
-        $correction = $address->latestCorrection;
-
-        // Handle ship via code fields
-        if (str_starts_with($field, 'ship_via_')) {
-            return $this->getShipViaFieldValue($address, $field);
-        }
-
-        // Handle fastest service fields
-        if (str_starts_with($field, 'fastest_')) {
-            return $this->getFastestServiceFieldValue($address, $field);
-        }
-
-        // Handle legacy transit_ fields for backwards compatibility
-        if (str_starts_with($field, 'transit_')) {
-            return $this->getTransitTimeFieldValue($address, $field);
+        // Handle extra fields (stored in JSON)
+        if (str_starts_with($field, 'extra_')) {
+            return $address->getExtraField($field);
         }
 
         return match ($field) {
-            // Original address fields
+            // Original input address fields
             'external_reference' => $address->external_reference,
-            'name' => $address->name,
-            'company' => $address->company,
-            'original_address_line_1' => $address->address_line_1,
-            'original_address_line_2' => $address->address_line_2,
-            'original_city' => $address->city,
-            'original_state' => $address->state,
-            'original_postal_code' => $address->postal_code,
-            'country_code' => $address->country_code ?? $correction?->corrected_country_code,
+            'name', 'input_name' => $address->input_name,
+            'company', 'input_company' => $address->input_company,
+            'original_address_line_1', 'input_address_1' => $address->input_address_1,
+            'original_address_line_2', 'input_address_2' => $address->input_address_2,
+            'original_city', 'input_city' => $address->input_city,
+            'original_state', 'input_state' => $address->input_state,
+            'original_postal_code', 'input_postal' => $address->input_postal,
+            'input_country' => $address->input_country,
 
-            // Corrected address fields
-            'corrected_address_line_1' => $correction?->corrected_address_line_1,
-            'corrected_address_line_2' => $correction?->corrected_address_line_2,
-            'corrected_city' => $correction?->corrected_city,
-            'corrected_state' => $correction?->corrected_state,
-            'corrected_postal_code' => $correction?->corrected_postal_code,
-            'corrected_postal_code_ext' => $correction?->corrected_postal_code_ext,
-            'full_postal_code' => $correction?->getFullPostalCode(),
+            // Corrected/output address fields (directly on address now)
+            'corrected_address_line_1', 'output_address_1' => $address->output_address_1,
+            'corrected_address_line_2', 'output_address_2' => $address->output_address_2,
+            'corrected_city', 'output_city' => $address->output_city,
+            'corrected_state', 'output_state' => $address->output_state,
+            'corrected_postal_code', 'output_postal' => $address->output_postal,
+            'corrected_postal_code_ext', 'output_postal_ext' => $address->output_postal_ext,
+            'full_postal_code' => $this->getFullPostalCode($address),
+            'country_code', 'output_country' => $address->output_country ?? $address->input_country,
 
-            // Validation fields
-            'validation_status' => $correction?->validation_status,
-            'is_residential' => $correction?->is_residential ? 'Yes' : 'No',
-            'classification' => $correction?->classification,
-            'confidence_score' => $correction?->confidence_score ? number_format($correction->confidence_score * 100, 0).'%' : null,
-            'carrier' => $correction?->carrier?->name,
-            'validated_at' => $correction?->validated_at?->format('Y-m-d H:i:s'),
+            // Validation fields (directly on address now)
+            'validation_status' => $address->validation_status,
+            'is_residential' => $address->is_residential === null ? '' : ($address->is_residential ? 'Yes' : 'No'),
+            'classification' => $address->classification,
+            'confidence_score' => $address->confidence_score ? number_format($address->confidence_score * 100, 0).'%' : null,
+            'carrier' => $address->validatedByCarrier?->name,
+            'validated_at' => $address->validated_at?->format('Y-m-d H:i:s'),
 
             // Ship dates & recommendation fields
             'requested_ship_date' => $address->requested_ship_date?->format('Y-m-d'),
             'required_on_site_date' => $address->required_on_site_date?->format('Y-m-d'),
-            'recommended_service' => $address->recommended_service,
-            'estimated_delivery_date' => $address->estimated_delivery_date?->format('Y-m-d'),
-            'can_meet_required_date' => $address->can_meet_required_date === null ? '' : ($address->can_meet_required_date ? 'Yes' : 'No'),
 
-            // Alternative suggestion when ship_via doesn't meet deadline
-            'suggested_service' => $address->suggested_service,
-            'suggested_delivery_date' => $address->suggested_delivery_date?->format('Y-m-d'),
-
-            // Distance - use stored value first, fallback to transit times
-            'distance_miles' => $address->distance_miles !== null
-                ? number_format((float) $address->distance_miles, 1)
-                : $this->getDistanceValue($address),
-
-            // Extra fields (pass-through)
-            'extra_1' => $address->extra_1,
-            'extra_2' => $address->extra_2,
-            'extra_3' => $address->extra_3,
-            'extra_4' => $address->extra_4,
-            'extra_5' => $address->extra_5,
-            'extra_6' => $address->extra_6,
-            'extra_7' => $address->extra_7,
-            'extra_8' => $address->extra_8,
-            'extra_9' => $address->extra_9,
-            'extra_10' => $address->extra_10,
-            'extra_11' => $address->extra_11,
-            'extra_12' => $address->extra_12,
-            'extra_13' => $address->extra_13,
-            'extra_14' => $address->extra_14,
-            'extra_15' => $address->extra_15,
-            'extra_16' => $address->extra_16,
-            'extra_17' => $address->extra_17,
-            'extra_18' => $address->extra_18,
-            'extra_19' => $address->extra_19,
-            'extra_20' => $address->extra_20,
-
-            default => null,
-        };
-    }
-
-    /**
-     * Get ship via code field value.
-     * Prefers stored calculated values, falls back to on-the-fly calculation.
-     */
-    protected function getShipViaFieldValue(Address $address, string $field): ?string
-    {
-        return match ($field) {
+            // Ship via fields (directly on address)
             'ship_via_code' => $address->ship_via_code,
-            // Use stored values first (populated by ShippingRecommendationService)
-            'ship_via_service' => $address->ship_via_service_name
-                ?? $this->calculateShipViaService($address),
-            'ship_via_transit_days' => $address->ship_via_transit_days
-                ?? $this->calculateShipViaTransitDays($address),
-            'ship_via_delivery_date' => $address->ship_via_delivery_date?->format('Y-m-d')
-                ?? $this->calculateShipViaDeliveryDate($address),
-            'ship_via_meets_deadline' => $address->ship_via_meets_deadline === null
-                ? '' : ($address->ship_via_meets_deadline ? 'Yes' : 'No'),
+            'previous_ship_via_code' => $address->previous_ship_via_code,
+            'bestway_optimized' => $address->bestway_optimized === null ? '' : ($address->bestway_optimized ? 'Yes' : 'No'),
+            'ship_via_service' => $address->ship_via_service,
+            'ship_via_transit_days', 'ship_via_days' => $address->ship_via_days !== null ? (string) $address->ship_via_days : null,
+            'ship_via_delivery_date', 'ship_via_date' => $address->ship_via_date?->format('Y-m-d'),
+            'ship_via_meets_deadline' => $address->ship_via_meets_deadline === null ? '' : ($address->ship_via_meets_deadline ? 'Yes' : 'No'),
+
+            // Fastest service fields (directly on address)
+            'fastest_service' => $address->fastest_service,
+            'fastest_days' => $address->fastest_days !== null ? (string) $address->fastest_days : null,
+            'fastest_delivery_date', 'fastest_date' => $address->fastest_date?->format('Y-m-d'),
+
+            // Ground service fields (directly on address)
+            'ground_service' => $address->ground_service,
+            'ground_days' => $address->ground_days !== null ? (string) $address->ground_days : null,
+            'ground_date' => $address->ground_date?->format('Y-m-d'),
+
+            // Distance
+            'distance_miles' => $address->distance_miles !== null ? number_format((float) $address->distance_miles, 1) : null,
+
+            // Legacy field names for backwards compatibility
+            'recommended_service' => $address->fastest_service,
+            'estimated_delivery_date' => $address->fastest_date?->format('Y-m-d'),
+            'can_meet_required_date' => $address->ship_via_meets_deadline === null ? '' : ($address->ship_via_meets_deadline ? 'Yes' : 'No'),
+            'suggested_service' => $address->ground_service,
+            'suggested_delivery_date' => $address->ground_date?->format('Y-m-d'),
+
+            // Legacy transit_ prefixed fields
+            'transit_fastest_service' => $address->fastest_service,
+            'transit_fastest_delivery_date' => $address->fastest_date?->format('Y-m-d'),
+            'transit_distance_miles' => $address->distance_miles !== null ? number_format((float) $address->distance_miles, 1) : null,
+            'transit_ground_days' => $address->ground_days !== null ? (string) $address->ground_days : null,
+            'transit_ground_date' => $address->ground_date?->format('Y-m-d'),
+
             default => null,
         };
     }
 
     /**
-     * Calculate ship via service name on-the-fly (fallback).
+     * Get full postal code with extension.
      */
-    protected function calculateShipViaService(Address $address): ?string
+    protected function getFullPostalCode(Address $address): ?string
     {
-        if (! $address->relationLoaded('shipViaCodeRecord')) {
-            $address->load('shipViaCodeRecord');
-        }
-
-        return $address->shipViaCodeRecord?->service_name;
-    }
-
-    /**
-     * Calculate ship via transit days on-the-fly (fallback).
-     */
-    protected function calculateShipViaTransitDays(Address $address): ?string
-    {
-        if (! $address->relationLoaded('shipViaCodeRecord')) {
-            $address->load('shipViaCodeRecord');
-        }
-
-        $shipViaCode = $address->shipViaCodeRecord;
-        if (! $shipViaCode || ! $shipViaCode->service_type) {
+        if (! $address->output_postal) {
             return null;
         }
 
-        if (! $address->relationLoaded('transitTimes')) {
-            $address->load('transitTimes');
+        if ($address->output_postal_ext) {
+            return $address->output_postal.'-'.$address->output_postal_ext;
         }
 
-        $transitTime = $address->transitTimes->firstWhere('service_type', $shipViaCode->service_type);
-
-        return $transitTime?->transit_range;
-    }
-
-    /**
-     * Calculate ship via delivery date on-the-fly (fallback).
-     */
-    protected function calculateShipViaDeliveryDate(Address $address): ?string
-    {
-        if (! $address->relationLoaded('shipViaCodeRecord')) {
-            $address->load('shipViaCodeRecord');
-        }
-
-        $shipViaCode = $address->shipViaCodeRecord;
-        if (! $shipViaCode || ! $shipViaCode->service_type) {
-            return null;
-        }
-
-        if (! $address->relationLoaded('transitTimes')) {
-            $address->load('transitTimes');
-        }
-
-        $transitTime = $address->transitTimes->firstWhere('service_type', $shipViaCode->service_type);
-
-        return $transitTime?->delivery_date?->format('Y-m-d');
-    }
-
-    /**
-     * Get fastest service field value.
-     * Prefers stored values, falls back to on-the-fly calculation.
-     */
-    protected function getFastestServiceFieldValue(Address $address, string $field): ?string
-    {
-        return match ($field) {
-            // Use stored values first (populated by ShippingRecommendationService)
-            'fastest_service' => $address->fastest_service
-                ?? $this->calculateFastestService($address),
-            'fastest_delivery_date' => $address->fastest_delivery_date?->format('Y-m-d')
-                ?? $this->calculateFastestDeliveryDate($address),
-            default => null,
-        };
-    }
-
-    /**
-     * Calculate fastest service on-the-fly (fallback).
-     */
-    protected function calculateFastestService(Address $address): ?string
-    {
-        if (! $address->relationLoaded('transitTimes')) {
-            $address->load('transitTimes');
-        }
-
-        return $this->getFastestService($address->transitTimes)?->service_label;
-    }
-
-    /**
-     * Calculate fastest delivery date on-the-fly (fallback).
-     */
-    protected function calculateFastestDeliveryDate(Address $address): ?string
-    {
-        if (! $address->relationLoaded('transitTimes')) {
-            $address->load('transitTimes');
-        }
-
-        return $this->getFastestService($address->transitTimes)?->delivery_date?->format('Y-m-d');
-    }
-
-    /**
-     * Get distance value from transit times.
-     */
-    protected function getDistanceValue(Address $address): ?string
-    {
-        if (! $address->relationLoaded('transitTimes')) {
-            $address->load('transitTimes');
-        }
-
-        return $address->transitTimes->first()?->formatted_distance;
-    }
-
-    /**
-     * Get transit time field value from an address.
-     */
-    protected function getTransitTimeFieldValue(Address $address, string $field): ?string
-    {
-        // Load transit times if not already loaded
-        if (! $address->relationLoaded('transitTimes')) {
-            $address->load('transitTimes');
-        }
-
-        $transitTimes = $address->transitTimes;
-
-        if ($transitTimes->isEmpty()) {
-            return null;
-        }
-
-        // Map field names to service types
-        $serviceTypeMap = [
-            'transit_ground' => 'FEDEX_GROUND',
-            'transit_home_delivery' => 'GROUND_HOME_DELIVERY',
-            'transit_express_saver' => 'FEDEX_EXPRESS_SAVER',
-            'transit_2day' => 'FEDEX_2_DAY',
-            'transit_2day_am' => 'FEDEX_2_DAY_AM',
-            'transit_standard_overnight' => 'STANDARD_OVERNIGHT',
-            'transit_priority_overnight' => 'PRIORITY_OVERNIGHT',
-            'transit_first_overnight' => 'FIRST_OVERNIGHT',
-        ];
-
-        // Handle specific service transit times
-        foreach ($serviceTypeMap as $prefix => $serviceType) {
-            if (str_starts_with($field, $prefix)) {
-                $transitTime = $transitTimes->firstWhere('service_type', $serviceType);
-
-                if (! $transitTime) {
-                    return null;
-                }
-
-                if (str_ends_with($field, '_days')) {
-                    return $transitTime->transit_range;
-                }
-                if (str_ends_with($field, '_date')) {
-                    return $transitTime->delivery_date?->format('Y-m-d');
-                }
-            }
-        }
-
-        // Handle special fields
-        return match ($field) {
-            'transit_fastest_service' => $this->getFastestService($transitTimes)?->service_label,
-            'transit_fastest_delivery_date' => $this->getFastestService($transitTimes)?->delivery_date?->format('Y-m-d'),
-            'transit_distance_miles' => $transitTimes->first()?->formatted_distance,
-            default => null,
-        };
-    }
-
-    /**
-     * Get the fastest delivery service from transit times.
-     */
-    protected function getFastestService(Collection $transitTimes): ?TransitTime
-    {
-        // Priority order for fastest services (overnight first, then express, then ground)
-        $priorityOrder = [
-            'FIRST_OVERNIGHT',
-            'PRIORITY_OVERNIGHT',
-            'STANDARD_OVERNIGHT',
-            'FEDEX_2_DAY_AM',
-            'FEDEX_2_DAY',
-            'FEDEX_EXPRESS_SAVER',
-            'GROUND_HOME_DELIVERY',
-            'FEDEX_GROUND',
-        ];
-
-        foreach ($priorityOrder as $serviceType) {
-            $transitTime = $transitTimes->firstWhere('service_type', $serviceType);
-            if ($transitTime) {
-                return $transitTime;
-            }
-        }
-
-        // Return first available if none match priority
-        return $transitTimes->first();
+        return $address->output_postal;
     }
 
     /**
@@ -392,8 +184,7 @@ class ExportService
         ImportBatch $batch,
         ?string $filename = null
     ): BinaryFileResponse {
-        // Increase limits for large exports
-        set_time_limit(600); // 10 minutes
+        set_time_limit(600);
         ini_set('memory_limit', '1G');
 
         $filename = $filename ?? $batch->display_name.'_validated_'.now()->format('Ymd_His');
@@ -406,37 +197,44 @@ class ExportService
 
     /**
      * Get the export field value for a system field, preferring corrected values.
+     * Supports both old field names (address_line_1) and new field names (input_address_1).
      */
     public function getExportFieldValue(Address $address, string $systemField): ?string
     {
-        $correction = $address->latestCorrection;
-
-        // For address fields, prefer corrected values if available
-        return match ($systemField) {
-            'address_line_1' => $correction?->corrected_address_line_1 ?? $address->address_line_1,
-            'address_line_2' => $correction?->corrected_address_line_2 ?? $address->address_line_2,
-            'city' => $correction?->corrected_city ?? $address->city,
-            'state' => $correction?->corrected_state ?? $address->state,
-            'postal_code' => $correction?->corrected_postal_code ?? $address->postal_code,
-            'country_code' => $correction?->corrected_country_code ?? $address->country_code,
-            'name' => $address->name,
-            'company' => $address->company,
-            'external_reference' => $address->external_reference,
-            // Extra fields pass through (including any unmapped fields like phone)
-            default => $this->getExtraField($address, $systemField),
-        };
-    }
-
-    /**
-     * Get an extra field value by name.
-     */
-    protected function getExtraField(Address $address, string $field): ?string
-    {
-        if (str_starts_with($field, 'extra_')) {
-            return $address->{$field} ?? null;
+        // Handle extra fields
+        if (str_starts_with($systemField, 'extra_')) {
+            return $address->getExtraField($systemField);
         }
 
-        return null;
+        // For address fields, prefer output (corrected) values if available
+        return match ($systemField) {
+            // New field names (input_*) - return corrected if available, else original
+            'input_address_1' => $address->output_address_1 ?? $address->input_address_1,
+            'input_address_2' => $address->output_address_2 ?? $address->input_address_2,
+            'input_city' => $address->output_city ?? $address->input_city,
+            'input_state' => $address->output_state ?? $address->input_state,
+            'input_postal' => $address->output_postal ?? $address->input_postal,
+            'input_country' => $address->output_country ?? $address->input_country,
+            'input_name' => $address->input_name,
+            'input_company' => $address->input_company,
+
+            // Old field names (for backward compatibility)
+            'address_line_1' => $address->output_address_1 ?? $address->input_address_1,
+            'address_line_2' => $address->output_address_2 ?? $address->input_address_2,
+            'city' => $address->output_city ?? $address->input_city,
+            'state' => $address->output_state ?? $address->input_state,
+            'postal_code' => $address->output_postal ?? $address->input_postal,
+            'country_code' => $address->output_country ?? $address->input_country,
+            'name' => $address->input_name,
+            'company' => $address->input_company,
+
+            // Other fields
+            'external_reference' => $address->external_reference,
+            'ship_via_code' => $address->ship_via_code,
+            'requested_ship_date' => $address->requested_ship_date?->format('Y-m-d'),
+            'required_on_site_date' => $address->required_on_site_date?->format('Y-m-d'),
+            default => null,
+        };
     }
 
     /**
@@ -540,7 +338,6 @@ class ImportMappingExport implements FromCollection, WithHeadings, WithMapping
         protected Collection $addresses,
         protected array $mappings
     ) {
-        // Sort mappings by position
         usort($this->mappings, fn ($a, $b) => ($a['position'] ?? 0) <=> ($b['position'] ?? 0));
     }
 
@@ -571,10 +368,8 @@ class ImportMappingExport implements FromCollection, WithHeadings, WithMapping
             $target = $mapping['target'] ?? '';
 
             if (empty($target)) {
-                // Unmapped column - output empty
                 $row[] = '';
             } else {
-                // Get the value using the export field value method (prefers corrected)
                 $row[] = $exportService->getExportFieldValue($address, $target);
             }
         }

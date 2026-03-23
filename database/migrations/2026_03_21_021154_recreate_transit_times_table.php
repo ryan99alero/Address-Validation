@@ -8,11 +8,12 @@ return new class extends Migration
 {
     /**
      * Run the migrations.
+     *
+     * Recreates the transit_times table after it was accidentally dropped
+     * during the schema migration cleanup.
      */
     public function up(): void
     {
-        // Stores detailed per-service transit times (multiple records per address)
-        // Summary data is denormalized to addresses table for fast export
         Schema::create('transit_times', function (Blueprint $table) {
             $table->id();
             $table->foreignId('address_id')->constrained()->cascadeOnDelete();

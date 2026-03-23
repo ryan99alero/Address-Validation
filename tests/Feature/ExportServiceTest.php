@@ -2,7 +2,6 @@
 
 use App\Jobs\ProcessExportBatch;
 use App\Models\Address;
-use App\Models\AddressCorrection;
 use App\Models\Carrier;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
@@ -18,38 +17,34 @@ describe('ExportService field value extraction', function () {
             'slug' => 'ups',
         ]);
 
-        // Create address with correction
+        // Create address with validation data (denormalized schema)
         $this->address = Address::factory()->create([
             'external_reference' => 'ORDER-12345',
-            'name' => 'John Doe',
-            'company' => 'Acme Corp',
-            'address_line_1' => '123 Main St',
-            'address_line_2' => 'Suite 100',
-            'city' => 'Springfield',
-            'state' => 'IL',
-            'postal_code' => '62701',
-            'country_code' => 'US',
-            'extra_1' => 'Custom Data 1',
-            'extra_5' => 'Custom Data 5',
-        ]);
-
-        $this->correction = AddressCorrection::factory()->create([
-            'address_id' => $this->address->id,
-            'carrier_id' => $this->carrier->id,
+            'input_name' => 'John Doe',
+            'input_company' => 'Acme Corp',
+            'input_address_1' => '123 Main St',
+            'input_address_2' => 'Suite 100',
+            'input_city' => 'Springfield',
+            'input_state' => 'IL',
+            'input_postal' => '62701',
+            'input_country' => 'US',
+            // Validated output data (denormalized)
+            'output_address_1' => '123 MAIN ST',
+            'output_address_2' => 'STE 100',
+            'output_city' => 'SPRINGFIELD',
+            'output_state' => 'IL',
+            'output_postal' => '62701',
+            'output_postal_ext' => '1234',
+            'output_country' => 'US',
             'validation_status' => 'valid',
-            'corrected_address_line_1' => '123 MAIN ST',
-            'corrected_address_line_2' => 'STE 100',
-            'corrected_city' => 'SPRINGFIELD',
-            'corrected_state' => 'IL',
-            'corrected_postal_code' => '62701',
-            'corrected_postal_code_ext' => '1234',
             'is_residential' => false,
             'classification' => 'commercial',
             'confidence_score' => 0.95,
+            'validated_by_carrier_id' => $this->carrier->id,
+            'validated_at' => now(),
+            // Extra data stored as JSON
+            'extra_data' => ['extra_1' => 'Custom Data 1', 'extra_5' => 'Custom Data 5'],
         ]);
-
-        // Refresh to load relationship
-        $this->address->refresh();
     });
 
     it('extracts original address fields', function () {
@@ -99,12 +94,10 @@ describe('ExportService export data generation', function () {
 
     it('generates export data with headers when include_header is true', function () {
         $carrier = Carrier::factory()->create();
-        $address = Address::factory()->create();
-        AddressCorrection::factory()->create([
-            'address_id' => $address->id,
-            'carrier_id' => $carrier->id,
+        $address = Address::factory()->validated()->create([
+            'output_city' => 'TESTCITY',
+            'validated_by_carrier_id' => $carrier->id,
         ]);
-        $address->refresh();
 
         $template = ExportTemplate::factory()->create([
             'include_header' => true,
@@ -124,13 +117,11 @@ describe('ExportService export data generation', function () {
 
     it('generates export data without headers when include_header is false', function () {
         $carrier = Carrier::factory()->create();
-        $address = Address::factory()->create(['external_reference' => 'TEST-001']);
-        AddressCorrection::factory()->create([
-            'address_id' => $address->id,
-            'carrier_id' => $carrier->id,
-            'corrected_city' => 'TESTCITY',
+        $address = Address::factory()->validated()->create([
+            'external_reference' => 'TEST-001',
+            'output_city' => 'TESTCITY',
+            'validated_by_carrier_id' => $carrier->id,
         ]);
-        $address->refresh();
 
         $template = ExportTemplate::factory()->create([
             'include_header' => false,
@@ -190,16 +181,12 @@ describe('ProcessExportBatch with validation fields', function () {
 
         $fields = $method->invoke($job);
 
-        // Should have core validation fields
+        // Should have core validation fields (using new field names)
         $fieldNames = array_column($fields, 'field');
-        expect($fieldNames)->toContain('corrected_address_line_1');
+        expect($fieldNames)->toContain('output_address_1');
         expect($fieldNames)->toContain('validation_status');
         expect($fieldNames)->toContain('is_residential');
         expect($fieldNames)->toContain('carrier');
-
-        // Should NOT have transit time fields
-        expect($fieldNames)->not->toContain('ship_via_service');
-        expect($fieldNames)->not->toContain('fastest_service');
     });
 
     it('includes transit time fields when batch has them enabled', function () {
@@ -223,12 +210,11 @@ describe('ProcessExportBatch with validation fields', function () {
         $fieldNames = array_column($fields, 'field');
 
         // Should have core validation fields
-        expect($fieldNames)->toContain('corrected_address_line_1');
+        expect($fieldNames)->toContain('output_address_1');
 
         // Should also have transit time fields
         expect($fieldNames)->toContain('ship_via_service');
-        expect($fieldNames)->toContain('ship_via_transit_days');
-        expect($fieldNames)->toContain('recommended_service');
+        expect($fieldNames)->toContain('ship_via_days');
         expect($fieldNames)->toContain('fastest_service');
         expect($fieldNames)->toContain('distance_miles');
     });

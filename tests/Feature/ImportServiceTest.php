@@ -12,11 +12,11 @@ describe('ImportService auto-matching', function () {
 
         $mappings = $this->service->autoMatchHeaders($headers);
 
-        expect($mappings[0]['target'])->toBe('address_line_1');
-        expect($mappings[1]['target'])->toBe('city');
-        expect($mappings[2]['target'])->toBe('state');
-        expect($mappings[3]['target'])->toBe('postal_code');
-        expect($mappings[4]['target'])->toBe('country_code');
+        expect($mappings[0]['target'])->toBe('input_address_1');
+        expect($mappings[1]['target'])->toBe('input_city');
+        expect($mappings[2]['target'])->toBe('input_state');
+        expect($mappings[3]['target'])->toBe('input_postal');
+        expect($mappings[4]['target'])->toBe('input_country');
     });
 
     it('matches abbreviated field names like add1, addr1', function () {
@@ -24,8 +24,8 @@ describe('ImportService auto-matching', function () {
 
         $mappings = $this->service->autoMatchHeaders($headers);
 
-        expect($mappings[0]['target'])->toBe('address_line_1');
-        expect($mappings[2]['target'])->toBe('address_line_2');
+        expect($mappings[0]['target'])->toBe('input_address_1');
+        expect($mappings[2]['target'])->toBe('input_address_2');
     });
 
     it('matches camelCase field names like DestinationCity', function () {
@@ -33,9 +33,9 @@ describe('ImportService auto-matching', function () {
 
         $mappings = $this->service->autoMatchHeaders($headers);
 
-        expect($mappings[0]['target'])->toBe('city');
-        expect($mappings[1]['target'])->toBe('state');
-        expect($mappings[2]['target'])->toBe('postal_code');
+        expect($mappings[0]['target'])->toBe('input_city');
+        expect($mappings[1]['target'])->toBe('input_state');
+        expect($mappings[2]['target'])->toBe('input_postal');
     });
 
     it('matches fields with ship/delivery prefixes', function () {
@@ -43,19 +43,19 @@ describe('ImportService auto-matching', function () {
 
         $mappings = $this->service->autoMatchHeaders($headers);
 
-        expect($mappings[0]['target'])->toBe('address_line_1');
-        expect($mappings[1]['target'])->toBe('city');
-        expect($mappings[2]['target'])->toBe('state');
+        expect($mappings[0]['target'])->toBe('input_address_1');
+        expect($mappings[1]['target'])->toBe('input_city');
+        expect($mappings[2]['target'])->toBe('input_state');
     });
 
     it('matches postal code variations', function () {
         $headers = ['ZipCode', 'Postal Code', 'PostalCode', 'Zip5'];
 
-        // Each header should match postal_code, but only first gets it (no duplicates)
+        // Each header should match input_postal, but only first gets it (no duplicates)
         $mappings = $this->service->autoMatchHeaders($headers);
 
-        expect($mappings[0]['target'])->toBe('postal_code');
-        // Others default to pass-through since postal_code is already used
+        expect($mappings[0]['target'])->toBe('input_postal');
+        // Others default to pass-through since input_postal is already used
         expect($mappings[1]['target'])->toBe('_passthrough');
     });
 
@@ -66,10 +66,10 @@ describe('ImportService auto-matching', function () {
 
         $mappings = $this->service->autoMatchHeaders($headers);
 
-        // Ship To Name should map to company (primary recipient in shipping)
-        expect($mappings[0]['target'])->toBe('company');
-        // Attention should map to name (person/contact)
-        expect($mappings[1]['target'])->toBe('name');
+        // Ship To Name should map to input_company (primary recipient in shipping)
+        expect($mappings[0]['target'])->toBe('input_company');
+        // Attention should map to input_name (person/contact)
+        expect($mappings[1]['target'])->toBe('input_name');
         // Company Name already taken, defaults to pass-through
         expect($mappings[2]['target'])->toBe('_passthrough');
         // Contact Name - name already taken, defaults to pass-through
@@ -82,10 +82,10 @@ describe('ImportService auto-matching', function () {
         $mappings = $this->service->autoMatchHeaders($headers);
 
         // Generic "Name" in shipping typically = company/recipient organization
-        expect($mappings[0]['target'])->toBe('company');
+        expect($mappings[0]['target'])->toBe('input_company');
         // Attn = person
-        expect($mappings[1]['target'])->toBe('name');
-        expect($mappings[2]['target'])->toBe('address_line_1');
+        expect($mappings[1]['target'])->toBe('input_name');
+        expect($mappings[2]['target'])->toBe('input_address_1');
     });
 
     it('maps any field containing contact to name (person)', function () {
@@ -93,9 +93,9 @@ describe('ImportService auto-matching', function () {
 
         $mappings = $this->service->autoMatchHeaders($headers);
 
-        // All "contact" fields should map to name (person)
-        expect($mappings[0]['target'])->toBe('name');
-        // Others default to pass-through since name is already used
+        // All "contact" fields should map to input_name (person)
+        expect($mappings[0]['target'])->toBe('input_name');
+        // Others default to pass-through since input_name is already used
         expect($mappings[1]['target'])->toBe('_passthrough');
         expect($mappings[2]['target'])->toBe('_passthrough');
         expect($mappings[3]['target'])->toBe('_passthrough');
@@ -125,9 +125,9 @@ describe('ImportService auto-matching', function () {
 
         $mappings = $this->service->autoMatchHeaders($headers);
 
-        expect($mappings[0]['target'])->toBe('address_line_1');
-        expect($mappings[1]['target'])->toBe('city');
-        expect($mappings[2]['target'])->toBe('postal_code');
+        expect($mappings[0]['target'])->toBe('input_address_1');
+        expect($mappings[1]['target'])->toBe('input_city');
+        expect($mappings[2]['target'])->toBe('input_postal');
     });
 
     it('prevents duplicate field assignments', function () {
@@ -135,8 +135,8 @@ describe('ImportService auto-matching', function () {
 
         $mappings = $this->service->autoMatchHeaders($headers);
 
-        // First one gets address_line_1
-        expect($mappings[0]['target'])->toBe('address_line_1');
+        // First one gets input_address_1
+        expect($mappings[0]['target'])->toBe('input_address_1');
         // Others default to pass-through to prevent duplicate mapping
         expect($mappings[1]['target'])->toBe('_passthrough');
         expect($mappings[2]['target'])->toBe('_passthrough');

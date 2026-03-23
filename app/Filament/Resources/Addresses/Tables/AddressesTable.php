@@ -2,14 +2,12 @@
 
 namespace App\Filament\Resources\Addresses\Tables;
 
-use App\Models\AddressCorrection;
 use App\Models\Carrier;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -20,66 +18,55 @@ class AddressesTable
     {
         return $table
             ->columns([
-                TextColumn::make('latestCorrection.validation_status')
+                TextColumn::make('validation_status')
                     ->label('Status')
                     ->badge()
                     ->color(fn (?string $state): string => match ($state) {
-                        AddressCorrection::STATUS_VALID => 'success',
-                        AddressCorrection::STATUS_INVALID => 'danger',
-                        AddressCorrection::STATUS_AMBIGUOUS => 'warning',
+                        'valid' => 'success',
+                        'invalid' => 'danger',
+                        'ambiguous' => 'warning',
                         default => 'gray',
                     })
                     ->formatStateUsing(fn (?string $state): string => match ($state) {
-                        AddressCorrection::STATUS_VALID => 'Valid',
-                        AddressCorrection::STATUS_INVALID => 'Invalid',
-                        AddressCorrection::STATUS_AMBIGUOUS => 'Ambiguous',
+                        'valid' => 'Valid',
+                        'invalid' => 'Invalid',
+                        'ambiguous' => 'Ambiguous',
+                        'pending' => 'Pending',
                         default => 'Pending',
                     })
-                    ->sortable(query: function (Builder $query, string $direction): Builder {
-                        return $query
-                            ->leftJoin('address_corrections as ac_status', function ($join) {
-                                $join->on('ac_status.address_id', '=', 'addresses.id')
-                                    ->whereRaw('ac_status.id = (select max(id) from address_corrections where address_id = addresses.id)');
-                            })
-                            ->orderBy('ac_status.validation_status', $direction)
-                            ->select('addresses.*');
-                    }),
-                TextColumn::make('latestCorrection.confidence_score')
+                    ->sortable(),
+                TextColumn::make('confidence_score')
                     ->label('Confidence')
                     ->formatStateUsing(fn ($state): string => $state ? number_format($state * 100, 0).'%' : '-')
-                    ->sortable(query: function (Builder $query, string $direction): Builder {
-                        return $query
-                            ->leftJoin('address_corrections as ac_conf', function ($join) {
-                                $join->on('ac_conf.address_id', '=', 'addresses.id')
-                                    ->whereRaw('ac_conf.id = (select max(id) from address_corrections where address_id = addresses.id)');
-                            })
-                            ->orderBy('ac_conf.confidence_score', $direction)
-                            ->select('addresses.*');
-                    })
+                    ->sortable()
                     ->toggleable(),
                 TextColumn::make('external_reference')
                     ->label('Reference')
                     ->searchable()
                     ->toggleable(),
-                TextColumn::make('name')
+                TextColumn::make('input_name')
+                    ->label('Name')
                     ->searchable()
                     ->toggleable(),
-                TextColumn::make('company')
+                TextColumn::make('input_company')
+                    ->label('Company')
                     ->searchable()
                     ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('address_line_1')
+                TextColumn::make('input_address_1')
                     ->label('Address')
                     ->searchable()
                     ->wrap()
                     ->limit(50),
-                TextColumn::make('city')
+                TextColumn::make('input_city')
+                    ->label('City')
                     ->searchable(),
-                TextColumn::make('state')
+                TextColumn::make('input_state')
+                    ->label('State')
                     ->searchable(),
-                TextColumn::make('postal_code')
+                TextColumn::make('input_postal')
                     ->label('ZIP')
                     ->searchable(),
-                TextColumn::make('latestCorrection.classification')
+                TextColumn::make('classification')
                     ->label('Type')
                     ->badge()
                     ->color(fn (?string $state): string => match ($state) {
@@ -99,7 +86,7 @@ class AddressesTable
                         default => 'gray',
                     })
                     ->toggleable(),
-                TextColumn::make('latestCorrection.carrier.name')
+                TextColumn::make('validatedByCarrier.name')
                     ->label('Carrier')
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('importBatch.name')
@@ -118,23 +105,10 @@ class AddressesTable
                     ->label('Validation Status')
                     ->options([
                         'pending' => 'Pending',
-                        AddressCorrection::STATUS_VALID => 'Valid',
-                        AddressCorrection::STATUS_INVALID => 'Invalid',
-                        AddressCorrection::STATUS_AMBIGUOUS => 'Ambiguous',
-                    ])
-                    ->query(function ($query, array $data) {
-                        if (empty($data['value'])) {
-                            return $query;
-                        }
-
-                        if ($data['value'] === 'pending') {
-                            return $query->whereDoesntHave('corrections');
-                        }
-
-                        return $query->whereHas('latestCorrection', function ($q) use ($data) {
-                            $q->where('validation_status', $data['value']);
-                        });
-                    }),
+                        'valid' => 'Valid',
+                        'invalid' => 'Invalid',
+                        'ambiguous' => 'Ambiguous',
+                    ]),
 
                 SelectFilter::make('confidence')
                     ->label('Confidence Score')
@@ -154,19 +128,14 @@ class AddressesTable
 
                         $value = $data['value'];
 
-                        // Parse the filter value (e.g., "90+", "50-")
                         if (str_ends_with($value, '+')) {
                             $threshold = (float) str_replace('+', '', $value) / 100;
 
-                            return $query->whereHas('latestCorrection', function ($q) use ($threshold) {
-                                $q->where('confidence_score', '>=', $threshold);
-                            });
+                            return $query->where('confidence_score', '>=', $threshold);
                         } elseif (str_ends_with($value, '-')) {
                             $threshold = (float) str_replace('-', '', $value) / 100;
 
-                            return $query->whereHas('latestCorrection', function ($q) use ($threshold) {
-                                $q->where('confidence_score', '<', $threshold);
-                            });
+                            return $query->where('confidence_score', '<', $threshold);
                         }
 
                         return $query;
@@ -179,68 +148,25 @@ class AddressesTable
                         'commercial' => 'Commercial',
                         'mixed' => 'Mixed',
                         'unknown' => 'Unknown',
-                    ])
-                    ->query(function (Builder $query, array $data): Builder {
-                        if (empty($data['value'])) {
-                            return $query;
-                        }
+                    ]),
 
-                        return $query->whereHas('latestCorrection', function ($q) use ($data) {
-                            $q->where('classification', $data['value']);
-                        });
-                    }),
-
-                SelectFilter::make('dpv_status')
-                    ->label('DPV Status')
+                SelectFilter::make('is_residential')
+                    ->label('Residential')
                     ->options([
-                        'confirmed' => 'Confirmed (Y)',
-                        'secondary_missing' => 'Secondary Missing (S)',
-                        'not_confirmed' => 'Not Confirmed (N)',
-                        'dpv_match' => 'DPV Match',
-                        'any_valid' => 'Any Valid DPV',
+                        '1' => 'Yes',
+                        '0' => 'No',
                     ])
                     ->query(function (Builder $query, array $data): Builder {
-                        if (empty($data['value'])) {
+                        if (! isset($data['value']) || $data['value'] === '') {
                             return $query;
                         }
 
-                        return $query->whereHas('latestCorrection', function ($q) use ($data) {
-                            $value = $data['value'];
-
-                            // DPV status is stored in raw_response, need to search JSON
-                            match ($value) {
-                                'confirmed' => $q->where(function ($subQ) {
-                                    // Smarty: dpv_match_code = Y
-                                    $subQ->whereJsonContains('raw_response->0->analysis->dpv_match_code', 'Y')
-                                        // Or UPS ValidAddressIndicator
-                                        ->orWhereNotNull('raw_response->XAVResponse->ValidAddressIndicator')
-                                        // Or FedEx DPV = true
-                                        ->orWhere('raw_response->output->resolvedAddresses->0->attributes->DPV', 'true');
-                                }),
-                                'secondary_missing' => $q->whereJsonContains('raw_response->0->analysis->dpv_match_code', 'S'),
-                                'not_confirmed' => $q->whereJsonContains('raw_response->0->analysis->dpv_match_code', 'N'),
-                                'dpv_match' => $q->where(function ($subQ) {
-                                    $subQ->whereIn('raw_response->0->analysis->dpv_match_code', ['Y', 'S', 'D'])
-                                        ->orWhereNotNull('raw_response->XAVResponse->ValidAddressIndicator');
-                                }),
-                                'any_valid' => $q->whereIn('validation_status', ['valid']),
-                                default => $q,
-                            };
-                        });
+                        return $query->where('is_residential', $data['value'] === '1');
                     }),
 
-                SelectFilter::make('carrier')
+                SelectFilter::make('validated_by_carrier_id')
                     ->label('Carrier')
-                    ->options(fn () => Carrier::pluck('name', 'id')->toArray())
-                    ->query(function (Builder $query, array $data): Builder {
-                        if (empty($data['value'])) {
-                            return $query;
-                        }
-
-                        return $query->whereHas('latestCorrection', function ($q) use ($data) {
-                            $q->where('carrier_id', $data['value']);
-                        });
-                    }),
+                    ->options(fn () => Carrier::pluck('name', 'id')->toArray()),
 
                 SelectFilter::make('source')
                     ->options([

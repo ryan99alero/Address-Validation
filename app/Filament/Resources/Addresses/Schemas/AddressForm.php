@@ -16,33 +16,34 @@ class AddressForm
                 Section::make('Address Information')
                     ->columns(2)
                     ->schema([
-                        TextInput::make('name')
+                        TextInput::make('input_name')
                             ->label('Recipient Name')
                             ->maxLength(255),
-                        TextInput::make('company')
+                        TextInput::make('input_company')
                             ->label('Company Name')
                             ->maxLength(255),
-                        TextInput::make('address_line_1')
+                        TextInput::make('input_address_1')
                             ->label('Address Line 1')
                             ->required()
                             ->maxLength(255)
                             ->columnSpanFull(),
-                        TextInput::make('address_line_2')
+                        TextInput::make('input_address_2')
                             ->label('Address Line 2')
                             ->maxLength(255)
                             ->columnSpanFull(),
-                        TextInput::make('city')
+                        TextInput::make('input_city')
+                            ->label('City')
                             ->required()
                             ->maxLength(100),
-                        TextInput::make('state')
+                        TextInput::make('input_state')
                             ->label('State/Province')
                             ->required()
                             ->maxLength(50),
-                        TextInput::make('postal_code')
+                        TextInput::make('input_postal')
                             ->label('ZIP/Postal Code')
                             ->required()
                             ->maxLength(20),
-                        Select::make('country_code')
+                        Select::make('input_country')
                             ->label('Country')
                             ->options([
                                 'US' => 'United States',

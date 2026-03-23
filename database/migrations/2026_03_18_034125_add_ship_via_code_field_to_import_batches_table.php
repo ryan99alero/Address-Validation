@@ -21,12 +21,7 @@ return new class extends Migration
             $table->string('ship_via_code_field')->nullable()->after('field_mappings');
         });
 
-        // Add ship_via_code to addresses table for storing the resolved code
-        Schema::table('addresses', function (Blueprint $table) {
-            $table->string('ship_via_code', 50)->nullable()->after('country_code');
-            $table->foreignId('ship_via_code_id')->nullable()->after('ship_via_code')
-                ->constrained('ship_via_codes')->nullOnDelete();
-        });
+        // Note: ship_via_code and ship_via_code_id are now in the base addresses table
     }
 
     /**
@@ -34,11 +29,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('addresses', function (Blueprint $table) {
-            $table->dropConstrainedForeignId('ship_via_code_id');
-            $table->dropColumn('ship_via_code');
-        });
-
         Schema::table('import_field_templates', function (Blueprint $table) {
             $table->dropColumn('ship_via_code_field');
         });

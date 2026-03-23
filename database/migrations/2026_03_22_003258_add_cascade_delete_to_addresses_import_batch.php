@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -11,15 +12,19 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('addresses', function (Blueprint $table) {
-            // Drop the existing foreign key constraint
-            $table->dropForeign(['import_batch_id']);
+        // First, clean up any orphaned addresses (pointing to non-existent batches)
+        DB::statement('
+            DELETE FROM addresses
+            WHERE import_batch_id IS NOT NULL
+            AND import_batch_id NOT IN (SELECT id FROM import_batches)
+        ');
 
-            // Re-add with cascade on delete
+        // Add foreign key constraint with cascade delete
+        Schema::table('addresses', function (Blueprint $table) {
             $table->foreign('import_batch_id')
                 ->references('id')
                 ->on('import_batches')
-                ->cascadeOnDelete();
+                ->onDelete('cascade');
         });
     }
 
@@ -29,14 +34,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('addresses', function (Blueprint $table) {
-            // Drop the cascade foreign key
             $table->dropForeign(['import_batch_id']);
-
-            // Re-add with null on delete (original behavior)
-            $table->foreign('import_batch_id')
-                ->references('id')
-                ->on('import_batches')
-                ->nullOnDelete();
         });
     }
 };

@@ -3,30 +3,12 @@
 namespace App\Services;
 
 use App\Models\CompanySetting;
-use Illuminate\Support\Facades\Schema;
 
 class DynamicFieldService
 {
     /**
-     * Get the current number of extra fields that exist in the addresses table.
-     */
-    public function getCurrentExtraFieldCount(): int
-    {
-        $count = 0;
-
-        for ($i = 1; $i <= 100; $i++) {
-            if (Schema::hasColumn('addresses', "extra_{$i}")) {
-                $count = $i;
-            } else {
-                break;
-            }
-        }
-
-        return $count;
-    }
-
-    /**
      * Get the configured extra field count from company settings.
+     * With JSON storage, this is just the number of fields shown in the UI.
      */
     public function getConfiguredExtraFieldCount(): int
     {
@@ -34,53 +16,49 @@ class DynamicFieldService
     }
 
     /**
-     * Expand extra fields to the specified count.
-     * Only adds columns - never removes them.
-     *
-     * @return array{added: int, current: int}
+     * Get the current number of extra fields available.
+     * With JSON storage, this equals the configured count (no column checks needed).
      */
-    public function expandExtraFields(int $newCount): array
+    public function getCurrentExtraFieldCount(): int
     {
-        $currentCount = $this->getCurrentExtraFieldCount();
-        $added = 0;
-
-        if ($newCount <= $currentCount) {
-            return ['added' => 0, 'current' => $currentCount];
-        }
-
-        Schema::table('addresses', function ($table) use ($currentCount, $newCount, &$added) {
-            for ($i = $currentCount + 1; $i <= $newCount; $i++) {
-                $table->string("extra_{$i}")->nullable();
-                $added++;
-            }
-        });
-
-        return ['added' => $added, 'current' => $newCount];
+        return $this->getConfiguredExtraFieldCount();
     }
 
     /**
-     * Update the configured extra field count and expand columns if needed.
+     * Update the configured extra field count.
+     * With JSON storage, we just update the setting - no column changes needed.
      *
      * @return array{added: int, current: int, configured: int}
      */
     public function updateExtraFieldCount(int $newCount): array
     {
-        // Expand columns first
-        $result = $this->expandExtraFields($newCount);
+        $oldCount = $this->getConfiguredExtraFieldCount();
 
-        // Update the setting
         $settings = CompanySetting::instance();
         $settings->update(['extra_field_count' => $newCount]);
 
         return [
-            'added' => $result['added'],
-            'current' => $result['current'],
+            'added' => max(0, $newCount - $oldCount),
+            'current' => $newCount,
             'configured' => $newCount,
         ];
     }
 
     /**
-     * Get list of all extra field names that currently exist.
+     * Expand extra fields to the specified count.
+     * With JSON storage, this is a no-op but kept for backward compatibility.
+     *
+     * @return array{added: int, current: int}
+     */
+    public function expandExtraFields(int $newCount): array
+    {
+        $currentCount = $this->getConfiguredExtraFieldCount();
+
+        return ['added' => 0, 'current' => max($currentCount, $newCount)];
+    }
+
+    /**
+     * Get list of all extra field names that are configured.
      *
      * @return array<string>
      */
@@ -111,5 +89,19 @@ class DynamicFieldService
         }
 
         return $options;
+    }
+
+    /**
+     * Check if an extra field key is valid.
+     */
+    public function isValidExtraField(string $key): bool
+    {
+        if (! preg_match('/^extra_(\d+)$/', $key, $matches)) {
+            return false;
+        }
+
+        $index = (int) $matches[1];
+
+        return $index >= 1 && $index <= $this->getConfiguredExtraFieldCount();
     }
 }

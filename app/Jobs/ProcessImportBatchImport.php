@@ -227,15 +227,26 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
 
                 // Map row data using position indices
                 $rowValues = array_values($row);
+                $extraData = [];
                 foreach ($this->positionToField as $position => $field) {
                     $value = $rowValues[$position] ?? null;
                     if ($value !== null && $value !== '') {
-                        $addressData[$field] = $value;
+                        // Store extra_N fields in the extra_data JSON column
+                        if (str_starts_with($field, 'extra_')) {
+                            $extraData[$field] = $value;
+                        } else {
+                            $addressData[$field] = $value;
+                        }
                     }
                 }
 
+                // Add extra_data JSON if we have any extra fields
+                if (! empty($extraData)) {
+                    $addressData['extra_data'] = $extraData;
+                }
+
                 // Parse address line for suite extraction
-                if (! empty($addressData['address_line_1'])) {
+                if (! empty($addressData['input_address_1'])) {
                     $addressData = $this->parseAddressLine($addressData);
                 }
 
@@ -250,8 +261,8 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
                 // Sanitize date fields - handle Excel formulas and invalid values
                 $addressData = $this->sanitizeDateFields($addressData);
 
-                // Only create if we have address_line_1
-                if (! empty($addressData['address_line_1'])) {
+                // Only create if we have input_address_1
+                if (! empty($addressData['input_address_1'])) {
                     // Use firstOrCreate to prevent duplicates if job retries
                     $address = Address::firstOrCreate(
                         [
@@ -309,7 +320,7 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
      */
     protected function parseAddressLine(array $addressData): array
     {
-        $addressLine1 = $addressData['address_line_1'] ?? '';
+        $addressLine1 = $addressData['input_address_1'] ?? '';
 
         if (empty($addressLine1)) {
             return $addressData;
@@ -322,10 +333,10 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
         if (preg_match('/^(.+?),\s*((?:'.$unitKeywords.')\s*[A-Za-z0-9][\w\-&\s]*)$/i', $addressLine1, $matches)) {
             $mainAddress = trim($matches[1]);
             if (strlen($mainAddress) >= 5) {
-                $addressData['address_line_1'] = $mainAddress;
+                $addressData['input_address_1'] = $mainAddress;
                 $unit = strtoupper(trim($matches[2]));
-                $addressData['address_line_2'] = ! empty($addressData['address_line_2'])
-                    ? trim($addressData['address_line_2']).', '.$unit
+                $addressData['input_address_2'] = ! empty($addressData['input_address_2'])
+                    ? trim($addressData['input_address_2']).', '.$unit
                     : $unit;
             }
 
@@ -336,10 +347,10 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
         if (preg_match('/^(.+?)\s+('.$unitKeywords.')\s+([A-Za-z0-9][\w\-&\s]*)$/i', $addressLine1, $matches)) {
             $mainAddress = trim($matches[1]);
             if (strlen($mainAddress) >= 5 && preg_match('/\d/', $mainAddress)) {
-                $addressData['address_line_1'] = $mainAddress;
+                $addressData['input_address_1'] = $mainAddress;
                 $unit = strtoupper(trim($matches[2])).' '.trim($matches[3]);
-                $addressData['address_line_2'] = ! empty($addressData['address_line_2'])
-                    ? trim($addressData['address_line_2']).', '.$unit
+                $addressData['input_address_2'] = ! empty($addressData['input_address_2'])
+                    ? trim($addressData['input_address_2']).', '.$unit
                     : $unit;
             }
 
@@ -350,10 +361,10 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
         if (preg_match('/^(.+?)\s+('.$unitKeywords.')\s*#\s*([A-Za-z0-9][\w\-&\s]*)$/i', $addressLine1, $matches)) {
             $mainAddress = trim($matches[1]);
             if (strlen($mainAddress) >= 5 && preg_match('/\d/', $mainAddress)) {
-                $addressData['address_line_1'] = $mainAddress;
+                $addressData['input_address_1'] = $mainAddress;
                 $unit = strtoupper(trim($matches[2])).' '.trim($matches[3]);
-                $addressData['address_line_2'] = ! empty($addressData['address_line_2'])
-                    ? trim($addressData['address_line_2']).', '.$unit
+                $addressData['input_address_2'] = ! empty($addressData['input_address_2'])
+                    ? trim($addressData['input_address_2']).', '.$unit
                     : $unit;
             }
         }

@@ -12,6 +12,13 @@ class TransitTime extends Model
     /** @use HasFactory<TransitTimeFactory> */
     use HasFactory;
 
+    /**
+     * The table associated with the model.
+     *
+     * @var string
+     */
+    protected $table = 'transit_times';
+
     protected $fillable = [
         'address_id',
         'carrier_id',
@@ -138,10 +145,29 @@ class TransitTime extends Model
     }
 
     /**
-     * Calculate transit days from ship date to delivery date.
+     * Calculate transit days - returns a string like "3" or "2-3" if min/max differ.
+     * Uses carrier-provided transit times, falls back to calculating from delivery_date.
      */
-    public function getCalculatedTransitDays(): ?int
+    public function getCalculatedTransitDays(): ?string
     {
+        // First priority: Use carrier-provided transit times
+        if ($this->minimum_transit_time || $this->maximum_transit_time) {
+            $min = $this->minimum_transit_time ? $this->convertTransitTimeToNumber($this->minimum_transit_time) : null;
+            $max = $this->maximum_transit_time ? $this->convertTransitTimeToNumber($this->maximum_transit_time) : null;
+
+            // If both exist and are different, show range
+            if ($min && $max && $min !== $max) {
+                return "{$min}-{$max}";
+            }
+
+            // Otherwise return whichever we have
+            $days = $max ?? $min;
+            if ($days && $days > 0) {
+                return (string) $days;
+            }
+        }
+
+        // Fallback: Calculate from delivery_date
         if (! $this->delivery_date) {
             return null;
         }
@@ -172,7 +198,7 @@ class TransitTime extends Model
             }
         }
 
-        return max(1, $days);
+        return (string) max(1, $days);
     }
 
     /**

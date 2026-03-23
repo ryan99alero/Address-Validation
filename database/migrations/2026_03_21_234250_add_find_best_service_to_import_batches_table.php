@@ -11,9 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('addresses', function (Blueprint $table) {
-            // Prevent duplicate rows per batch (handles job retries)
-            $table->unique(['import_batch_id', 'source_row_number'], 'addresses_batch_row_unique');
+        Schema::table('import_batches', function (Blueprint $table) {
+            $table->boolean('find_best_service')->default(false)->after('origin_country_code');
         });
     }
 
@@ -22,8 +21,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('addresses', function (Blueprint $table) {
-            $table->dropUnique('addresses_batch_row_unique');
+        Schema::table('import_batches', function (Blueprint $table) {
+            $table->dropColumn('find_best_service');
         });
     }
 };

@@ -3,7 +3,6 @@
 namespace App\Services\Carriers;
 
 use App\Models\Address;
-use App\Models\AddressCorrection;
 use Exception;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -23,7 +22,7 @@ class UpsCarrier extends AbstractCarrier
     /**
      * Validate a single address using UPS Address Validation API.
      */
-    public function validateAddress(Address $address): AddressCorrection
+    public function validateAddress(Address $address): Address
     {
         try {
             $response = $this->getHttpClient()
@@ -36,7 +35,7 @@ class UpsCarrier extends AbstractCarrier
             if (! $response->successful()) {
                 $this->markError('API request failed: '.$response->status());
 
-                return $this->createFailedCorrection($address, 'API request failed: '.$response->body());
+                return $this->markAddressFailed($address, 'API request failed: '.$response->body());
             }
 
             $this->markConnected();
@@ -50,7 +49,7 @@ class UpsCarrier extends AbstractCarrier
             ]);
             $this->markError($e->getMessage());
 
-            return $this->createFailedCorrection($address, $e->getMessage());
+            return $this->markAddressFailed($address, $e->getMessage());
         }
     }
 
@@ -116,25 +115,25 @@ class UpsCarrier extends AbstractCarrier
     protected function formatAddressForRequest(Address $address): array
     {
         $addressLines = array_filter([
-            $address->address_line_1,
-            $address->address_line_2,
+            $address->input_address_1,
+            $address->input_address_2,
         ]);
 
         return [
             'AddressLine' => $addressLines,
-            'PoliticalDivision2' => $address->city,
-            'PoliticalDivision1' => $address->state,
-            'PostcodePrimaryLow' => $address->postal_code,
-            'CountryCode' => $address->country_code ?? 'US',
+            'PoliticalDivision2' => $address->input_city,
+            'PoliticalDivision1' => $address->input_state,
+            'PostcodePrimaryLow' => $address->input_postal,
+            'CountryCode' => $address->input_country ?? 'US',
         ];
     }
 
     /**
-     * Parse UPS API response into AddressCorrection.
+     * Parse UPS API response and update Address.
      *
      * @param  array<string, mixed>  $responseData
      */
-    protected function parseResponse(Address $address, array $responseData): AddressCorrection
+    protected function parseResponse(Address $address, array $responseData): Address
     {
         $xavResponse = $responseData['XAVResponse'] ?? [];
 
@@ -143,34 +142,31 @@ class UpsCarrier extends AbstractCarrier
 
         // Get the candidate address (first one if multiple)
         $candidate = $this->extractBestCandidate($xavResponse);
-        $candidatesCount = $this->countCandidates($xavResponse);
 
         // Check if residential
         $isResidential = $this->isResidentialAddress($xavResponse);
         $classification = $this->determineClassification($xavResponse);
 
-        $correction = new AddressCorrection([
-            'address_id' => $address->id,
-            'carrier_id' => $this->carrier->id,
+        $confidenceScore = $this->calculateConfidenceScore($xavResponse);
+
+        // Update Address directly (denormalized schema)
+        $address->update([
+            'output_address_1' => $candidate['address_line_1'] ?? null,
+            'output_address_2' => $candidate['address_line_2'] ?? null,
+            'output_city' => $candidate['city'] ?? null,
+            'output_state' => $candidate['state'] ?? null,
+            'output_postal' => $candidate['postal_code'] ?? null,
+            'output_postal_ext' => $candidate['postal_code_ext'] ?? null,
+            'output_country' => $candidate['country_code'] ?? $address->input_country,
             'validation_status' => $validationStatus,
-            'corrected_address_line_1' => $candidate['address_line_1'] ?? null,
-            'corrected_address_line_2' => $candidate['address_line_2'] ?? null,
-            'corrected_city' => $candidate['city'] ?? null,
-            'corrected_state' => $candidate['state'] ?? null,
-            'corrected_postal_code' => $candidate['postal_code'] ?? null,
-            'corrected_postal_code_ext' => $candidate['postal_code_ext'] ?? null,
-            'corrected_country_code' => $candidate['country_code'] ?? $address->country_code,
             'is_residential' => $isResidential,
             'classification' => $classification,
-            'confidence_score' => $this->calculateConfidenceScore($xavResponse),
-            'candidates_count' => $candidatesCount,
-            'raw_response' => $responseData,
+            'confidence_score' => $confidenceScore,
+            'validated_by_carrier_id' => $this->carrier->id,
             'validated_at' => now(),
         ]);
 
-        $correction->save();
-
-        return $correction;
+        return $address;
     }
 
     /**
@@ -182,21 +178,21 @@ class UpsCarrier extends AbstractCarrier
     {
         // Check for ValidAddressIndicator
         if (isset($xavResponse['ValidAddressIndicator'])) {
-            return AddressCorrection::STATUS_VALID;
+            return 'valid';
         }
 
         // Check for AmbiguousAddressIndicator
         if (isset($xavResponse['AmbiguousAddressIndicator'])) {
-            return AddressCorrection::STATUS_AMBIGUOUS;
+            return 'ambiguous';
         }
 
         // Check for NoCandidatesIndicator
         if (isset($xavResponse['NoCandidatesIndicator'])) {
-            return AddressCorrection::STATUS_INVALID;
+            return 'invalid';
         }
 
         // Default to invalid if we can't determine
-        return AddressCorrection::STATUS_INVALID;
+        return 'invalid';
     }
 
     /**
@@ -233,27 +229,6 @@ class UpsCarrier extends AbstractCarrier
     }
 
     /**
-     * Count the number of candidate addresses.
-     *
-     * @param  array<string, mixed>  $xavResponse
-     */
-    protected function countCandidates(array $xavResponse): int
-    {
-        $candidates = $xavResponse['Candidate'] ?? [];
-
-        if (empty($candidates)) {
-            return 0;
-        }
-
-        // Check if it's a single candidate (associative array) or multiple
-        if (isset($candidates['AddressKeyFormat'])) {
-            return 1;
-        }
-
-        return count($candidates);
-    }
-
-    /**
      * Check if the address is residential.
      *
      * @param  array<string, mixed>  $xavResponse
@@ -287,17 +262,17 @@ class UpsCarrier extends AbstractCarrier
         $candidate = $xavResponse['Candidate'][0] ?? $xavResponse['Candidate'] ?? null;
 
         if (! $candidate) {
-            return AddressCorrection::CLASSIFICATION_UNKNOWN;
+            return 'unknown';
         }
 
         $addressClassification = $candidate['AddressClassification'] ?? [];
         $code = $addressClassification['Code'] ?? null;
 
         return match ($code) {
-            '1' => AddressCorrection::CLASSIFICATION_COMMERCIAL,
-            '2' => AddressCorrection::CLASSIFICATION_RESIDENTIAL,
-            '0' => AddressCorrection::CLASSIFICATION_UNKNOWN,
-            default => AddressCorrection::CLASSIFICATION_UNKNOWN,
+            '1' => 'commercial',
+            '2' => 'residential',
+            '0' => 'unknown',
+            default => 'unknown',
         };
     }
 
@@ -325,12 +300,33 @@ class UpsCarrier extends AbstractCarrier
     }
 
     /**
+     * Count the number of candidate addresses.
+     *
+     * @param  array<string, mixed>  $xavResponse
+     */
+    protected function countCandidates(array $xavResponse): int
+    {
+        $candidates = $xavResponse['Candidate'] ?? [];
+
+        if (empty($candidates)) {
+            return 0;
+        }
+
+        // Check if it's a single candidate (associative array) or multiple
+        if (isset($candidates['AddressKeyFormat'])) {
+            return 1;
+        }
+
+        return count($candidates);
+    }
+
+    /**
      * Validate multiple addresses using concurrent HTTP requests.
      * UPS doesn't have a native batch API, so we use HTTP pool for parallel requests.
      * Uses carrier settings for chunk_size and concurrent_requests.
      *
      * @param  array<Address>  $addresses
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     public function validateBatch(array $addresses): array
     {
@@ -363,22 +359,22 @@ class UpsCarrier extends AbstractCarrier
             }
         );
 
-        // Extract corrections from results
-        $corrections = [];
+        // Extract addresses from results
+        $validatedAddresses = [];
         foreach ($results as $result) {
-            if ($result['correction']) {
-                $corrections[] = $result['correction'];
+            if ($result['address']) {
+                $validatedAddresses[] = $result['address'];
             }
         }
 
-        return $corrections;
+        return $validatedAddresses;
     }
 
     /**
      * Validate addresses concurrently and return detailed results.
      *
      * @param  array<Address>  $addresses
-     * @return array<array{address_id: int, success: bool, correction: ?AddressCorrection, error: ?string}>
+     * @return array<array{address_id: int, success: bool, address: Address, error: ?string}>
      */
     public function validateAddressesConcurrently(array $addresses): array
     {

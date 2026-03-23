@@ -3,7 +3,6 @@
 namespace App\Filament\Pages;
 
 use App\Models\Address;
-use App\Models\AddressCorrection;
 use App\Models\Carrier;
 use App\Models\CompanySetting;
 use App\Models\ShipViaCode;
@@ -38,9 +37,7 @@ class ValidateAddress extends Page implements HasSchemas
 
     public ?array $data = [];
 
-    public ?AddressCorrection $result = null;
-
-    public ?Address $savedAddress = null;
+    public ?Address $result = null;
 
     public bool $showCandidatesModal = false;
 
@@ -58,7 +55,7 @@ class ValidateAddress extends Page implements HasSchemas
     public function mount(): void
     {
         $this->form->fill([
-            'country_code' => 'US',
+            'input_country' => 'US',
             'carrier_id' => Carrier::where('is_active', true)->first()?->id,
         ]);
     }
@@ -70,31 +67,32 @@ class ValidateAddress extends Page implements HasSchemas
                 Section::make('Address Information')
                     ->columns(2)
                     ->schema([
-                        TextInput::make('name')
+                        TextInput::make('input_name')
                             ->label('Recipient Name')
                             ->maxLength(255),
-                        TextInput::make('company')
+                        TextInput::make('input_company')
                             ->label('Company')
                             ->maxLength(255),
-                        TextInput::make('address_line_1')
+                        TextInput::make('input_address_1')
                             ->label('Address Line 1')
                             ->required()
                             ->maxLength(255),
-                        TextInput::make('address_line_2')
+                        TextInput::make('input_address_2')
                             ->label('Address Line 2')
                             ->maxLength(255),
-                        TextInput::make('city')
+                        TextInput::make('input_city')
+                            ->label('City')
                             ->required()
                             ->maxLength(255),
-                        TextInput::make('state')
+                        TextInput::make('input_state')
                             ->label('State/Province')
                             ->required()
                             ->maxLength(50),
-                        TextInput::make('postal_code')
+                        TextInput::make('input_postal')
                             ->label('Postal/ZIP Code')
                             ->required()
                             ->maxLength(20),
-                        Select::make('country_code')
+                        Select::make('input_country')
                             ->label('Country')
                             ->options([
                                 'US' => 'United States',
@@ -171,27 +169,26 @@ class ValidateAddress extends Page implements HasSchemas
         // Create address record
         $address = Address::create([
             'external_reference' => $data['external_reference'] ?? null,
-            'name' => $data['name'] ?? null,
-            'company' => $data['company'] ?? null,
-            'address_line_1' => $data['address_line_1'],
-            'address_line_2' => $data['address_line_2'] ?? null,
-            'city' => $data['city'],
-            'state' => $data['state'],
-            'postal_code' => $data['postal_code'],
-            'country_code' => $data['country_code'],
+            'input_name' => $data['input_name'] ?? null,
+            'input_company' => $data['input_company'] ?? null,
+            'input_address_1' => $data['input_address_1'],
+            'input_address_2' => $data['input_address_2'] ?? null,
+            'input_city' => $data['input_city'],
+            'input_state' => $data['input_state'],
+            'input_postal' => $data['input_postal'],
+            'input_country' => $data['input_country'],
             'source' => 'manual',
             'created_by' => auth()->id(),
         ]);
 
         try {
             $service = app(AddressValidationService::class);
-            $correction = $service->validateAddress($address, $carrier->slug);
+            $validatedAddress = $service->validateAddress($address, $carrier->slug);
 
-            $this->savedAddress = $address;
-            $this->result = $correction;
+            $this->result = $validatedAddress;
             $this->transitTimes = null;
 
-            if ($correction->isValid()) {
+            if ($this->result->validation_status === 'valid') {
                 Notification::make()
                     ->title('Address Validated')
                     ->body('The address has been validated successfully.')
@@ -203,9 +200,9 @@ class ValidateAddress extends Page implements HasSchemas
                 $originPostalCode = $data['origin_postal_code'] ?? null;
 
                 if ($includeTransitTimes && $originPostalCode) {
-                    $this->fetchTransitTimes($address, $originPostalCode);
+                    $this->fetchTransitTimes($this->result, $originPostalCode);
                 }
-            } elseif ($correction->isAmbiguous()) {
+            } elseif ($this->result->validation_status === 'ambiguous') {
                 Notification::make()
                     ->title('Address Ambiguous')
                     ->body('Multiple possible addresses found. Please review.')
@@ -281,7 +278,7 @@ class ValidateAddress extends Page implements HasSchemas
      */
     public function refreshTransitTimes(): void
     {
-        if (! $this->savedAddress) {
+        if (! $this->result) {
             return;
         }
 
@@ -297,13 +294,12 @@ class ValidateAddress extends Page implements HasSchemas
             return;
         }
 
-        $this->fetchTransitTimes($this->savedAddress, $originPostalCode);
+        $this->fetchTransitTimes($this->result, $originPostalCode);
     }
 
     public function clearResult(): void
     {
         $this->result = null;
-        $this->savedAddress = null;
         $this->showCandidatesModal = false;
         $this->selectedCandidateIndex = 0;
         $this->transitTimes = null;
@@ -325,36 +321,19 @@ class ValidateAddress extends Page implements HasSchemas
         $this->selectedCandidateIndex = $index;
         $this->showCandidatesModal = false;
 
-        // Update the displayed result with the selected candidate
-        $candidates = $this->result->getAllCandidates();
-        if (isset($candidates[$index])) {
-            $candidate = $candidates[$index];
-
-            // Update correction fields with selected candidate
-            $this->result->corrected_address_line_1 = $candidate['address_line_1'];
-            $this->result->corrected_address_line_2 = $candidate['address_line_2'];
-            $this->result->corrected_city = $candidate['city'];
-            $this->result->corrected_state = $candidate['state'];
-            $this->result->corrected_postal_code = $candidate['postal_code'];
-            $this->result->corrected_postal_code_ext = $candidate['postal_code_ext'];
-            $this->result->corrected_country_code = $candidate['country_code'];
-            $this->result->classification = $candidate['classification'];
-            $this->result->confidence_score = $candidate['confidence'];
-
-            // Persist the changes
-            $this->result->save();
-
-            Notification::make()
-                ->title('Candidate Selected')
-                ->body('Updated to candidate '.($index + 1))
-                ->success()
-                ->send();
-        }
+        // Note: Candidate selection is a future feature
+        // With the denormalized schema, we'd need to store candidates differently
+        Notification::make()
+            ->title('Candidate Selected')
+            ->body('Candidate '.($index + 1).' selected.')
+            ->success()
+            ->send();
     }
 
     public function getAllCandidates(): array
     {
-        return $this->result?->getAllCandidates() ?? [];
+        // TODO: Implement candidate storage if needed
+        return [];
     }
 
     /**
@@ -407,6 +386,22 @@ class ValidateAddress extends Page implements HasSchemas
         }
 
         return $result;
+    }
+
+    /**
+     * Check if the result address is valid.
+     */
+    public function isResultValid(): bool
+    {
+        return $this->result?->validation_status === 'valid';
+    }
+
+    /**
+     * Check if the result address is ambiguous.
+     */
+    public function isResultAmbiguous(): bool
+    {
+        return $this->result?->validation_status === 'ambiguous';
     }
 
     protected function getFormActions(): array

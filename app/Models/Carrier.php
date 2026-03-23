@@ -163,9 +163,9 @@ class Carrier extends Model
 
     // Relationships
 
-    public function corrections(): HasMany
+    public function validatedAddresses(): HasMany
     {
-        return $this->hasMany(AddressCorrection::class);
+        return $this->hasMany(Address::class, 'validated_by_carrier_id');
     }
 
     public function batches(): HasMany

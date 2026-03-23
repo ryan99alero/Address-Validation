@@ -114,6 +114,13 @@ class ShipViaCode extends Model
         'SP' => 'UPS SurePost',
     ];
 
+    /**
+     * Payment type constants.
+     */
+    public const PAYMENT_SENDER = 'sender';
+
+    public const PAYMENT_THIRD_PARTY = 'third_party';
+
     protected $fillable = [
         'code',
         'carrier_code',
@@ -122,6 +129,9 @@ class ShipViaCode extends Model
         'service_type',
         'service_name',
         'description',
+        'plant_id',
+        'payment_type',
+        'account_number',
         'is_active',
     ];
 
@@ -307,6 +317,61 @@ class ShipViaCode extends Model
         return [
             'FedEx' => self::getServiceTypesForCarrier('fedex'),
             'UPS' => self::getServiceTypesForCarrier('ups'),
+        ];
+    }
+
+    /**
+     * Find a matching ShipViaCode for BestWay optimization.
+     *
+     * Finds a ship via code with the same plant_id, payment_type, and account_number
+     * but for a different service type.
+     *
+     * @param  string  $serviceType  The target service type (e.g., FEDEX_GROUND)
+     * @param  string|null  $plantId  Plant identifier to match
+     * @param  string|null  $paymentType  Payment type to match (sender or third_party)
+     * @param  string|null  $accountNumber  Account number to match (for sender payment type)
+     */
+    public static function findMatchingForBestWay(
+        string $serviceType,
+        ?string $plantId,
+        ?string $paymentType,
+        ?string $accountNumber = null
+    ): ?self {
+        $query = static::where('service_type', $serviceType)
+            ->where('is_active', true);
+
+        // Match plant_id
+        if ($plantId !== null) {
+            $query->where('plant_id', $plantId);
+        } else {
+            $query->whereNull('plant_id');
+        }
+
+        // Match payment_type
+        if ($paymentType !== null) {
+            $query->where('payment_type', $paymentType);
+        } else {
+            $query->whereNull('payment_type');
+        }
+
+        // Match account_number only if payment_type is sender
+        if ($paymentType === self::PAYMENT_SENDER && $accountNumber !== null) {
+            $query->where('account_number', $accountNumber);
+        }
+
+        return $query->first();
+    }
+
+    /**
+     * Get payment type options for forms.
+     *
+     * @return array<string, string>
+     */
+    public static function getPaymentTypeOptions(): array
+    {
+        return [
+            self::PAYMENT_SENDER => 'Sender (Bill to our account)',
+            self::PAYMENT_THIRD_PARTY => 'Third Party (Bill to client)',
         ];
     }
 

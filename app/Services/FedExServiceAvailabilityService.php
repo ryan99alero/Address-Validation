@@ -178,10 +178,9 @@ class FedExServiceAvailabilityService
      */
     protected function buildPayloadForAddress(Address $address, array $shipperAddress): array
     {
-        // Use corrected address if available, otherwise original
-        $correction = $address->latestCorrection;
-        $destinationPostalCode = $correction?->corrected_postal_code ?? $address->postal_code;
-        $destinationCountryCode = $correction?->corrected_country_code ?? $address->country_code ?? 'US';
+        // Use validated output address if available, otherwise original input (denormalized schema)
+        $destinationPostalCode = $address->output_postal ?? $address->input_postal;
+        $destinationCountryCode = $address->output_country ?? $address->input_country ?? 'US';
 
         // Use requested ship date or today
         $shipDate = $address->requested_ship_date ?? now();

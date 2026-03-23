@@ -3,7 +3,6 @@
 namespace App\Services\Carriers;
 
 use App\Models\Address;
-use App\Models\AddressCorrection;
 use Exception;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -23,7 +22,7 @@ class SmartyCarrier extends AbstractCarrier
     /**
      * Validate a single address using Smarty US Street Address API.
      */
-    public function validateAddress(Address $address): AddressCorrection
+    public function validateAddress(Address $address): Address
     {
         $results = $this->validateBatch([$address]);
 
@@ -35,7 +34,7 @@ class SmartyCarrier extends AbstractCarrier
      * Uses carrier settings for native_batch_size, chunk_size, and concurrent_requests.
      *
      * @param  array<Address>  $addresses
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     public function validateBatch(array $addresses): array
     {
@@ -48,7 +47,7 @@ class SmartyCarrier extends AbstractCarrier
         $chunkSize = $this->getChunkSize();
         $concurrentRequests = $this->getConcurrentRequests();
 
-        $allCorrections = [];
+        $allResults = [];
 
         // First, split into chunks based on overall chunk_size
         foreach (array_chunk($addresses, $chunkSize) as $chunk) {
@@ -60,19 +59,19 @@ class SmartyCarrier extends AbstractCarrier
 
             // Process native batches concurrently (up to concurrent_requests at a time)
             foreach (array_chunk($nativeBatches, $concurrentRequests) as $concurrentBatches) {
-                $corrections = $this->validateNativeBatchesConcurrently($concurrentBatches);
-                $allCorrections = array_merge($allCorrections, $corrections);
+                $results = $this->validateNativeBatchesConcurrently($concurrentBatches);
+                $allResults = array_merge($allResults, $results);
             }
         }
 
-        return $allCorrections;
+        return $allResults;
     }
 
     /**
      * Process multiple native batches concurrently using HTTP pool.
      *
      * @param  array<array<Address>>  $batches
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     protected function validateNativeBatchesConcurrently(array $batches): array
     {
@@ -90,14 +89,14 @@ class SmartyCarrier extends AbstractCarrier
 
         if (empty($authId) || empty($authToken)) {
             $errorMsg = 'Smarty API credentials not configured';
-            $allCorrections = [];
+            $allResults = [];
             foreach ($batches as $batch) {
                 foreach ($batch as $address) {
-                    $allCorrections[] = $this->createFailedCorrection($address, $errorMsg);
+                    $allResults[] = $this->markAddressFailed($address, $errorMsg);
                 }
             }
 
-            return $allCorrections;
+            return $allResults;
         }
 
         $baseUrl = $this->carrier->getBaseUrl();
@@ -124,19 +123,19 @@ class SmartyCarrier extends AbstractCarrier
         });
 
         // Process responses
-        $allCorrections = [];
+        $allResults = [];
 
         foreach ($batches as $batchIndex => $batch) {
             $response = $responses[$batchIndex] ?? null;
 
             try {
                 if ($response && $response->successful()) {
-                    $corrections = $this->parseBatchResponse($batch, $response->json());
-                    $allCorrections = array_merge($allCorrections, $corrections);
+                    $results = $this->parseBatchResponse($batch, $response->json());
+                    $allResults = array_merge($allResults, $results);
                 } else {
                     $errorMsg = $response ? 'API error: '.$response->status() : 'No response';
                     foreach ($batch as $address) {
-                        $allCorrections[] = $this->createFailedCorrection($address, $errorMsg);
+                        $allResults[] = $this->markAddressFailed($address, $errorMsg);
                     }
                 }
             } catch (Exception $e) {
@@ -145,21 +144,21 @@ class SmartyCarrier extends AbstractCarrier
                     'error' => $e->getMessage(),
                 ]);
                 foreach ($batch as $address) {
-                    $allCorrections[] = $this->createFailedCorrection($address, $e->getMessage());
+                    $allResults[] = $this->markAddressFailed($address, $e->getMessage());
                 }
             }
         }
 
         $this->markConnected();
 
-        return $allCorrections;
+        return $allResults;
     }
 
     /**
      * Validate a chunk of addresses (up to 100) in a single POST request.
      *
      * @param  array<Address>  $addresses
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     protected function validateBatchChunk(array $addresses): array
     {
@@ -190,7 +189,7 @@ class SmartyCarrier extends AbstractCarrier
                 $this->markError('API request failed: '.$response->status());
 
                 return array_map(
-                    fn (Address $address) => $this->createFailedCorrection($address, 'API request failed: '.$response->body()),
+                    fn (Address $address) => $this->markAddressFailed($address, 'API request failed: '.$response->body()),
                     $addresses
                 );
             }
@@ -207,7 +206,7 @@ class SmartyCarrier extends AbstractCarrier
             $this->markError($e->getMessage());
 
             return array_map(
-                fn (Address $address) => $this->createFailedCorrection($address, $e->getMessage()),
+                fn (Address $address) => $this->markAddressFailed($address, $e->getMessage()),
                 $addresses
             );
         }
@@ -227,40 +226,40 @@ class SmartyCarrier extends AbstractCarrier
 
         $data = [
             'input_id' => $inputId,
-            'street' => $address->address_line_1,
+            'street' => $address->input_address_1,
             'candidates' => 1,
             'match' => 'invalid', // Return results even for invalid addresses
         ];
 
-        if ($address->address_line_2) {
-            $data['street2'] = $address->address_line_2;
+        if ($address->input_address_2) {
+            $data['street2'] = $address->input_address_2;
         }
 
-        if ($address->city) {
-            $data['city'] = $address->city;
+        if ($address->input_city) {
+            $data['city'] = $address->input_city;
         }
 
-        if ($address->state) {
-            $data['state'] = $address->state;
+        if ($address->input_state) {
+            $data['state'] = $address->input_state;
         }
 
-        if ($address->postal_code) {
-            $data['zipcode'] = $address->postal_code;
+        if ($address->input_postal) {
+            $data['zipcode'] = $address->input_postal;
         }
 
-        if ($address->name || $address->company) {
-            $data['addressee'] = $address->company ?: $address->name;
+        if ($address->input_name || $address->input_company) {
+            $data['addressee'] = $address->input_company ?: $address->input_name;
         }
 
         return $data;
     }
 
     /**
-     * Parse Smarty batch response into AddressCorrections.
+     * Parse Smarty batch response and update Addresses.
      *
      * @param  array<Address>  $addresses
      * @param  array<int, array<string, mixed>>  $responseData
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     protected function parseBatchResponse(array $addresses, array $responseData): array
     {
@@ -277,14 +276,14 @@ class SmartyCarrier extends AbstractCarrier
             }
         }
 
-        $corrections = [];
+        $results = [];
 
         foreach ($addresses as $index => $address) {
-            $results = $responseMap[$index] ?? [];
-            $corrections[] = $this->parseResponse($address, $results);
+            $addressResults = $responseMap[$index] ?? [];
+            $results[] = $this->parseResponse($address, $addressResults);
         }
 
-        return $corrections;
+        return $results;
     }
 
     /**
@@ -366,29 +365,25 @@ class SmartyCarrier extends AbstractCarrier
     }
 
     /**
-     * Parse Smarty API response into AddressCorrection.
+     * Parse Smarty API response and update Address.
      *
      * @param  array<int, array<string, mixed>>  $responseData
      */
-    protected function parseResponse(Address $address, array $responseData): AddressCorrection
+    protected function parseResponse(Address $address, array $responseData): Address
     {
         // Smarty returns an array of candidates
         $candidatesCount = count($responseData);
 
         if ($candidatesCount === 0) {
             // No matches found - invalid address
-            $correction = new AddressCorrection([
-                'address_id' => $address->id,
-                'carrier_id' => $this->carrier->id,
-                'validation_status' => AddressCorrection::STATUS_INVALID,
-                'candidates_count' => 0,
+            $address->update([
+                'validation_status' => 'invalid',
                 'confidence_score' => 0.0,
-                'raw_response' => $responseData,
+                'validated_by_carrier_id' => $this->carrier->id,
                 'validated_at' => now(),
             ]);
-            $correction->save();
 
-            return $correction;
+            return $address;
         }
 
         // Get the best candidate (first one)
@@ -404,37 +399,33 @@ class SmartyCarrier extends AbstractCarrier
         $rdi = $metadata['rdi'] ?? null;
         $isResidential = $rdi === 'Residential';
         $classification = match ($rdi) {
-            'Residential' => AddressCorrection::CLASSIFICATION_RESIDENTIAL,
-            'Commercial' => AddressCorrection::CLASSIFICATION_COMMERCIAL,
-            default => AddressCorrection::CLASSIFICATION_UNKNOWN,
+            'Residential' => 'residential',
+            'Commercial' => 'commercial',
+            default => 'unknown',
         };
 
         // Build corrected address
         $deliveryLine1 = $candidate['delivery_line_1'] ?? null;
         $deliveryLine2 = $candidate['delivery_line_2'] ?? null;
 
-        $correction = new AddressCorrection([
-            'address_id' => $address->id,
-            'carrier_id' => $this->carrier->id,
+        // Update Address directly (denormalized schema)
+        $address->update([
+            'output_address_1' => $deliveryLine1,
+            'output_address_2' => $deliveryLine2,
+            'output_city' => $components['city_name'] ?? null,
+            'output_state' => $components['state_abbreviation'] ?? null,
+            'output_postal' => $components['zipcode'] ?? null,
+            'output_postal_ext' => $components['plus4_code'] ?? null,
+            'output_country' => 'US',
             'validation_status' => $validationStatus,
-            'corrected_address_line_1' => $deliveryLine1,
-            'corrected_address_line_2' => $deliveryLine2,
-            'corrected_city' => $components['city_name'] ?? null,
-            'corrected_state' => $components['state_abbreviation'] ?? null,
-            'corrected_postal_code' => $components['zipcode'] ?? null,
-            'corrected_postal_code_ext' => $components['plus4_code'] ?? null,
-            'corrected_country_code' => 'US',
             'is_residential' => $isResidential,
             'classification' => $classification,
             'confidence_score' => $this->calculateConfidenceScore($analysis),
-            'candidates_count' => $candidatesCount,
-            'raw_response' => $responseData,
+            'validated_by_carrier_id' => $this->carrier->id,
             'validated_at' => now(),
         ]);
 
-        $correction->save();
-
-        return $correction;
+        return $address;
     }
 
     /**
@@ -454,12 +445,12 @@ class SmartyCarrier extends AbstractCarrier
         // blank = Not eligible for DPV
 
         return match ($dpvMatchCode) {
-            'Y' => AddressCorrection::STATUS_VALID,
-            'S', 'D' => AddressCorrection::STATUS_AMBIGUOUS,
-            'N' => AddressCorrection::STATUS_INVALID,
+            'Y' => 'valid',
+            'S', 'D' => 'ambiguous',
+            'N' => 'invalid',
             default => $candidatesCount > 0
-                ? AddressCorrection::STATUS_AMBIGUOUS
-                : AddressCorrection::STATUS_INVALID,
+                ? 'ambiguous'
+                : 'invalid',
         };
     }
 

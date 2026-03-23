@@ -3,7 +3,6 @@
 namespace App\Services\Carriers;
 
 use App\Models\Address;
-use App\Models\AddressCorrection;
 use Exception;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -23,7 +22,7 @@ class FedExCarrier extends AbstractCarrier
     /**
      * Validate a single address using FedEx Address Resolution API.
      */
-    public function validateAddress(Address $address): AddressCorrection
+    public function validateAddress(Address $address): Address
     {
         $results = $this->validateBatch([$address]);
 
@@ -35,7 +34,7 @@ class FedExCarrier extends AbstractCarrier
      * Uses carrier settings for native_batch_size, chunk_size, and concurrent_requests.
      *
      * @param  array<Address>  $addresses
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     public function validateBatch(array $addresses): array
     {
@@ -48,7 +47,7 @@ class FedExCarrier extends AbstractCarrier
         $chunkSize = $this->getChunkSize();
         $concurrentRequests = $this->getConcurrentRequests();
 
-        $allCorrections = [];
+        $allResults = [];
 
         // First, split into chunks based on overall chunk_size
         foreach (array_chunk($addresses, $chunkSize) as $chunk) {
@@ -60,19 +59,19 @@ class FedExCarrier extends AbstractCarrier
 
             // Process native batches concurrently (up to concurrent_requests at a time)
             foreach (array_chunk($nativeBatches, $concurrentRequests) as $concurrentBatches) {
-                $corrections = $this->validateNativeBatchesConcurrently($concurrentBatches);
-                $allCorrections = array_merge($allCorrections, $corrections);
+                $results = $this->validateNativeBatchesConcurrently($concurrentBatches);
+                $allResults = array_merge($allResults, $results);
             }
         }
 
-        return $allCorrections;
+        return $allResults;
     }
 
     /**
      * Process multiple native batches concurrently using HTTP pool.
      *
      * @param  array<array<Address>>  $batches
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     protected function validateNativeBatchesConcurrently(array $batches): array
     {
@@ -115,19 +114,19 @@ class FedExCarrier extends AbstractCarrier
         });
 
         // Process responses
-        $allCorrections = [];
+        $allResults = [];
 
         foreach ($batches as $batchIndex => $batch) {
             $response = $responses[$batchIndex] ?? null;
 
             try {
                 if ($response && $response->successful()) {
-                    $corrections = $this->parseBatchResponse($batch, $response->json());
-                    $allCorrections = array_merge($allCorrections, $corrections);
+                    $results = $this->parseBatchResponse($batch, $response->json());
+                    $allResults = array_merge($allResults, $results);
                 } else {
                     $errorMsg = $response ? 'API error: '.$response->status() : 'No response';
                     foreach ($batch as $address) {
-                        $allCorrections[] = $this->createFailedCorrection($address, $errorMsg);
+                        $allResults[] = $this->markAddressFailed($address, $errorMsg);
                     }
                 }
             } catch (Exception $e) {
@@ -136,21 +135,21 @@ class FedExCarrier extends AbstractCarrier
                     'error' => $e->getMessage(),
                 ]);
                 foreach ($batch as $address) {
-                    $allCorrections[] = $this->createFailedCorrection($address, $e->getMessage());
+                    $allResults[] = $this->markAddressFailed($address, $e->getMessage());
                 }
             }
         }
 
         $this->markConnected();
 
-        return $allCorrections;
+        return $allResults;
     }
 
     /**
      * Validate a chunk of addresses (up to 100) in a single API call.
      *
      * @param  array<Address>  $addresses
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     protected function validateBatchChunk(array $addresses): array
     {
@@ -177,9 +176,9 @@ class FedExCarrier extends AbstractCarrier
             if (! $response->successful()) {
                 $this->markError('API request failed: '.$response->status());
 
-                // Return failed corrections for all addresses in the batch
+                // Return failed addresses for all addresses in the batch
                 return array_map(
-                    fn (Address $address) => $this->createFailedCorrection($address, 'API request failed: '.$response->body()),
+                    fn (Address $address) => $this->markAddressFailed($address, 'API request failed: '.$response->body()),
                     $addresses
                 );
             }
@@ -195,44 +194,43 @@ class FedExCarrier extends AbstractCarrier
             ]);
             $this->markError($e->getMessage());
 
-            // Return failed corrections for all addresses
+            // Return failed addresses for all addresses
             return array_map(
-                fn (Address $address) => $this->createFailedCorrection($address, $e->getMessage()),
+                fn (Address $address) => $this->markAddressFailed($address, $e->getMessage()),
                 $addresses
             );
         }
     }
 
     /**
-     * Parse FedEx batch response into AddressCorrections.
+     * Parse FedEx batch response and update Addresses.
      *
      * @param  array<Address>  $addresses
      * @param  array<string, mixed>  $responseData
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     protected function parseBatchResponse(array $addresses, array $responseData): array
     {
         $output = $responseData['output'] ?? [];
         $resolvedAddresses = $output['resolvedAddresses'] ?? [];
 
-        $corrections = [];
+        $results = [];
 
         // FedEx returns resolved addresses in the same order as submitted
         foreach ($addresses as $index => $address) {
             $resolvedAddress = $resolvedAddresses[$index] ?? [];
-            $corrections[] = $this->parseResolvedAddress($address, $resolvedAddress, $responseData);
+            $results[] = $this->parseResolvedAddress($address, $resolvedAddress);
         }
 
-        return $corrections;
+        return $results;
     }
 
     /**
      * Parse a single resolved address from FedEx response.
      *
      * @param  array<string, mixed>  $resolvedAddress
-     * @param  array<string, mixed>  $fullResponseData
      */
-    protected function parseResolvedAddress(Address $address, array $resolvedAddress, array $fullResponseData): AddressCorrection
+    protected function parseResolvedAddress(Address $address, array $resolvedAddress): Address
     {
         // Determine validation status
         $validationStatus = $this->determineValidationStatus($resolvedAddress);
@@ -242,30 +240,27 @@ class FedExCarrier extends AbstractCarrier
 
         // Check classification
         $classification = $this->determineClassification($resolvedAddress);
-        $isResidential = $classification === AddressCorrection::CLASSIFICATION_RESIDENTIAL;
+        $isResidential = $classification === 'residential';
+        $confidenceScore = $this->calculateConfidenceScore($resolvedAddress);
 
-        $correction = new AddressCorrection([
-            'address_id' => $address->id,
-            'carrier_id' => $this->carrier->id,
+        // Update Address directly (denormalized schema)
+        $address->update([
+            'output_address_1' => $correctedAddress['address_line_1'] ?? null,
+            'output_address_2' => $correctedAddress['address_line_2'] ?? null,
+            'output_city' => $correctedAddress['city'] ?? null,
+            'output_state' => $correctedAddress['state'] ?? null,
+            'output_postal' => $correctedAddress['postal_code'] ?? null,
+            'output_postal_ext' => $correctedAddress['postal_code_ext'] ?? null,
+            'output_country' => $correctedAddress['country_code'] ?? $address->input_country,
             'validation_status' => $validationStatus,
-            'corrected_address_line_1' => $correctedAddress['address_line_1'] ?? null,
-            'corrected_address_line_2' => $correctedAddress['address_line_2'] ?? null,
-            'corrected_city' => $correctedAddress['city'] ?? null,
-            'corrected_state' => $correctedAddress['state'] ?? null,
-            'corrected_postal_code' => $correctedAddress['postal_code'] ?? null,
-            'corrected_postal_code_ext' => $correctedAddress['postal_code_ext'] ?? null,
-            'corrected_country_code' => $correctedAddress['country_code'] ?? $address->country_code,
             'is_residential' => $isResidential,
             'classification' => $classification,
-            'confidence_score' => $this->calculateConfidenceScore($resolvedAddress),
-            'candidates_count' => 1, // In batch mode, we get one result per address
-            'raw_response' => $resolvedAddress, // Store individual address response
+            'confidence_score' => $confidenceScore,
+            'validated_by_carrier_id' => $this->carrier->id,
             'validated_at' => now(),
         ]);
 
-        $correction->save();
-
-        return $correction;
+        return $address;
     }
 
     /**
@@ -331,16 +326,16 @@ class FedExCarrier extends AbstractCarrier
     protected function formatAddressForRequest(Address $address): array
     {
         $streetLines = array_filter([
-            $address->address_line_1,
-            $address->address_line_2,
+            $address->input_address_1,
+            $address->input_address_2,
         ]);
 
         return [
             'streetLines' => array_values($streetLines),
-            'city' => $address->city,
-            'stateOrProvinceCode' => $address->state,
-            'postalCode' => $address->postal_code,
-            'countryCode' => $address->country_code ?? 'US',
+            'city' => $address->input_city,
+            'stateOrProvinceCode' => $address->input_state,
+            'postalCode' => $address->input_postal,
+            'countryCode' => $address->input_country ?? 'US',
         ];
     }
 
@@ -352,7 +347,7 @@ class FedExCarrier extends AbstractCarrier
     protected function determineValidationStatus(array $resolvedAddress): string
     {
         if (empty($resolvedAddress)) {
-            return AddressCorrection::STATUS_INVALID;
+            return 'invalid';
         }
 
         $attributes = $resolvedAddress['attributes'] ?? [];
@@ -365,20 +360,20 @@ class FedExCarrier extends AbstractCarrier
 
         // If DPV confirmed and matched, it's valid
         if ($dpv && $matched) {
-            return AddressCorrection::STATUS_VALID;
+            return 'valid';
         }
 
         // If multiple matches, it's ambiguous
         if ($multipleMatches) {
-            return AddressCorrection::STATUS_AMBIGUOUS;
+            return 'ambiguous';
         }
 
         // If resolved but not DPV confirmed, still consider valid (standardized)
         if ($resolved && $matched) {
-            return AddressCorrection::STATUS_VALID;
+            return 'valid';
         }
 
-        return AddressCorrection::STATUS_INVALID;
+        return 'invalid';
     }
 
     /**
@@ -420,10 +415,10 @@ class FedExCarrier extends AbstractCarrier
         $classification = $resolvedAddress['classification'] ?? null;
 
         return match ($classification) {
-            'RESIDENTIAL' => AddressCorrection::CLASSIFICATION_RESIDENTIAL,
-            'BUSINESS' => AddressCorrection::CLASSIFICATION_COMMERCIAL,
-            'MIXED' => AddressCorrection::CLASSIFICATION_MIXED,
-            default => AddressCorrection::CLASSIFICATION_UNKNOWN,
+            'RESIDENTIAL' => 'residential',
+            'BUSINESS' => 'commercial',
+            'MIXED' => 'mixed',
+            default => 'unknown',
         };
     }
 

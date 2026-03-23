@@ -42,8 +42,9 @@ class ProcessImportBatchValidation implements ShouldQueue
         // Disable query log to save memory
         DB::disableQueryLog();
 
+        // Get addresses that haven't been validated yet (denormalized schema)
         $addressesToValidate = $this->batch->addresses()
-            ->whereDoesntHave('corrections')
+            ->where('validation_status', 'pending')
             ->get();
 
         Log::info('ProcessImportBatchValidation: Starting', [
@@ -149,6 +150,19 @@ class ProcessImportBatchValidation implements ShouldQueue
                         'error' => $e->getMessage(),
                     ]);
                 }
+
+                // Apply BestWay optimization if enabled
+                if ($this->batch->find_best_service) {
+                    try {
+                        $this->batch->update(['processing_phase' => ImportBatch::PHASE_BESTWAY]);
+                        $this->applyBestWayOptimization();
+                    } catch (\Exception $e) {
+                        Log::error('ProcessImportBatchValidation: BestWay optimization failed', [
+                            'batch_id' => $this->batch->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
             }
 
             $this->batch->markCompleted();
@@ -178,9 +192,9 @@ class ProcessImportBatchValidation implements ShouldQueue
             return;
         }
 
-        // Get validated addresses count first
+        // Get validated addresses count first (denormalized schema)
         $totalValidated = $this->batch->addresses()
-            ->whereHas('corrections', fn ($q) => $q->where('validation_status', 'valid'))
+            ->where('validation_status', 'valid')
             ->count();
 
         // Update phase to transit times
@@ -211,10 +225,9 @@ class ProcessImportBatchValidation implements ShouldQueue
             'chunk_size' => $chunkSize,
         ]);
 
-        // Process in chunks using cursor for memory efficiency
+        // Process in chunks using cursor for memory efficiency (denormalized schema)
         $this->batch->addresses()
-            ->whereHas('corrections', fn ($q) => $q->where('validation_status', 'valid'))
-            ->with('latestCorrection')
+            ->where('validation_status', 'valid')
             ->chunk($chunkSize, function ($addresses) use ($transitService, $concurrentRequests, &$processed, &$failed) {
                 // Check if cancelled at chunk boundary
                 $this->batch->refresh();
@@ -307,6 +320,48 @@ class ProcessImportBatchValidation implements ShouldQueue
             'with_recommendations' => $result['with_recommendations'],
             'with_ship_via' => $result['with_ship_via'],
             'with_suggestions' => $result['with_suggestions'],
+        ]);
+    }
+
+    /**
+     * Apply BestWay optimization to find the most economical shipping service.
+     *
+     * This replaces ship_via_code with the cheapest service that meets the Required On-Site Date.
+     * The original ship_via_code is preserved in previous_ship_via_code.
+     */
+    protected function applyBestWayOptimization(): void
+    {
+        $recommendationService = new ShippingRecommendationService;
+
+        // Get addresses with required_on_site_date and transit times
+        $addressesToOptimize = $this->batch->addresses()
+            ->whereNotNull('required_on_site_date')
+            ->whereHas('transitTimes')
+            ->with(['transitTimes', 'shipViaCodeRecord'])
+            ->get();
+
+        if ($addressesToOptimize->isEmpty()) {
+            Log::info('ProcessImportBatchValidation: No addresses to optimize with BestWay', [
+                'batch_id' => $this->batch->id,
+            ]);
+
+            return;
+        }
+
+        Log::info('ProcessImportBatchValidation: Applying BestWay optimization', [
+            'batch_id' => $this->batch->id,
+            'addresses_count' => $addressesToOptimize->count(),
+        ]);
+
+        $result = $recommendationService->applyBestWayOptimizationBatch($addressesToOptimize);
+
+        Log::info('ProcessImportBatchValidation: BestWay optimization completed', [
+            'batch_id' => $this->batch->id,
+            'processed' => $result['processed'],
+            'optimized' => $result['optimized'],
+            'already_optimal' => $result['already_optimal'],
+            'no_viable_service' => $result['no_viable_service'],
+            'no_matching_code' => $result['no_matching_code'] ?? 0,
         ]);
     }
 

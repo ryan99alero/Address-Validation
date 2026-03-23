@@ -2,7 +2,6 @@
 
 use App\Jobs\ProcessImportBatchValidation;
 use App\Models\Address;
-use App\Models\AddressCorrection;
 use App\Models\Carrier;
 use App\Models\ImportBatch;
 use App\Models\TransitTime;
@@ -34,12 +33,9 @@ it('recommends the most economical service that meets the required on-site date'
     $address = Address::factory()->create([
         'import_batch_id' => $batch->id,
         'required_on_site_date' => $requiredDate,
-    ]);
-
-    // Create a correction so the address is considered validated
-    AddressCorrection::factory()->create([
-        'address_id' => $address->id,
         'validation_status' => 'valid',
+        'validated_by_carrier_id' => $this->carrier->id,
+        'validated_at' => now(),
     ]);
 
     // Create transit times - some can meet the deadline, some cannot
@@ -109,11 +105,9 @@ it('recommends the fastest service when no service can meet the deadline', funct
     $address = Address::factory()->create([
         'import_batch_id' => $batch->id,
         'required_on_site_date' => $requiredDate,
-    ]);
-
-    AddressCorrection::factory()->create([
-        'address_id' => $address->id,
         'validation_status' => 'valid',
+        'validated_by_carrier_id' => $this->carrier->id,
+        'validated_at' => now(),
     ]);
 
     // All services deliver after the required date
@@ -158,11 +152,9 @@ it('skips addresses without required on-site dates', function () {
     $address = Address::factory()->create([
         'import_batch_id' => $batch->id,
         'required_on_site_date' => null,
-    ]);
-
-    AddressCorrection::factory()->create([
-        'address_id' => $address->id,
         'validation_status' => 'valid',
+        'validated_by_carrier_id' => $this->carrier->id,
+        'validated_at' => now(),
     ]);
 
     TransitTime::factory()->create([
@@ -199,11 +191,9 @@ it('prefers ground over express when both meet the deadline', function () {
     $address = Address::factory()->create([
         'import_batch_id' => $batch->id,
         'required_on_site_date' => $requiredDate,
-    ]);
-
-    AddressCorrection::factory()->create([
-        'address_id' => $address->id,
         'validation_status' => 'valid',
+        'validated_by_carrier_id' => $this->carrier->id,
+        'validated_at' => now(),
     ]);
 
     // Ground: delivers in 5 days

@@ -259,16 +259,32 @@ class ImportService
                 'created_by' => auth()->id(),
             ];
 
+            // Separate extra fields (stored in JSON) from regular fields
+            $extraData = [];
+
             foreach ($positionToField as $position => $field) {
                 $value = $row[$position] ?? null;
 
                 if ($value !== null && $value !== '') {
-                    $addressData[$field] = $value;
+                    // Map legacy field names to new schema
+                    $mappedField = $this->mapToNewFieldName($field);
+
+                    // Extra fields go into JSON
+                    if (str_starts_with($field, 'extra_')) {
+                        $extraData[$field] = $value;
+                    } else {
+                        $addressData[$mappedField] = $value;
+                    }
                 }
             }
 
-            // Parse address_line_1 to extract suite/unit info into address_line_2
-            if (! empty($addressData['address_line_1'])) {
+            // Store extra data as JSON
+            if (! empty($extraData)) {
+                $addressData['extra_data'] = $extraData;
+            }
+
+            // Parse input_address_1 to extract suite/unit info into input_address_2
+            if (! empty($addressData['input_address_1'])) {
                 $addressData = $this->parseAddressLine($addressData);
             }
 
@@ -280,8 +296,8 @@ class ImportService
                 }
             }
 
-            // Only create if we have at least address_line_1
-            if (! empty($addressData['address_line_1'])) {
+            // Only create if we have at least input_address_1
+            if (! empty($addressData['input_address_1'])) {
                 $addresses->push(Address::create($addressData));
             }
         }
@@ -337,7 +353,25 @@ class ImportService
     }
 
     /**
-     * Parse address_line_1 to extract suite/unit/apt info into address_line_2.
+     * Map legacy field names to new schema field names.
+     */
+    protected function mapToNewFieldName(string $field): string
+    {
+        return match ($field) {
+            'name' => 'input_name',
+            'company' => 'input_company',
+            'address_line_1' => 'input_address_1',
+            'address_line_2' => 'input_address_2',
+            'city' => 'input_city',
+            'state' => 'input_state',
+            'postal_code' => 'input_postal',
+            'country_code' => 'input_country',
+            default => $field,
+        };
+    }
+
+    /**
+     * Parse input_address_1 to extract suite/unit/apt info into input_address_2.
      *
      * Handles patterns like:
      * - "Exchange Building #341" -> addr1: "Exchange Building", addr2: "STE 341"
@@ -345,16 +379,16 @@ class ImportService
      * - "5095 Blue Diamond Rd Ste A-7" -> addr1: "5095 Blue Diamond Rd", addr2: "STE A-7"
      * - "10722 BEVERLY BLVD STE B & C" -> addr1: "10722 BEVERLY BLVD", addr2: "STE B & C"
      *
-     * If address_line_2 already has content, the extracted unit is appended with a comma.
+     * If input_address_2 already has content, the extracted unit is appended with a comma.
      *
      * @param  array<string, mixed>  $addressData
      * @return array<string, mixed>
      */
     public function parseAddressLine(array $addressData): array
     {
-        $addressLine1 = $addressData['address_line_1'] ?? '';
+        $addressLine1 = $addressData['input_address_1'] ?? '';
 
-        // Skip if address_line_1 is empty
+        // Skip if input_address_1 is empty
         if (empty($addressLine1)) {
             return $addressData;
         }
@@ -362,13 +396,13 @@ class ImportService
         $extracted = $this->extractSecondaryUnit($addressLine1);
 
         if ($extracted) {
-            $addressData['address_line_1'] = $extracted['address'];
+            $addressData['input_address_1'] = $extracted['address'];
 
-            // If address_line_2 already has content, append the extracted unit
-            if (! empty($addressData['address_line_2'])) {
-                $addressData['address_line_2'] = trim($addressData['address_line_2']).', '.$extracted['unit'];
+            // If input_address_2 already has content, append the extracted unit
+            if (! empty($addressData['input_address_2'])) {
+                $addressData['input_address_2'] = trim($addressData['input_address_2']).', '.$extracted['unit'];
             } else {
-                $addressData['address_line_2'] = $extracted['unit'];
+                $addressData['input_address_2'] = $extracted['unit'];
             }
         }
 
@@ -649,44 +683,45 @@ class ImportService
     protected function findBestMatch(string $normalizedHeader, array $usedFields): ?string
     {
         // Define patterns for each system field (in order of priority)
+        // Field names match Address::getSystemFields()
         $patterns = [
-            'address_line_1' => [
+            'input_address_1' => [
                 'exact' => ['address', 'address 1', 'address1', 'addr', 'addr 1', 'addr1', 'add1', 'add 1', 'street', 'street 1', 'street1', 'str1', 'street address', 'address line 1', 'addressline1', 'line 1', 'line1'],
                 'contains' => ['address1', 'addr1', 'add1', 'street1', 'line1'],
                 'regex' => ['/^addr(?:ess)?[\s_-]*1?$/i', '/^street[\s_-]*(?:address)?[\s_-]*1?$/i'],
             ],
-            'address_line_2' => [
+            'input_address_2' => [
                 'exact' => ['address 2', 'address2', 'addr 2', 'addr2', 'add2', 'add 2', 'street 2', 'street2', 'str2', 'apt', 'apartment', 'suite', 'ste', 'unit', 'floor', 'building', 'bldg', 'address line 2', 'addressline2', 'line 2', 'line2'],
                 'contains' => ['address2', 'addr2', 'add2', 'street2', 'line2'],
                 'regex' => ['/^addr(?:ess)?[\s_-]*2$/i'],
             ],
-            'city' => [
+            'input_city' => [
                 'exact' => ['city', 'town', 'municipality', 'locality', 'suburb'],
                 'contains' => ['city'],
                 'regex' => [],
             ],
-            'state' => [
+            'input_state' => [
                 'exact' => ['state', 'st', 'province', 'prov', 'region', 'state province', 'state prov', 'territory'],
                 'contains' => ['state', 'province', 'prov'],
                 'regex' => [],
             ],
-            'postal_code' => [
+            'input_postal' => [
                 'exact' => ['zip', 'zip code', 'zipcode', 'zip5', 'postal', 'postal code', 'postalcode', 'postcode', 'post code', 'pc'],
                 'contains' => ['zip', 'postal', 'postcode'],
                 'regex' => ['/^zip[\s_-]*(?:code)?[\s_-]*\d*$/i', '/^postal[\s_-]*(?:code)?$/i'],
             ],
-            'country_code' => [
+            'input_country' => [
                 'exact' => ['country', 'country code', 'countrycode', 'nation', 'cc'],
                 'contains' => ['country'],
                 'regex' => [],
             ],
-            'name' => [
+            'input_name' => [
                 // Person/contact name - NOT the company/ship-to name
                 'exact' => ['contact', 'contact name', 'contactname', 'attention', 'attn', 'attn name', 'care of', 'c/o', 'addressee', 'person', 'person name', 'full name', 'fullname', 'recipient contact', 'ship to contact', 'shipto contact', 'shiptocontact', 'delivery contact'],
                 'contains' => ['contact'],  // Any field with "contact" = person's name
                 'regex' => ['/^(?:attn|attention|c\/?o|care of)[\s_:-]*/i'],
             ],
-            'company' => [
+            'input_company' => [
                 // Company/business name - this is typically the "Ship To Name" or primary recipient
                 'exact' => ['company', 'company name', 'companyname', 'business', 'business name', 'businessname', 'organization', 'org', 'firm', 'corp', 'corporation', 'enterprise', 'name', 'recipient', 'recipient name', 'ship to name', 'shipto name', 'shiptoname', 'consignee name', 'deliver to name', 'delivery name'],
                 'contains' => ['company', 'business', 'organization'],

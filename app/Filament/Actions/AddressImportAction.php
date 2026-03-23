@@ -471,14 +471,14 @@ class AddressImportAction extends Action
     protected function getSystemFields(): array
     {
         $fields = [
-            'name' => 'Name',
-            'company' => 'Company',
-            'address_line_1' => 'Address Line 1',
-            'address_line_2' => 'Address Line 2',
-            'city' => 'City',
-            'state' => 'State',
-            'postal_code' => 'Postal Code',
-            'country_code' => 'Country Code',
+            'input_name' => 'Recipient Name',
+            'input_company' => 'Company',
+            'input_address_1' => 'Address Line 1',
+            'input_address_2' => 'Address Line 2',
+            'input_city' => 'City',
+            'input_state' => 'State',
+            'input_postal' => 'Postal Code',
+            'input_country' => 'Country Code',
             'external_reference' => 'External Reference',
         ];
 

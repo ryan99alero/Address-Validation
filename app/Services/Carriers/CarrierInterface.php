@@ -3,7 +3,6 @@
 namespace App\Services\Carriers;
 
 use App\Models\Address;
-use App\Models\AddressCorrection;
 use App\Models\Carrier;
 
 interface CarrierInterface
@@ -15,14 +14,15 @@ interface CarrierInterface
 
     /**
      * Validate a single address.
+     * Updates the Address model directly with validation results.
      */
-    public function validateAddress(Address $address): AddressCorrection;
+    public function validateAddress(Address $address): Address;
 
     /**
      * Validate multiple addresses in batch.
      *
      * @param  array<Address>  $addresses
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     public function validateBatch(array $addresses): array;
 

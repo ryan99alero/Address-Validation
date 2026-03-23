@@ -23,22 +23,6 @@ return new class extends Migration
             $table->index(['import_batch_id', 'id']);
         });
 
-        // Address corrections indexes for faster joins and sorting
-        Schema::table('address_corrections', function (Blueprint $table) {
-            // Single column index on address_id for faster lookups
-            // (existing composite index address_id+carrier_id may not be optimal for all queries)
-            $table->index('address_id', 'address_corrections_address_id_index');
-
-            // Index for sorting by validation time
-            $table->index('validated_at');
-
-            // Index for sorting by confidence score
-            $table->index('confidence_score');
-
-            // Composite index for the "latest correction" subquery pattern
-            $table->index(['address_id', 'id'], 'address_corrections_latest_lookup');
-        });
-
         // Import batches indexes
         Schema::table('import_batches', function (Blueprint $table) {
             // Index for filtering by status (common query)
@@ -58,13 +42,6 @@ return new class extends Migration
             $table->dropIndex(['created_at']);
             $table->dropIndex(['source']);
             $table->dropIndex(['import_batch_id', 'id']);
-        });
-
-        Schema::table('address_corrections', function (Blueprint $table) {
-            $table->dropIndex('address_corrections_address_id_index');
-            $table->dropIndex(['validated_at']);
-            $table->dropIndex(['confidence_score']);
-            $table->dropIndex('address_corrections_latest_lookup');
         });
 
         Schema::table('import_batches', function (Blueprint $table) {

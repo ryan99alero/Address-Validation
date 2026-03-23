@@ -34,6 +34,8 @@ class ImportBatch extends Model
 
     public const PHASE_RECOMMENDATIONS = 'calculating_recommendations';
 
+    public const PHASE_BESTWAY = 'optimizing_bestway';
+
     public const PHASE_COMPLETE = 'complete';
 
     // Export phases
@@ -64,6 +66,7 @@ class ImportBatch extends Model
         'include_transit_times',
         'origin_postal_code',
         'origin_country_code',
+        'find_best_service',
         'ship_via_code_column',
         'error_file_path',
         'export_file_path',

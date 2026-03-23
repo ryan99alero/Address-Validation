@@ -3,7 +3,6 @@
 namespace App\Services\Carriers;
 
 use App\Models\Address;
-use App\Models\AddressCorrection;
 use App\Models\Carrier;
 use Closure;
 use Exception;
@@ -72,22 +71,22 @@ abstract class AbstractCarrier implements CarrierInterface
      * Uses carrier settings for chunk size and concurrency.
      *
      * @param  array<Address>  $addresses
-     * @return array<AddressCorrection>
+     * @return array<Address>
      */
     public function validateBatch(array $addresses): array
     {
-        $corrections = [];
+        $results = [];
 
         foreach ($addresses as $address) {
             try {
-                $corrections[] = $this->validateAddress($address);
+                $results[] = $this->validateAddress($address);
             } catch (Exception $e) {
-                // Create a failed correction record
-                $corrections[] = $this->createFailedCorrection($address, $e->getMessage());
+                // Mark the address as failed
+                $results[] = $this->markAddressFailed($address, $e->getMessage());
             }
         }
 
-        return $corrections;
+        return $results;
     }
 
     /**
@@ -96,8 +95,8 @@ abstract class AbstractCarrier implements CarrierInterface
      *
      * @param  array<Address>  $addresses
      * @param  Closure  $requestBuilder  Function that builds the request: fn(Pool $pool, Address $address, int $index) => $pool->as($index)->...
-     * @param  Closure  $responseParser  Function that parses the response: fn(Address $address, mixed $response) => AddressCorrection
-     * @return array<array{address_id: int, success: bool, correction: ?AddressCorrection, error: ?string}>
+     * @param  Closure  $responseParser  Function that parses the response: fn(Address $address, mixed $response) => Address
+     * @return array<array{address_id: int, success: bool, address: Address, error: ?string}>
      */
     protected function processConcurrently(array $addresses, Closure $requestBuilder, Closure $responseParser): array
     {
@@ -129,11 +128,11 @@ abstract class AbstractCarrier implements CarrierInterface
 
                     try {
                         if ($response && $response->successful()) {
-                            $correction = $responseParser($address, $response);
+                            $validatedAddress = $responseParser($address, $response);
                             $allResults[] = [
                                 'address_id' => $address->id,
                                 'success' => true,
-                                'correction' => $correction,
+                                'address' => $validatedAddress,
                                 'error' => null,
                             ];
                         } else {
@@ -141,7 +140,7 @@ abstract class AbstractCarrier implements CarrierInterface
                             $allResults[] = [
                                 'address_id' => $address->id,
                                 'success' => false,
-                                'correction' => $this->createFailedCorrection($address, $errorMsg),
+                                'address' => $this->markAddressFailed($address, $errorMsg),
                                 'error' => $errorMsg,
                             ];
                         }
@@ -153,7 +152,7 @@ abstract class AbstractCarrier implements CarrierInterface
                         $allResults[] = [
                             'address_id' => $address->id,
                             'success' => false,
-                            'correction' => $this->createFailedCorrection($address, $e->getMessage()),
+                            'address' => $this->markAddressFailed($address, $e->getMessage()),
                             'error' => $e->getMessage(),
                         ];
                     }
@@ -229,17 +228,16 @@ abstract class AbstractCarrier implements CarrierInterface
     }
 
     /**
-     * Create a failed correction record.
+     * Mark an address as failed validation.
      */
-    protected function createFailedCorrection(Address $address, string $errorMessage): AddressCorrection
+    protected function markAddressFailed(Address $address, string $errorMessage): Address
     {
-        return new AddressCorrection([
-            'address_id' => $address->id,
-            'carrier_id' => $this->carrier->id,
-            'validation_status' => AddressCorrection::STATUS_INVALID,
-            'raw_response' => ['error' => $errorMessage],
-            'validated_at' => now(),
-        ]);
+        $address->validation_status = 'invalid';
+        $address->validated_by_carrier_id = $this->carrier->id;
+        $address->validated_at = now();
+        $address->save();
+
+        return $address;
     }
 
     /**
