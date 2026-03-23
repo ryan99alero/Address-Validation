@@ -12,16 +12,17 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Check if foreign key already exists
-        $foreignKeys = Schema::getConnection()
-            ->getDoctrineSchemaManager()
-            ->listTableForeignKeys('addresses');
+        // Check if foreign key already exists using raw query
+        $foreignKeys = DB::select("
+            SELECT CONSTRAINT_NAME
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'addresses'
+            AND COLUMN_NAME = 'import_batch_id'
+            AND REFERENCED_TABLE_NAME IS NOT NULL
+        ");
 
-        $hasForeignKey = collect($foreignKeys)->contains(function ($fk) {
-            return in_array('import_batch_id', $fk->getLocalColumns());
-        });
-
-        if ($hasForeignKey) {
+        if (count($foreignKeys) > 0) {
             return;
         }
 
