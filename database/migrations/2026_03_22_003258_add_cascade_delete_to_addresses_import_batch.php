@@ -12,6 +12,19 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Check if foreign key already exists
+        $foreignKeys = Schema::getConnection()
+            ->getDoctrineSchemaManager()
+            ->listTableForeignKeys('addresses');
+
+        $hasForeignKey = collect($foreignKeys)->contains(function ($fk) {
+            return in_array('import_batch_id', $fk->getLocalColumns());
+        });
+
+        if ($hasForeignKey) {
+            return;
+        }
+
         // First, clean up any orphaned addresses (pointing to non-existent batches)
         DB::statement('
             DELETE FROM addresses

@@ -11,6 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Skip if columns already exist
+        if (Schema::hasColumn('addresses', 'previous_ship_via_code')) {
+            return;
+        }
+
         Schema::table('addresses', function (Blueprint $table) {
             // Store original ship_via_code before BestWay optimization replaces it
             $table->string('previous_ship_via_code', 50)->nullable()->after('ship_via_code');

@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::hasColumn('import_batches', 'find_best_service')) {
+            return;
+        }
+
         Schema::table('import_batches', function (Blueprint $table) {
             $table->boolean('find_best_service')->default(false)->after('origin_country_code');
         });

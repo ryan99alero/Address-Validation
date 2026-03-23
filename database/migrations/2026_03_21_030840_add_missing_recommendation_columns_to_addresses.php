@@ -11,6 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Skip if columns already exist
+        if (Schema::hasColumn('addresses', 'recommended_service')) {
+            return;
+        }
+
         Schema::table('addresses', function (Blueprint $table) {
             // Recommendation fields (when required_on_site_date is set)
             $table->string('recommended_service', 100)->nullable()->after('ground_date');

@@ -14,6 +14,11 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Skip if table already exists (different environments may have different states)
+        if (Schema::hasTable('transit_times')) {
+            return;
+        }
+
         Schema::create('transit_times', function (Blueprint $table) {
             $table->id();
             $table->foreignId('address_id')->constrained()->cascadeOnDelete();

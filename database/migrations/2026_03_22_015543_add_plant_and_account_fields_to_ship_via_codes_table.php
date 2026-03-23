@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::hasColumn('ship_via_codes', 'plant_id')) {
+            return;
+        }
+
         Schema::table('ship_via_codes', function (Blueprint $table) {
             // Plant identifier (e.g., Plant001, Plant002, Plant003)
             $table->string('plant_id', 50)->nullable()->after('description');
