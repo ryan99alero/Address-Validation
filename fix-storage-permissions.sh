@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Fix Storage Permissions Script
-# Run with sudo if needed: sudo ./fix-storage-permissions.sh
+# Automatically elevates to root if needed
 #
 # This script:
 # 1. Creates all required storage directories
@@ -10,13 +10,20 @@
 
 set -e
 
+# Re-run with sudo if not root
+if [[ $EUID -ne 0 ]]; then
+    echo "Elevating privileges..."
+    exec sudo "$0" "$@"
+fi
+
 # Detect the script directory (project root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STORAGE_DIR="$SCRIPT_DIR/storage"
 
 # Detect web user (macOS Herd uses current user, Linux typically www-data)
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    WEB_USER=$(whoami)
+    # On macOS, get the user who invoked sudo (not root)
+    WEB_USER="${SUDO_USER:-$(whoami)}"
     WEB_GROUP="staff"
 else
     WEB_USER="${WEB_USER:-www-data}"
