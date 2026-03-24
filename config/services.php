@@ -35,4 +35,18 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Carrier Invoice Processing
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for processing carrier invoice files to build the
+    | local address correction cache.
+    |
+    */
+    'carrier_invoices' => [
+        'input_path' => env('CARRIER_INVOICES_INPUT_PATH', storage_path('invoices/input')),
+        'archive_path' => env('CARRIER_INVOICES_ARCHIVE_PATH', storage_path('invoices/processed')),
+    ],
+
 ];

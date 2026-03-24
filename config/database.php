@@ -114,6 +114,21 @@ return [
             // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),
         ],
 
+        // Shipping database (MSSQL) for tracking number lookups
+        'shipping' => [
+            'driver' => 'sqlsrv',
+            'host' => env('SHIPPING_DB_HOST', 'localhost'),
+            'port' => env('SHIPPING_DB_PORT', '1433'),
+            'database' => env('SHIPPING_DB_DATABASE', 'shipping'),
+            'username' => env('SHIPPING_DB_USERNAME', ''),
+            'password' => env('SHIPPING_DB_PASSWORD', ''),
+            'charset' => 'utf8',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'encrypt' => env('SHIPPING_DB_ENCRYPT', 'no'),
+            'trust_server_certificate' => env('SHIPPING_DB_TRUST_CERT', 'true'),
+        ],
+
     ],
 
     /*

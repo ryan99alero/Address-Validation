@@ -19,3 +19,10 @@ Schedule::command('workers:manage cleanup --stale-minutes=60')
     ->everyThirtyMinutes()
     ->name('worker-stale-cleanup')
     ->withoutOverlapping();
+
+// Process carrier invoices daily at 12:30 AM
+Schedule::command('invoices:process')
+    ->dailyAt('00:30')
+    ->name('carrier-invoice-processing')
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/carrier-invoices.log'));
