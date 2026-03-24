@@ -18,6 +18,11 @@ echo ""
 echo "Pulling latest changes..."
 git pull origin "$BRANCH"
 
+# Fix storage permissions
+echo ""
+echo "Fixing storage permissions..."
+./fix-storage-permissions.sh
+
 # Run migrations
 echo ""
 echo "Running migrations..."
