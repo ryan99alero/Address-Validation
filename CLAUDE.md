@@ -96,6 +96,16 @@ Run this checklist:
 3. `search-docs` for the Filament component documentation
 4. Only then write the new file using discovered patterns
 
+### Framework-Native First (CRITICAL)
+
+- **ALWAYS prefer framework/library-native solutions over hand-rolled (DIY) code.** This applies everywhere, not just UI:
+  - **Background work:** queued Jobs (`ShouldQueue`) dispatched onto the queue + a queue worker — never custom loops or synchronous long-running web requests.
+  - **Recurring/timed work:** Laravel's Scheduler (`routes/console.php` + `schedule:work`/`schedule:run`) — never custom timers.
+  - **Data:** Eloquent relationships, scopes, casts, accessors — never raw `DB::` or manual joins unless genuinely necessary.
+  - **Libraries:** use the installed package's documented API (e.g. webklex IMAP, phpspreadsheet, Filament) before writing your own implementation.
+- **Only hand-roll when the native option is genuinely missing or broken.** When you do, you MUST: (1) say so explicitly, (2) state why the native path doesn't work (with evidence), and (3) keep the DIY code minimal and behind the framework's own primitives where possible.
+- Before building anything non-trivial, ask: "Does Laravel / the installed library already do this?" Search docs if unsure.
+
 ### Native Components First (CRITICAL)
 
 - **ALWAYS use Filament's native components before writing custom Blade views.** This ensures visual consistency across the application.
@@ -192,7 +202,7 @@ The Laravel Boost guidelines are specifically curated by Laravel maintainers for
 
 This application is a Laravel application and its main Laravel ecosystems package & versions are below. You are an expert with them all. Ensure you abide by these specific packages & versions.
 
-- php - 8.4.3
+- php - 8.4.19
 - filament/filament (FILAMENT) - v5
 - laravel/fortify (FORTIFY) - v1
 - laravel/framework (LARAVEL) - v12

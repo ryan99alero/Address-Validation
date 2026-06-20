@@ -1,0 +1,763 @@
+{
+  "info": {
+    "_postman_id": "melissa-address-validation-001",
+    "name": "Melissa Address Validation",
+    "description": "Melissa Data Address Validation APIs for CASS-certified validation with RDI flag and street-level candidate lookup.\n\nIncludes:\n- Global Address API - CASS validation with Residential Delivery Indicator (RDI)\n- Street Search API - Street-level house number candidate lookup\n\nDocumentation: https://docs.melissa.com/cloud-api/global-address/global-address-index.html",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "8255341"
+  },
+  "item": [
+    {
+      "name": "Global Address",
+      "item": [
+        {
+          "name": "Validate Address (GET)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has Records\", function () {",
+                  "    pm.expect(jsonData).to.have.property('Records');",
+                  "});",
+                  "",
+                  "// Log validation results",
+                  "if (jsonData.Records && jsonData.Records.length > 0) {",
+                  "    var record = jsonData.Records[0];",
+                  "    console.log(\"=== Address Validation Result ===\");",
+                  "    console.log(\"Results Codes: \" + (record.Results || 'N/A'));",
+                  "    console.log(\"Formatted Address: \" + (record.FormattedAddress || 'N/A'));",
+                  "    console.log(\"Address Line 1: \" + (record.AddressLine1 || 'N/A'));",
+                  "    console.log(\"Locality: \" + (record.Locality || 'N/A'));",
+                  "    console.log(\"Administrative Area: \" + (record.AdministrativeArea || 'N/A'));",
+                  "    console.log(\"Postal Code: \" + (record.PostalCode || 'N/A'));",
+                  "    console.log(\"\\n=== Delivery Classification ===\");",
+                  "    console.log(\"Address Type: \" + (record.AddressType || 'N/A'));",
+                  "    console.log(\"Address Type Code: \" + (record.AddressTypeCode || 'N/A'));",
+                  "    console.log(\"\\n=== Key Codes ===\");",
+                  "    console.log(\"Melissa Address Key (MAK): \" + (record.MelissaAddressKey || 'N/A'));",
+                  "    console.log(\"Melissa Address Key Base: \" + (record.MelissaAddressKeyBase || 'N/A'));",
+                  "    ",
+                  "    // Parse result codes for RDI and validity",
+                  "    var results = record.Results || '';",
+                  "    if (results.includes('AV11') || results.includes('AV12')) {",
+                  "        console.log(\"\\n✓ Address is CASS Verified\");",
+                  "    }",
+                  "    if (results.includes('AV14')) {",
+                  "        console.log(\"⚠ Address corrected\");",
+                  "    }",
+                  "    if (results.includes('AE')) {",
+                  "        console.log(\"✗ Address has errors: \" + results);",
+                  "    }",
+                  "} else {",
+                  "    console.log(\"No records returned\");",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{melissa_global_address_url}}?t=Address Validation&id={{melissa_api_key}}&opt=&org=&a1=22382 Avenida Empresa&a2=&a3=&a4=&a5=&a6=&a7=&a8=&ddeploc=&deploc=&loc=Rancho Santa Margarita&subadmarea=&admarea=CA&subnatarea=&postal=92688&ctry=US&format=JSON",
+              "host": [
+                "{{melissa_global_address_url}}"
+              ],
+              "query": [
+                {
+                  "key": "t",
+                  "value": "Address Validation",
+                  "description": "Transmission Reference (for tracking)"
+                },
+                {
+                  "key": "id",
+                  "value": "{{melissa_api_key}}",
+                  "description": "Melissa License Key"
+                },
+                {
+                  "key": "opt",
+                  "value": "",
+                  "description": "Options (e.g., OutputScript:)"
+                },
+                {
+                  "key": "org",
+                  "value": "",
+                  "description": "Organization/Company Name"
+                },
+                {
+                  "key": "a1",
+                  "value": "22382 Avenida Empresa",
+                  "description": "Address Line 1 (Street)"
+                },
+                {
+                  "key": "a2",
+                  "value": "",
+                  "description": "Address Line 2"
+                },
+                {
+                  "key": "a3",
+                  "value": "",
+                  "description": "Address Line 3"
+                },
+                {
+                  "key": "a4",
+                  "value": "",
+                  "description": "Address Line 4"
+                },
+                {
+                  "key": "a5",
+                  "value": "",
+                  "description": "Address Line 5"
+                },
+                {
+                  "key": "a6",
+                  "value": "",
+                  "description": "Address Line 6"
+                },
+                {
+                  "key": "a7",
+                  "value": "",
+                  "description": "Address Line 7"
+                },
+                {
+                  "key": "a8",
+                  "value": "",
+                  "description": "Address Line 8"
+                },
+                {
+                  "key": "ddeploc",
+                  "value": "",
+                  "description": "Double Dependent Locality"
+                },
+                {
+                  "key": "deploc",
+                  "value": "",
+                  "description": "Dependent Locality"
+                },
+                {
+                  "key": "loc",
+                  "value": "Rancho Santa Margarita",
+                  "description": "Locality (City)"
+                },
+                {
+                  "key": "subadmarea",
+                  "value": "",
+                  "description": "Sub Administrative Area (County)"
+                },
+                {
+                  "key": "admarea",
+                  "value": "CA",
+                  "description": "Administrative Area (State)"
+                },
+                {
+                  "key": "subnatarea",
+                  "value": "",
+                  "description": "Sub National Area"
+                },
+                {
+                  "key": "postal",
+                  "value": "92688",
+                  "description": "Postal/ZIP Code"
+                },
+                {
+                  "key": "ctry",
+                  "value": "US",
+                  "description": "Country Code (ISO 3166-1 alpha-2)"
+                },
+                {
+                  "key": "format",
+                  "value": "JSON",
+                  "description": "Response format (JSON or XML)"
+                }
+              ]
+            },
+            "description": "Single address validation via GET request.\n\nReturns CASS-certified validation with:\n- Result codes indicating validity\n- Corrected/standardized address components\n- Address Type (Residential/Commercial indicator)\n- Melissa Address Key (MAK) for lookups"
+          },
+          "response": []
+        },
+        {
+          "name": "Validate Address (GET) - Template",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has Records\", function () {",
+                  "    pm.expect(jsonData).to.have.property('Records');",
+                  "});",
+                  "",
+                  "// Log validation results",
+                  "if (jsonData.Records && jsonData.Records.length > 0) {",
+                  "    var record = jsonData.Records[0];",
+                  "    console.log(\"=== Address Validation Result ===\");",
+                  "    console.log(\"Results Codes: \" + (record.Results || 'N/A'));",
+                  "    console.log(\"Formatted Address: \" + (record.FormattedAddress || 'N/A'));",
+                  "    console.log(\"Address Type: \" + (record.AddressType || 'N/A'));",
+                  "} else {",
+                  "    console.log(\"No records returned\");",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{melissa_global_address_url}}?t=&id={{melissa_api_key}}&opt=&org=&a1=&a2=&a3=&a4=&a5=&a6=&a7=&a8=&ddeploc=&deploc=&loc=&subadmarea=&admarea=&subnatarea=&postal=&ctry=&format=JSON",
+              "host": [
+                "{{melissa_global_address_url}}"
+              ],
+              "query": [
+                {
+                  "key": "t",
+                  "value": "",
+                  "description": "Transmission Reference (for tracking)"
+                },
+                {
+                  "key": "id",
+                  "value": "{{melissa_api_key}}",
+                  "description": "Melissa License Key"
+                },
+                {
+                  "key": "opt",
+                  "value": "",
+                  "description": "Options"
+                },
+                {
+                  "key": "org",
+                  "value": "",
+                  "description": "Organization"
+                },
+                {
+                  "key": "a1",
+                  "value": "",
+                  "description": "Address Line 1"
+                },
+                {
+                  "key": "a2",
+                  "value": "",
+                  "description": "Address Line 2"
+                },
+                {
+                  "key": "a3",
+                  "value": "",
+                  "description": "Address Line 3"
+                },
+                {
+                  "key": "a4",
+                  "value": "",
+                  "description": "Address Line 4"
+                },
+                {
+                  "key": "a5",
+                  "value": "",
+                  "description": "Address Line 5"
+                },
+                {
+                  "key": "a6",
+                  "value": "",
+                  "description": "Address Line 6"
+                },
+                {
+                  "key": "a7",
+                  "value": "",
+                  "description": "Address Line 7"
+                },
+                {
+                  "key": "a8",
+                  "value": "",
+                  "description": "Address Line 8"
+                },
+                {
+                  "key": "ddeploc",
+                  "value": "",
+                  "description": "Double Dependent Locality"
+                },
+                {
+                  "key": "deploc",
+                  "value": "",
+                  "description": "Dependent Locality"
+                },
+                {
+                  "key": "loc",
+                  "value": "",
+                  "description": "Locality (City)"
+                },
+                {
+                  "key": "subadmarea",
+                  "value": "",
+                  "description": "Sub Administrative Area"
+                },
+                {
+                  "key": "admarea",
+                  "value": "",
+                  "description": "Administrative Area (State)"
+                },
+                {
+                  "key": "subnatarea",
+                  "value": "",
+                  "description": "Sub National Area"
+                },
+                {
+                  "key": "postal",
+                  "value": "",
+                  "description": "Postal Code"
+                },
+                {
+                  "key": "ctry",
+                  "value": "",
+                  "description": "Country Code"
+                },
+                {
+                  "key": "format",
+                  "value": "JSON",
+                  "description": "Response format"
+                }
+              ]
+            },
+            "description": "Empty template for single address validation."
+          },
+          "response": []
+        },
+        {
+          "name": "Validate Address Batch (POST)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has Records\", function () {",
+                  "    pm.expect(jsonData).to.have.property('Records');",
+                  "});",
+                  "",
+                  "// Log batch results",
+                  "if (jsonData.Records && jsonData.Records.length > 0) {",
+                  "    console.log(\"=== Batch Validation Results ===\");",
+                  "    console.log(\"Total Records: \" + jsonData.Records.length);",
+                  "    console.log(\"\");",
+                  "    ",
+                  "    jsonData.Records.forEach(function(record, idx) {",
+                  "        console.log(\"--- Record \" + (record.RecordID || idx + 1) + \" ---\");",
+                  "        console.log(\"Results: \" + (record.Results || 'N/A'));",
+                  "        console.log(\"Address: \" + (record.FormattedAddress || record.AddressLine1 || 'N/A'));",
+                  "        console.log(\"Type: \" + (record.AddressType || 'N/A'));",
+                  "        console.log(\"\");",
+                  "    });",
+                  "} else {",
+                  "    console.log(\"No records returned\");",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"TransmissionReference\": \"Batch Address Validation\",\n    \"CustomerID\": \"{{melissa_api_key}}\",\n    \"Options\": \"\",\n    \"Records\": [\n        {\n            \"RecordID\": \"1\",\n            \"Organization\": \"\",\n            \"AddressLine1\": \"22382 Avenida Empresa\",\n            \"AddressLine2\": \"\",\n            \"AddressLine3\": \"\",\n            \"AddressLine4\": \"\",\n            \"AddressLine5\": \"\",\n            \"AddressLine6\": \"\",\n            \"AddressLine7\": \"\",\n            \"AddressLine8\": \"\",\n            \"DoubleDependentLocality\": \"\",\n            \"DependentLocality\": \"\",\n            \"Locality\": \"Rancho Santa Margarita\",\n            \"SubAdministrativeArea\": \"\",\n            \"AdministrativeArea\": \"CA\",\n            \"PostalCode\": \"92688\",\n            \"SubNationalArea\": \"\",\n            \"Country\": \"US\"\n        },\n        {\n            \"RecordID\": \"2\",\n            \"Organization\": \"\",\n            \"AddressLine1\": \"1600 Amphitheatre Pkwy\",\n            \"AddressLine2\": \"\",\n            \"AddressLine3\": \"\",\n            \"AddressLine4\": \"\",\n            \"AddressLine5\": \"\",\n            \"AddressLine6\": \"\",\n            \"AddressLine7\": \"\",\n            \"AddressLine8\": \"\",\n            \"DoubleDependentLocality\": \"\",\n            \"DependentLocality\": \"\",\n            \"Locality\": \"Mountain View\",\n            \"SubAdministrativeArea\": \"\",\n            \"AdministrativeArea\": \"CA\",\n            \"PostalCode\": \"94043\",\n            \"SubNationalArea\": \"\",\n            \"Country\": \"US\"\n        }\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{melissa_global_address_url}}",
+              "host": [
+                "{{melissa_global_address_url}}"
+              ]
+            },
+            "description": "Batch address validation via POST request.\n\nSubmit multiple addresses in a single request for efficient processing."
+          },
+          "response": []
+        },
+        {
+          "name": "Validate Address Batch (POST) - Template",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has Records\", function () {",
+                  "    pm.expect(jsonData).to.have.property('Records');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"TransmissionReference\": \"Batch Template\",\n    \"CustomerID\": \"{{melissa_api_key}}\",\n    \"Options\": \"\",\n    \"Records\": [\n        {\n            \"RecordID\": \"1\",\n            \"Organization\": \"\",\n            \"AddressLine1\": \"\",\n            \"AddressLine2\": \"\",\n            \"AddressLine3\": \"\",\n            \"AddressLine4\": \"\",\n            \"AddressLine5\": \"\",\n            \"AddressLine6\": \"\",\n            \"AddressLine7\": \"\",\n            \"AddressLine8\": \"\",\n            \"DoubleDependentLocality\": \"\",\n            \"DependentLocality\": \"\",\n            \"Locality\": \"\",\n            \"SubAdministrativeArea\": \"\",\n            \"AdministrativeArea\": \"\",\n            \"PostalCode\": \"\",\n            \"SubNationalArea\": \"\",\n            \"Country\": \"\"\n        },\n        {\n            \"RecordID\": \"2\",\n            \"Organization\": \"\",\n            \"AddressLine1\": \"\",\n            \"AddressLine2\": \"\",\n            \"AddressLine3\": \"\",\n            \"AddressLine4\": \"\",\n            \"AddressLine5\": \"\",\n            \"AddressLine6\": \"\",\n            \"AddressLine7\": \"\",\n            \"AddressLine8\": \"\",\n            \"DoubleDependentLocality\": \"\",\n            \"DependentLocality\": \"\",\n            \"Locality\": \"\",\n            \"SubAdministrativeArea\": \"\",\n            \"AdministrativeArea\": \"\",\n            \"PostalCode\": \"\",\n            \"SubNationalArea\": \"\",\n            \"Country\": \"\"\n        }\n    ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{melissa_global_address_url}}",
+              "host": [
+                "{{melissa_global_address_url}}"
+              ]
+            },
+            "description": "Empty template for batch validation."
+          },
+          "response": []
+        }
+      ],
+      "description": "Melissa Global Address API for CASS-certified address validation.\n\nKey fields in response:\n- Results: Validation result codes (AV11=verified, AV14=corrected, AE=error)\n- AddressType: Residential/Commercial indicator (RDI equivalent)\n- FormattedAddress: Standardized full address\n- MelissaAddressKey: Unique identifier for address lookups\n\nDocumentation: https://docs.melissa.com/cloud-api/global-address/global-address-index.html"
+    },
+    {
+      "name": "Street Search (Lookups)",
+      "item": [
+        {
+          "name": "Street Search - With Address",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has Results\", function () {",
+                  "    pm.expect(jsonData).to.have.property('Results');",
+                  "});",
+                  "",
+                  "// Log street search results",
+                  "console.log(\"=== Street Search Results ===\");",
+                  "console.log(\"Transmission Reference: \" + (jsonData.TransmissionReference || 'N/A'));",
+                  "console.log(\"Total Found: \" + (jsonData.TotalRecords || '0'));",
+                  "",
+                  "if (jsonData.Results && jsonData.Results.length > 0) {",
+                  "    console.log(\"\\n--- Address Candidates ---\");",
+                  "    jsonData.Results.forEach(function(result, idx) {",
+                  "        console.log((idx + 1) + \". \" + (result.AddressLine || 'N/A'));",
+                  "        console.log(\"   City: \" + (result.City || 'N/A'));",
+                  "        console.log(\"   State: \" + (result.State || 'N/A'));",
+                  "        console.log(\"   ZIP: \" + (result.Zip || 'N/A'));",
+                  "        console.log(\"   Range: \" + (result.AddressRange || 'N/A'));",
+                  "        console.log(\"\");",
+                  "    });",
+                  "} else {",
+                  "    console.log(\"No street candidates found\");",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{melissa_street_search_url}}?id={{melissa_api_key}}&t=Street Lookup&opt=&a=Parkridge Blvd&city=Irving&state=TX&zip=75063&ctry=US",
+              "host": [
+                "{{melissa_street_search_url}}"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{{melissa_api_key}}",
+                  "description": "Melissa License Key"
+                },
+                {
+                  "key": "t",
+                  "value": "Street Lookup",
+                  "description": "Transmission Reference"
+                },
+                {
+                  "key": "opt",
+                  "value": "",
+                  "description": "Options (RangeOnly - returns only range info)"
+                },
+                {
+                  "key": "a",
+                  "value": "Parkridge Blvd",
+                  "description": "Street address (can be partial)"
+                },
+                {
+                  "key": "city",
+                  "value": "Irving",
+                  "description": "City name"
+                },
+                {
+                  "key": "state",
+                  "value": "TX",
+                  "description": "State abbreviation"
+                },
+                {
+                  "key": "zip",
+                  "value": "75063",
+                  "description": "ZIP code"
+                },
+                {
+                  "key": "ctry",
+                  "value": "US",
+                  "description": "Country code"
+                }
+              ]
+            },
+            "description": "Street Search with address for finding valid house number ranges.\n\nUseful for:\n- Finding valid street segments in a city/ZIP\n- Getting house number ranges for a street\n- Validating if a house number exists on a street\n\nUse case: When primary carrier returns invalid, search for the street to find valid house numbers, then use Levenshtein to suggest corrections."
+          },
+          "response": []
+        },
+        {
+          "name": "Street Search - Range Only",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "// Log range results",
+                  "console.log(\"=== Street Range Results ===\");",
+                  "",
+                  "if (jsonData.Results && jsonData.Results.length > 0) {",
+                  "    jsonData.Results.forEach(function(result, idx) {",
+                  "        console.log((idx + 1) + \". \" + (result.AddressLine || result.Street || 'N/A'));",
+                  "        if (result.AddressRange) {",
+                  "            console.log(\"   Valid Range: \" + result.AddressRange);",
+                  "        }",
+                  "        if (result.OddRange) {",
+                  "            console.log(\"   Odd Numbers: \" + result.OddRange);",
+                  "        }",
+                  "        if (result.EvenRange) {",
+                  "            console.log(\"   Even Numbers: \" + result.EvenRange);",
+                  "        }",
+                  "    });",
+                  "} else {",
+                  "    console.log(\"No street ranges found\");",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{melissa_street_search_url}}?id={{melissa_api_key}}&t=Range Lookup&opt=RangeOnly&a=Main St&city=Dallas&state=TX&zip=&ctry=US",
+              "host": [
+                "{{melissa_street_search_url}}"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{{melissa_api_key}}",
+                  "description": "Melissa License Key"
+                },
+                {
+                  "key": "t",
+                  "value": "Range Lookup",
+                  "description": "Transmission Reference"
+                },
+                {
+                  "key": "opt",
+                  "value": "RangeOnly",
+                  "description": "RangeOnly - Returns only address range information"
+                },
+                {
+                  "key": "a",
+                  "value": "Main St",
+                  "description": "Street name (partial OK)"
+                },
+                {
+                  "key": "city",
+                  "value": "Dallas",
+                  "description": "City name"
+                },
+                {
+                  "key": "state",
+                  "value": "TX",
+                  "description": "State"
+                },
+                {
+                  "key": "zip",
+                  "value": "",
+                  "description": "ZIP code (optional with city/state)"
+                },
+                {
+                  "key": "ctry",
+                  "value": "US",
+                  "description": "Country"
+                }
+              ]
+            },
+            "description": "Street Search with RangeOnly option.\n\nReturns valid house number ranges for the street, useful for determining if an invalid house number is close to a valid range."
+          },
+          "response": []
+        },
+        {
+          "name": "Street Search - Template",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{melissa_street_search_url}}?id={{melissa_api_key}}&t=&opt=&a=&city=&state=&zip=&ctry=",
+              "host": [
+                "{{melissa_street_search_url}}"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{{melissa_api_key}}",
+                  "description": "Melissa License Key"
+                },
+                {
+                  "key": "t",
+                  "value": "",
+                  "description": "Transmission Reference"
+                },
+                {
+                  "key": "opt",
+                  "value": "",
+                  "description": "Options"
+                },
+                {
+                  "key": "a",
+                  "value": "",
+                  "description": "Address/Street"
+                },
+                {
+                  "key": "city",
+                  "value": "",
+                  "description": "City"
+                },
+                {
+                  "key": "state",
+                  "value": "",
+                  "description": "State"
+                },
+                {
+                  "key": "zip",
+                  "value": "",
+                  "description": "ZIP"
+                },
+                {
+                  "key": "ctry",
+                  "value": "",
+                  "description": "Country"
+                }
+              ]
+            },
+            "description": "Empty template for street search."
+          },
+          "response": []
+        }
+      ],
+      "description": "Melissa Street Search API for finding valid street addresses and house number ranges.\n\nUse cases:\n1. Find all valid addresses on a street in a given city/ZIP\n2. Get valid house number ranges for a street\n3. Validate if a house number exists on a specific street\n\nKey for address correction workflow:\n- When primary validation returns invalid house number\n- Search for the street to find valid ranges\n- Use Levenshtein to find closest valid house number\n- Suggest correction to user\n\nDocumentation: https://docs.melissa.com/cloud-api/lookups/lookups-street-search-request.html"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "melissa_global_address_url",
+      "value": "https://address.melissadata.net/v3/WEB/GlobalAddress/doGlobalAddress",
+      "description": "Melissa Global Address API endpoint"
+    },
+    {
+      "key": "melissa_street_search_url",
+      "value": "https://streetsearch.melissadata.net/v2/rest/service.svc/doStreetSearch",
+      "description": "Melissa Street Search API endpoint"
+    },
+    {
+      "key": "melissa_api_key",
+      "value": "REPLACE_WITH_YOUR_MELISSA_LICENSE_KEY",
+      "description": "Your Melissa Data license key"
+    }
+  ]
+}

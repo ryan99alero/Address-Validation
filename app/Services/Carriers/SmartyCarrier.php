@@ -224,11 +224,14 @@ class SmartyCarrier extends AbstractCarrier
             ? "row_{$address->source_row_number}_id_{$address->id}"
             : "idx_{$index}_id_{$address->id}";
 
+        // Get match mode from carrier settings, default to 'invalid'
+        $matchMode = $this->carrier->getCredential('smarty_match_mode') ?? 'invalid';
+
         $data = [
             'input_id' => $inputId,
             'street' => $address->input_address_1,
             'candidates' => 1,
-            'match' => 'invalid', // Return results even for invalid addresses
+            'match' => $matchMode,
         ];
 
         if ($address->input_address_2) {

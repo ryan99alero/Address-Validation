@@ -1,0 +1,266 @@
+{
+  "info": {
+    "_postman_id": "google-address-validation-001",
+    "name": "Google Address Validation",
+    "description": "Google Address Validation API for verifying and correcting addresses.\n\nFull documentation: https://developers.google.com/maps/documentation/address-validation",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "8255341"
+  },
+  "item": [
+    {
+      "name": "Validate Address",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has result\", function () {",
+              "    pm.expect(jsonData).to.have.property('result');",
+              "});",
+              "",
+              "// Log validation verdict",
+              "if (jsonData.result && jsonData.result.verdict) {",
+              "    var verdict = jsonData.result.verdict;",
+              "    console.log(\"Address Completeness: \" + verdict.addressComplete);",
+              "    console.log(\"Validation Granularity: \" + verdict.validationGranularity);",
+              "    console.log(\"Has Unconfirmed Components: \" + verdict.hasUnconfirmedComponents);",
+              "}",
+              "",
+              "// Log corrected address if available",
+              "if (jsonData.result && jsonData.result.address) {",
+              "    console.log(\"Formatted Address: \" + jsonData.result.address.formattedAddress);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"address\": {\n    \"regionCode\": \"US\",\n    \"locality\": \"Mountain View\",\n    \"administrativeArea\": \"CA\",\n    \"postalCode\": \"94043\",\n    \"addressLines\": [\"1600 Amphitheatre Pkwy\"]\n  },\n  \"enableUspsCass\": true\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{google_address_validation_url}}/v1:validateAddress?key={{google_api_key}}",
+          "host": [
+            "{{google_address_validation_url}}"
+          ],
+          "path": [
+            "v1:validateAddress"
+          ],
+          "query": [
+            {
+              "key": "key",
+              "value": "{{google_api_key}}"
+            }
+          ]
+        },
+        "description": "Validate an address using Google Address Validation API.\n\nRequest fields:\n- regionCode: ISO 3166-1 alpha-2 country code (US, CA, etc.)\n- locality: City name\n- administrativeArea: State/Province\n- postalCode: ZIP/Postal code\n- addressLines: Array of address lines\n- enableUspsCass: Enable USPS CASS processing for US addresses"
+      },
+      "response": []
+    },
+    {
+      "name": "Validate Address - Full Details",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has result\", function () {",
+              "    pm.expect(jsonData).to.have.property('result');",
+              "});",
+              "",
+              "// Log detailed component analysis",
+              "if (jsonData.result && jsonData.result.address && jsonData.result.address.addressComponents) {",
+              "    console.log(\"=== Address Components ===\");",
+              "    jsonData.result.address.addressComponents.forEach(function(comp) {",
+              "        console.log(comp.componentType + \": \" + comp.componentName.text + \" (\" + comp.confirmationLevel + \")\");",
+              "    });",
+              "}",
+              "",
+              "// Log USPS data if available",
+              "if (jsonData.result && jsonData.result.uspsData) {",
+              "    var usps = jsonData.result.uspsData;",
+              "    console.log(\"=== USPS Data ===\");",
+              "    console.log(\"Standardized Address: \" + usps.standardizedAddress?.firstAddressLine);",
+              "    console.log(\"City: \" + usps.standardizedAddress?.city);",
+              "    console.log(\"State: \" + usps.standardizedAddress?.state);",
+              "    console.log(\"ZIP: \" + usps.standardizedAddress?.zipCode);",
+              "    console.log(\"ZIP+4: \" + usps.standardizedAddress?.zipCodeExtension);",
+              "    console.log(\"DPV Confirmation: \" + usps.dpvConfirmation);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"address\": {\n    \"regionCode\": \"US\",\n    \"addressLines\": [\"1600 Amphitheatre Pkwy, Mountain View, CA 94043\"]\n  },\n  \"enableUspsCass\": true\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{google_address_validation_url}}/v1:validateAddress?key={{google_api_key}}",
+          "host": [
+            "{{google_address_validation_url}}"
+          ],
+          "path": [
+            "v1:validateAddress"
+          ],
+          "query": [
+            {
+              "key": "key",
+              "value": "{{google_api_key}}"
+            }
+          ]
+        },
+        "description": "Validate an address using freeform input (single addressLines entry).\n\nThis approach lets Google parse the address components automatically."
+      },
+      "response": []
+    },
+    {
+      "name": "Validate Address - Residential Check",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "// Check for residential/commercial classification",
+              "if (jsonData.result && jsonData.result.metadata) {",
+              "    var meta = jsonData.result.metadata;",
+              "    console.log(\"=== Address Metadata ===\");",
+              "    console.log(\"Business: \" + meta.business);",
+              "    console.log(\"Residential: \" + meta.residential);",
+              "    console.log(\"PO Box: \" + meta.poBox);",
+              "}",
+              "",
+              "// Log geocode if available",
+              "if (jsonData.result && jsonData.result.geocode) {",
+              "    var geo = jsonData.result.geocode;",
+              "    console.log(\"=== Geocode ===\");",
+              "    console.log(\"Lat: \" + geo.location?.latitude);",
+              "    console.log(\"Lng: \" + geo.location?.longitude);",
+              "    console.log(\"Place ID: \" + geo.placeId);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"address\": {\n    \"regionCode\": \"US\",\n    \"locality\": \"Irving\",\n    \"administrativeArea\": \"TX\",\n    \"postalCode\": \"75063\",\n    \"addressLines\": [\"7372 Parkridge Blvd\", \"Apt 286\"]\n  },\n  \"enableUspsCass\": true\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{google_address_validation_url}}/v1:validateAddress?key={{google_api_key}}",
+          "host": [
+            "{{google_address_validation_url}}"
+          ],
+          "path": [
+            "v1:validateAddress"
+          ],
+          "query": [
+            {
+              "key": "key",
+              "value": "{{google_api_key}}"
+            }
+          ]
+        },
+        "description": "Test residential/commercial classification with metadata response."
+      },
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "google_address_validation_url",
+      "value": "https://addressvalidation.googleapis.com"
+    },
+    {
+      "key": "google_api_key",
+      "value": "REPLACE_WITH_YOUR_GOOGLE_API_KEY"
+    }
+  ]
+}

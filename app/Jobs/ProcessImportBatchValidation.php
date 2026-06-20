@@ -7,6 +7,7 @@ use App\Models\ImportBatch;
 use App\Services\AddressValidationService;
 use App\Services\FedExServiceAvailabilityService;
 use App\Services\ShippingRecommendationService;
+use App\Services\UpsTimeInTransitService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -107,7 +108,11 @@ class ProcessImportBatchValidation implements ShouldQueue
 
             try {
                 // Use native batch validation (FedEx/Smarty) or concurrent (UPS)
-                $corrections = $validationService->validateBatch($chunk->all(), $carrier->slug);
+                $corrections = $validationService->validateBatch(
+                    $chunk->all(),
+                    $carrier->slug,
+                    (bool) $this->batch->check_both_sources,
+                );
 
                 // Process results
                 foreach ($corrections as $correction) {
@@ -178,15 +183,19 @@ class ProcessImportBatchValidation implements ShouldQueue
 
     /**
      * Fetch transit times for all validated addresses in the batch.
+     * Supports both UPS and FedEx based on transit_carrier_id.
      */
     protected function fetchTransitTimes(): void
     {
-        // Only FedEx supports transit times currently
-        $fedexCarrier = Carrier::where('slug', 'fedex')->where('is_active', true)->first();
+        // Get transit carrier from batch or fall back to FedEx
+        $transitCarrier = $this->batch->transit_carrier_id
+            ? Carrier::where('id', $this->batch->transit_carrier_id)->where('is_active', true)->first()
+            : Carrier::where('slug', 'fedex')->where('is_active', true)->first();
 
-        if (! $fedexCarrier) {
-            Log::warning('ProcessImportBatchValidation: FedEx carrier not found or inactive for transit times', [
+        if (! $transitCarrier) {
+            Log::warning('ProcessImportBatchValidation: Transit carrier not found or inactive', [
                 'batch_id' => $this->batch->id,
+                'transit_carrier_id' => $this->batch->transit_carrier_id,
             ]);
 
             return;
@@ -206,21 +215,29 @@ class ProcessImportBatchValidation implements ShouldQueue
 
         Log::info('ProcessImportBatchValidation: Fetching transit times', [
             'batch_id' => $this->batch->id,
+            'carrier' => $transitCarrier->name,
+            'carrier_slug' => $transitCarrier->slug,
             'origin_postal_code' => $this->batch->origin_postal_code,
             'total_addresses' => $totalValidated,
         ]);
 
-        $transitService = new FedExServiceAvailabilityService($fedexCarrier);
+        // Create appropriate transit service based on carrier
+        $transitService = match ($transitCarrier->slug) {
+            'ups' => new UpsTimeInTransitService($transitCarrier),
+            'fedex' => new FedExServiceAvailabilityService($transitCarrier),
+            default => new FedExServiceAvailabilityService($transitCarrier),
+        };
 
         $processed = 0;
         $failed = 0;
 
         // Use carrier's concurrent request setting, default to 10
-        $concurrentRequests = $fedexCarrier->concurrent_requests ?? 10;
+        $concurrentRequests = $transitCarrier->concurrent_requests ?? 10;
         $chunkSize = $concurrentRequests * 5; // Process 5 concurrent batches at a time
 
         Log::info('ProcessImportBatchValidation: Using concurrent transit time fetching', [
             'batch_id' => $this->batch->id,
+            'carrier' => $transitCarrier->name,
             'concurrent_requests' => $concurrentRequests,
             'chunk_size' => $chunkSize,
         ]);
@@ -266,6 +283,7 @@ class ProcessImportBatchValidation implements ShouldQueue
 
         Log::info('ProcessImportBatchValidation: Transit times completed', [
             'batch_id' => $this->batch->id,
+            'carrier' => $transitCarrier->name,
             'processed' => $processed,
             'failed' => $failed,
         ]);

@@ -13,6 +13,29 @@ class Address extends Model
     /** @use HasFactory<AddressFactory> */
     use HasFactory;
 
+    // Validation source constants
+    public const SOURCE_LOCAL_CACHE = 'local_cache';
+
+    public const SOURCE_UPS_API = 'ups_api';
+
+    public const SOURCE_FEDEX_API = 'fedex_api';
+
+    public const SOURCE_USPS_API = 'usps_api';
+
+    public const SOURCE_MANUAL = 'manual';
+
+    // Validation status constants
+    public const STATUS_PENDING = 'pending';
+
+    public const STATUS_VALID = 'valid';
+
+    public const STATUS_INVALID = 'invalid';
+
+    public const STATUS_AMBIGUOUS = 'ambiguous';
+
+    // DB (invoice) and carrier API corrections disagree; awaiting a human pick.
+    public const STATUS_NEEDS_REVIEW = 'needs_review';
+
     /**
      * Use guarded instead of fillable to allow dynamic fields.
      *
@@ -220,8 +243,9 @@ class Address extends Model
      * Apply validation result directly to address.
      *
      * @param  array<string, mixed>  $result
+     * @param  string  $validationSource  One of SOURCE_* constants
      */
-    public function applyValidationResult(array $result, int $carrierId): void
+    public function applyValidationResult(array $result, int $carrierId, string $validationSource = self::SOURCE_UPS_API): void
     {
         $this->update([
             'output_address_1' => $result['corrected_address_line_1'] ?? $this->input_address_1,
@@ -236,8 +260,25 @@ class Address extends Model
             'classification' => $result['classification'] ?? null,
             'confidence_score' => $result['confidence_score'] ?? null,
             'validated_by_carrier_id' => $carrierId,
+            'validation_source' => $validationSource,
             'validated_at' => now(),
         ]);
+    }
+
+    /**
+     * Get all available validation sources for reporting.
+     *
+     * @return array<string, string>
+     */
+    public static function getValidationSources(): array
+    {
+        return [
+            self::SOURCE_LOCAL_CACHE => 'Local Cache (Carrier Invoice Data)',
+            self::SOURCE_UPS_API => 'UPS API',
+            self::SOURCE_FEDEX_API => 'FedEx API',
+            self::SOURCE_USPS_API => 'USPS API',
+            self::SOURCE_MANUAL => 'Manual Entry',
+        ];
     }
 
     /**
@@ -293,6 +334,14 @@ class Address extends Model
         return $this->hasMany(TransitTime::class);
     }
 
+    /**
+     * Candidate corrected addresses awaiting a review pick (DB vs API).
+     */
+    public function candidates(): HasMany
+    {
+        return $this->hasMany(AddressCandidate::class);
+    }
+
     // Scopes
 
     public function scopeValidated($query)
@@ -325,6 +374,23 @@ class Address extends Model
         return $query->where('validation_status', 'ambiguous');
     }
 
+    public function scopeNeedsReview($query)
+    {
+        return $query->where('validation_status', self::STATUS_NEEDS_REVIEW);
+    }
+
+    /**
+     * Addresses that need human attention: invalid, ambiguous, or flagged for review.
+     */
+    public function scopeIssues($query)
+    {
+        return $query->whereIn('validation_status', [
+            self::STATUS_INVALID,
+            self::STATUS_AMBIGUOUS,
+            self::STATUS_NEEDS_REVIEW,
+        ]);
+    }
+
     public function scopeFromSource($query, string $source)
     {
         return $query->where('source', $source);
@@ -333,5 +399,24 @@ class Address extends Model
     public function scopeForBatch($query, int $batchId)
     {
         return $query->where('import_batch_id', $batchId);
+    }
+
+    public function scopeFromValidationSource($query, string $source)
+    {
+        return $query->where('validation_source', $source);
+    }
+
+    public function scopeFromLocalCache($query)
+    {
+        return $query->where('validation_source', self::SOURCE_LOCAL_CACHE);
+    }
+
+    public function scopeFromCarrierApi($query)
+    {
+        return $query->whereIn('validation_source', [
+            self::SOURCE_UPS_API,
+            self::SOURCE_FEDEX_API,
+            self::SOURCE_USPS_API,
+        ]);
     }
 }

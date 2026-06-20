@@ -26,3 +26,11 @@ Schedule::command('invoices:process')
     ->name('carrier-invoice-processing')
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/carrier-invoices.log'));
+
+// Poll carrier invoice mailboxes; each integration is gated by its own
+// Check Frequency (poll_minutes), so this 15-minute tick is just the granularity.
+Schedule::command('mail:process-invoices --due')
+    ->everyFifteenMinutes()
+    ->name('mail-invoice-polling')
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/mail-invoices.log'));

@@ -12,17 +12,18 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Check if foreign key already exists using raw query
-        $foreignKeys = DB::select("
-            SELECT CONSTRAINT_NAME
-            FROM information_schema.KEY_COLUMN_USAGE
-            WHERE TABLE_SCHEMA = DATABASE()
-            AND TABLE_NAME = 'addresses'
-            AND COLUMN_NAME = 'import_batch_id'
-            AND REFERENCED_TABLE_NAME IS NOT NULL
-        ");
+        // SQLite (used by the test suite) has no information_schema and cannot
+        // ALTER a table to add a foreign key. The cascade FK is a production
+        // (MySQL) concern, so skip it on SQLite.
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            return;
+        }
 
-        if (count($foreignKeys) > 0) {
+        // Check if foreign key already exists using portable schema introspection
+        $hasForeignKey = collect(Schema::getForeignKeys('addresses'))
+            ->contains(fn (array $fk): bool => in_array('import_batch_id', $fk['columns'] ?? [], true));
+
+        if ($hasForeignKey) {
             return;
         }
 
@@ -47,6 +48,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (Schema::getConnection()->getDriverName() === 'sqlite') {
+            return;
+        }
+
         Schema::table('addresses', function (Blueprint $table) {
             $table->dropForeign(['import_batch_id']);
         });

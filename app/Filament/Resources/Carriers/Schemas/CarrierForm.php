@@ -188,6 +188,28 @@ class CarrierForm
                             }),
                     ]),
 
+                Section::make('Smarty API Settings')
+                    ->description('Configure Smarty-specific matching behavior. [Learn more about match modes](https://www.smarty.com/blog/match-enhanced-mode)')
+                    ->columns(2)
+                    ->visible(fn (callable $get) => $get('slug') === 'smarty')
+                    ->schema([
+                        Select::make('smarty_match_mode')
+                            ->label('Match Mode')
+                            ->options([
+                                'strict' => 'Strict - Only USPS-verified addresses',
+                                'enhanced' => 'Enhanced - Handles misspellings, 20M+ non-USPS addresses (requires US Core license)',
+                                'invalid' => 'Invalid - Returns result for every address, even invalid ones',
+                            ])
+                            ->default('invalid')
+                            ->required()
+                            ->helperText('Enhanced mode is more forgiving and can validate addresses not in the USPS database')
+                            ->afterStateHydrated(function (Select $component, ?Carrier $record) {
+                                if ($record) {
+                                    $component->state($record->getCredential('smarty_match_mode') ?? 'invalid');
+                                }
+                            }),
+                    ]),
+
                 Section::make('Connection Status')
                     ->columns(3)
                     ->schema([

@@ -18,6 +18,8 @@ class CarrierInvoice extends Model
 
     protected $fillable = [
         'carrier_id',
+        'source',
+        'source_reference',
         'filename',
         'original_path',
         'archived_path',
@@ -67,6 +69,11 @@ class CarrierInvoice extends Model
     {
         return $this->hasMany(CarrierInvoiceLine::class)
             ->whereNotNull('corrected_address_1');
+    }
+
+    public function charges(): HasMany
+    {
+        return $this->hasMany(CarrierCharge::class);
     }
 
     // Static Methods

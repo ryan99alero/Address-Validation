@@ -6,6 +6,7 @@ use App\Filament\Resources\Addresses\Pages\CreateAddress;
 use App\Filament\Resources\Addresses\Pages\EditAddress;
 use App\Filament\Resources\Addresses\Pages\ListAddresses;
 use App\Filament\Resources\Addresses\Pages\ViewAddress;
+use App\Filament\Resources\Addresses\RelationManagers\CandidatesRelationManager;
 use App\Filament\Resources\Addresses\Schemas\AddressForm;
 use App\Filament\Resources\Addresses\Tables\AddressesTable;
 use App\Models\Address;
@@ -50,7 +51,7 @@ class AddressResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            CandidatesRelationManager::class,
         ];
     }
 

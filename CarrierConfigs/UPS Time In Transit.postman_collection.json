@@ -1,0 +1,330 @@
+{
+  "info": {
+    "_postman_id": "27b7677d-f4b4-4365-af60-a23225c54394",
+    "name": "UPS Time In Transit",
+    "description": "Gives customer's the ability to determine the delivery time for UPS services.\n\nVisit the full [UPS Time In Transit Documentation](https://developer.ups.com/api/reference?loc=en_US#tag/TimeInTransit_other) for more details!",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "8255341",
+    "_collection_link": "https://go.postman.co/collection/8255341-27b7677d-f4b4-4365-af60-a23225c54394?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Time In Transit Example Request",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// Get token from globals if collection variable is empty",
+              "var token = pm.collectionVariables.get(\"ups_access_token\");",
+              "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+              "    var globalToken = pm.globals.get(\"ups_access_token\");",
+              "    if (globalToken) {",
+              "        pm.collectionVariables.set(\"ups_access_token\", globalToken);",
+              "    }",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has emsResponse\", function () {",
+              "    pm.expect(jsonData).to.have.property('emsResponse');",
+              "});",
+              "",
+              "// Log services found",
+              "if (jsonData.emsResponse && jsonData.emsResponse.services) {",
+              "    console.log(\"Transit services found: \" + jsonData.emsResponse.numberOfServices);",
+              "    jsonData.emsResponse.services.forEach(function(svc) {",
+              "        console.log(svc.serviceLevelDescription + \": \" + svc.businessTransitDays + \" business days, delivery \" + svc.deliveryDate);",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{ups_access_token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "transId",
+            "value": "{{$guid}}",
+            "description": "An identifier unique to the request",
+            "type": "text"
+          },
+          {
+            "key": "transactionSrc",
+            "value": "AddressCorrection",
+            "description": "Source of transaction",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n    \"originCountryCode\": \"US\",\r\n    \"originStateProvince\": \"KS\",\r\n    \"originCityName\": \"WICHITA\",\r\n    \"originTownName\": \"\",\r\n    \"originPostalCode\": \"67202\",\r\n    \"destinationCountryCode\": \"US\",\r\n    \"destinationStateProvince\": \"NH\",\r\n    \"destinationCityName\": \"MANCHESTER\",\r\n    \"destinationTownName\": \"\",\r\n    \"destinationPostalCode\": \"03104\",\r\n    \"weight\": \"10.5\",\r\n    \"weightUnitOfMeasure\": \"LBS\",\r\n    \"shipmentContentsValue\": \"10.5\",\r\n    \"shipmentContentsCurrencyCode\": \"USD\",\r\n    \"billType\": \"03\",\r\n    \"shipDate\": \"2026-03-25\",\r\n    \"shipTime\": \"\",\r\n    \"residentialIndicator\": \"\",\r\n    \"avvFlag\": true,\r\n    \"numberOfPackages\": \"1\"\r\n}"
+        },
+        "url": {
+          "raw": "{{ups_base_url}}/api/shipments/:version/transittimes",
+          "host": [
+            "{{ups_base_url}}"
+          ],
+          "path": [
+            "api",
+            "shipments",
+            ":version",
+            "transittimes"
+          ],
+          "variable": [
+            {
+              "key": "version",
+              "value": "v1",
+              "description": "API Version"
+            }
+          ]
+        },
+        "description": "This HTTP POST request will return a list of services and the time those services will take to move a package from a given origin to a given destination. Package details provided will sometimes change what services are available for a given lane (origin-destination pair)."
+      },
+      "response": [
+        {
+          "name": "Time In Transit Success",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "transId",
+                "value": "{{$guid}}",
+                "description": "An identifier unique to the request",
+                "type": "text"
+              },
+              {
+                "key": "transactionSrc",
+                "value": "AddressCorrection",
+                "description": "Source of transaction",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"originCountryCode\": \"US\",\r\n    \"originStateProvince\": \"KS\",\r\n    \"originCityName\": \"WICHITA\",\r\n    \"originTownName\": \"\",\r\n    \"originPostalCode\": \"67202\",\r\n    \"destinationCountryCode\": \"US\",\r\n    \"destinationStateProvince\": \"NH\",\r\n    \"destinationCityName\": \"MANCHESTER\",\r\n    \"destinationTownName\": \"\",\r\n    \"destinationPostalCode\": \"03104\",\r\n    \"weight\": \"10.5\",\r\n    \"weightUnitOfMeasure\": \"LBS\",\r\n    \"shipmentContentsValue\": \"10.5\",\r\n    \"shipmentContentsCurrencyCode\": \"USD\",\r\n    \"billType\": \"03\",\r\n    \"shipDate\": \"2026-03-25\",\r\n    \"shipTime\": \"\",\r\n    \"residentialIndicator\": \"\",\r\n    \"avvFlag\": true,\r\n    \"numberOfPackages\": \"1\"\r\n}"
+            },
+            "url": {
+              "raw": "{{ups_base_url}}/api/shipments/:version/transittimes",
+              "host": [
+                "{{ups_base_url}}"
+              ],
+              "path": [
+                "api",
+                "shipments",
+                ":version",
+                "transittimes"
+              ],
+              "variable": [
+                {
+                  "key": "version",
+                  "value": "v1",
+                  "description": "API Version"
+                }
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "Content-Type",
+              "name": "Content-Type",
+              "value": "application/json",
+              "description": "",
+              "type": "text"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"emsResponse\": {\n        \"shipDate\": \"2024-02-01\",\n        \"shipTime\": \"11:15:43\",\n        \"billType\": \"03\",\n        \"dutyType\": \"09\",\n        \"residentialIndicator\": \"02\",\n        \"destinationCityName\": \"MANCHESTER\",\n        \"destinationCountryName\": \"UNITED STATES\",\n        \"destinationCountryCode\": \"US\",\n        \"destinationPostalCode\": \"03104\",\n        \"destinationPostalCodeLow\": \"03104\",\n        \"destinationPostalCodeHigh\": \"03104\",\n        \"destinationStateProvince\": \"NH\",\n        \"originCityName\": \"BERLIN\",\n        \"originCountryName\": \"GERMANY\",\n        \"originCountryCode\": \"DE\",\n        \"originPostalCode\": \"10703\",\n        \"originStateProvince\": \"BERLIN\",\n        \"shipmentContentsCurrencyCode\": \"USD\",\n        \"weightUnitOfMeasure\": \"LBS\",\n        \"weight\": \"10.5\",\n        \"shipmentContentsValue\": \"10.5\",\n        \"guaranteeSuspended\": false,\n        \"numberOfServices\": 6,\n        \"services\": [\n            {\n                \"serviceLevel\": \"01\",\n                \"serviceLevelDescription\": \"UPS Worldwide Express\",\n                \"businessTransitDays\": 2,\n                \"totalTransitDays\": 4,\n                \"deliveryDate\": \"2024-02-03\",\n                \"deliveryTime\": \"12:00:00\",\n                \"deliveryDayOfWeek\": \"SAT\",\n                \"nextDayPickupIndicator\": \"0\",\n                \"saturdayPickupIndicator\": \"0\",\n                \"saturdayDeliveryIndicator\": \"1\",\n                \"saturdayDeliveryDate\": \"2024-02-03\",\n                \"saturdayDeliveryTime\": \"12:00:00\",\n                \"guaranteeIndicator\": \"1\",\n                \"restDaysCount\": 2,\n                \"holidayCount\": 0,\n                \"delayCount\": 0,\n                \"commitTime\": \"12:00:00\",\n                \"serviceRemarksText\": \"SATURDAY DELIVERY EXTRA CHARGE10KG & 25KG BOX SRVC AVAIL                                                \",\n                \"shipDate\": \"2024-02-01\",\n                \"pickupTime\": \"20:00:00\",\n                \"pickupDate\": \"2024-02-01\",\n                \"poddate\": \"2024-02-06\",\n                \"poddays\": 1,\n                \"cstccutoffTime\": \"18:00:00\"\n            },\n            {\n                \"serviceLevel\": \"21\",\n                \"serviceLevelDescription\": \"UPS Express Plus®\",\n                \"businessTransitDays\": 2,\n                \"totalTransitDays\": 4,\n                \"deliveryDate\": \"2024-02-05\",\n                \"deliveryTime\": \"08:00:00\",\n                \"deliveryDayOfWeek\": \"MON\",\n                \"nextDayPickupIndicator\": \"0\",\n                \"saturdayPickupIndicator\": \"0\",\n                \"saturdayDeliveryIndicator\": \"0\",\n                \"saturdayDeliveryTime\": \"00:00:00\",\n                \"guaranteeIndicator\": \"1\",\n                \"restDaysCount\": 2,\n                \"holidayCount\": 0,\n                \"delayCount\": 0,\n                \"commitTime\": \"08:00:00\",\n                \"shipDate\": \"2024-02-01\",\n                \"pickupTime\": \"20:00:00\",\n                \"pickupDate\": \"2024-02-01\",\n                \"poddate\": \"2024-02-06\",\n                \"poddays\": 1,\n                \"cstccutoffTime\": \"18:00:00\"\n            },\n            {\n                \"serviceLevel\": \"01\",\n                \"serviceLevelDescription\": \"UPS Express®\",\n                \"businessTransitDays\": 2,\n                \"totalTransitDays\": 4,\n                \"deliveryDate\": \"2024-02-05\",\n                \"deliveryTime\": \"10:30:00\",\n                \"deliveryDayOfWeek\": \"MON\",\n                \"nextDayPickupIndicator\": \"0\",\n                \"saturdayPickupIndicator\": \"0\",\n                \"saturdayDeliveryIndicator\": \"0\",\n                \"sundayDeliveryIndicator\": \"0\",\n                \"guaranteeIndicator\": \"1\",\n                \"restDaysCount\": 2,\n                \"holidayCount\": 0,\n                \"delayCount\": 0,\n                \"commitTime\": \"10:30:00\",\n                \"serviceRemarksText\": \"SATURDAY DELIVERY EXTRA CHARGE10KG & 25KG BOX SRVC AVAIL                                                \",\n                \"shipDate\": \"2024-02-01\",\n                \"pickupTime\": \"20:00:00\",\n                \"pickupDate\": \"2024-02-01\",\n                \"poddate\": \"2024-02-06\",\n                \"poddays\": 1,\n                \"cstccutoffTime\": \"18:00:00\"\n            },\n            {\n                \"serviceLevel\": \"28\",\n                \"serviceLevelDescription\": \"UPS Express Saver\",\n                \"businessTransitDays\": 2,\n                \"totalTransitDays\": 4,\n                \"deliveryDate\": \"2024-02-05\",\n                \"deliveryTime\": \"23:30:00\",\n                \"deliveryDayOfWeek\": \"MON\",\n                \"nextDayPickupIndicator\": \"0\",\n                \"saturdayPickupIndicator\": \"0\",\n                \"saturdayDeliveryIndicator\": \"0\",\n                \"saturdayDeliveryTime\": \"00:00:00\",\n                \"guaranteeIndicator\": \"1\",\n                \"restDaysCount\": 2,\n                \"holidayCount\": 0,\n                \"delayCount\": 0,\n                \"commitTime\": \"23:30:00\",\n                \"serviceRemarksText\": \"10KG & 25KG BOX SRVC AVAIL                                                \",\n                \"shipDate\": \"2024-02-01\",\n                \"pickupTime\": \"20:00:00\",\n                \"pickupDate\": \"2024-02-01\",\n                \"poddate\": \"2024-02-06\",\n                \"poddays\": 1,\n                \"cstccutoffTime\": \"18:00:00\"\n            },\n            {\n                \"serviceLevel\": \"29\",\n                \"serviceLevelDescription\": \"UPS Worldwide Express Freight\",\n                \"businessTransitDays\": 2,\n                \"totalTransitDays\": 4,\n                \"deliveryDate\": \"2024-02-05\",\n                \"deliveryTime\": \"23:30:00\",\n                \"deliveryDayOfWeek\": \"MON\",\n                \"nextDayPickupIndicator\": \"0\",\n                \"saturdayPickupIndicator\": \"0\",\n                \"saturdayDeliveryIndicator\": \"0\",\n                \"saturdayDeliveryTime\": \"00:00:00\",\n                \"guaranteeIndicator\": \"1\",\n                \"restDaysCount\": 2,\n                \"holidayCount\": 0,\n                \"delayCount\": 0,\n                \"commitTime\": \"23:30:00\",\n                \"shipDate\": \"2024-02-01\",\n                \"pickupTime\": \"17:00:00\",\n                \"pickupDate\": \"2024-02-01\",\n                \"poddate\": \"2024-02-06\",\n                \"poddays\": 1,\n                \"cstccutoffTime\": \"15:00:00\"\n            },\n            {\n                \"serviceLevel\": \"05\",\n                \"serviceLevelDescription\": \"UPS Expedited\",\n                \"businessTransitDays\": 4,\n                \"totalTransitDays\": 6,\n                \"deliveryDate\": \"2024-02-07\",\n                \"deliveryTime\": \"23:30:00\",\n                \"deliveryDayOfWeek\": \"WED\",\n                \"nextDayPickupIndicator\": \"0\",\n                \"saturdayPickupIndicator\": \"0\",\n                \"saturdayDeliveryIndicator\": \"0\",\n                \"saturdayDeliveryTime\": \"00:00:00\",\n                \"guaranteeIndicator\": \"0\",\n                \"restDaysCount\": 2,\n                \"holidayCount\": 0,\n                \"delayCount\": 0,\n                \"commitTime\": \"23:30:00\",\n                \"serviceRemarksText\": \"IF GUARANTEE IS NO, THEN GUARANTEE WILL APPLY FOR US PAYERS ONLY          \",\n                \"shipDate\": \"2024-02-01\",\n                \"pickupTime\": \"20:00:00\",\n                \"pickupDate\": \"2024-02-01\",\n                \"poddate\": \"2024-02-08\",\n                \"poddays\": 1,\n                \"cstccutoffTime\": \"18:00:00\"\n            }\n        ]\n    }\n}"
+        }
+      ]
+    },
+    {
+      "name": "Time In Transit - Domestic US",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "// Get token from globals if collection variable is empty",
+              "var token = pm.collectionVariables.get(\"ups_access_token\");",
+              "if (!token || token === \"WILL_BE_AUTO_POPULATED\") {",
+              "    var globalToken = pm.globals.get(\"ups_access_token\");",
+              "    if (globalToken) {",
+              "        pm.collectionVariables.set(\"ups_access_token\", globalToken);",
+              "    }",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has emsResponse\", function () {",
+              "    pm.expect(jsonData).to.have.property('emsResponse');",
+              "});",
+              "",
+              "// Log services found",
+              "if (jsonData.emsResponse && jsonData.emsResponse.services) {",
+              "    console.log(\"Transit services found: \" + jsonData.emsResponse.numberOfServices);",
+              "    jsonData.emsResponse.services.forEach(function(svc) {",
+              "        console.log(svc.serviceLevelDescription + \": \" + svc.businessTransitDays + \" business days, delivery \" + svc.deliveryDate);",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{ups_access_token}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "transId",
+            "value": "{{$guid}}",
+            "description": "Unique transaction ID",
+            "type": "text"
+          },
+          {
+            "key": "transactionSrc",
+            "value": "AddressCorrection",
+            "description": "Source of transaction",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n    \"originCountryCode\": \"US\",\r\n    \"originStateProvince\": \"TX\",\r\n    \"originCityName\": \"DALLAS\",\r\n    \"originTownName\": \"\",\r\n    \"originPostalCode\": \"75201\",\r\n    \"destinationCountryCode\": \"US\",\r\n    \"destinationStateProvince\": \"CA\",\r\n    \"destinationCityName\": \"LOS ANGELES\",\r\n    \"destinationTownName\": \"\",\r\n    \"destinationPostalCode\": \"90001\",\r\n    \"weight\": \"5.0\",\r\n    \"weightUnitOfMeasure\": \"LBS\",\r\n    \"shipmentContentsValue\": \"100.00\",\r\n    \"shipmentContentsCurrencyCode\": \"USD\",\r\n    \"billType\": \"03\",\r\n    \"shipDate\": \"2026-03-25\",\r\n    \"shipTime\": \"\",\r\n    \"residentialIndicator\": \"01\",\r\n    \"avvFlag\": true,\r\n    \"numberOfPackages\": \"1\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{ups_base_url}}/api/shipments/:version/transittimes",
+          "host": [
+            "{{ups_base_url}}"
+          ],
+          "path": [
+            "api",
+            "shipments",
+            ":version",
+            "transittimes"
+          ],
+          "variable": [
+            {
+              "key": "version",
+              "value": "v1",
+              "description": "API Version"
+            }
+          ]
+        },
+        "description": "Domestic US shipment transit time request. Tests a typical cross-country residential delivery.\n\nresidentialIndicator values:\n- 01 = Residential\n- 02 = Commercial"
+      },
+      "response": []
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{ups_access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "ups_base_url",
+      "value": "https://wwwcie.ups.com"
+    },
+    {
+      "key": "ups_access_token",
+      "value": "WILL_BE_AUTO_POPULATED"
+    }
+  ]
+}

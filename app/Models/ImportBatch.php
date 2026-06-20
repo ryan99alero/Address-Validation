@@ -64,6 +64,8 @@ class ImportBatch extends Model
         'field_mappings',
         'carrier_id',
         'include_transit_times',
+        'check_both_sources',
+        'transit_carrier_id',
         'origin_postal_code',
         'origin_country_code',
         'find_best_service',
@@ -97,6 +99,7 @@ class ImportBatch extends Model
             'export_processed_rows' => 'integer',
             'field_mappings' => 'array',
             'include_transit_times' => 'boolean',
+            'check_both_sources' => 'boolean',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',
             'export_completed_at' => 'datetime',
@@ -400,6 +403,11 @@ class ImportBatch extends Model
     public function carrier(): BelongsTo
     {
         return $this->belongsTo(Carrier::class);
+    }
+
+    public function transitCarrier(): BelongsTo
+    {
+        return $this->belongsTo(Carrier::class, 'transit_carrier_id');
     }
 
     public function importer(): BelongsTo

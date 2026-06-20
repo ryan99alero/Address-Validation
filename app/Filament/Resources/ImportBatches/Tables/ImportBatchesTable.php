@@ -2,7 +2,9 @@
 
 namespace App\Filament\Resources\ImportBatches\Tables;
 
+use App\Filament\Resources\Addresses\AddressResource;
 use App\Models\ImportBatch;
+use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -104,6 +106,16 @@ class ImportBatchesTable
                     ->icon('heroicon-o-arrow-path')
                     ->url(fn (ImportBatch $record): string => route('filament.admin.pages.batch-processing', ['batch' => $record->id]))
                     ->visible(fn (ImportBatch $record): bool => $record->isProcessing() || $record->isCompleted()),
+                Action::make('viewAddresses')
+                    ->label('View Addresses')
+                    ->icon('heroicon-o-map-pin')
+                    ->color('gray')
+                    ->url(fn (ImportBatch $record): string => AddressResource::getUrl('index', [
+                        'tableFilters' => [
+                            'import_batch_id' => ['value' => $record->id],
+                        ],
+                    ]))
+                    ->visible(fn (ImportBatch $record): bool => $record->isCompleted()),
                 EditAction::make(),
             ])
             ->toolbarActions([

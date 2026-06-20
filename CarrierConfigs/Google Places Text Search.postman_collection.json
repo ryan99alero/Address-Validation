@@ -1,0 +1,333 @@
+{
+  "info": {
+    "_postman_id": "google-places-text-search-001",
+    "name": "Google Places Text Search",
+    "description": "Google Places API (New) - Text Search for address validation.\n\nUses the Essential SKU for cost-effective address lookups.\n\nDocumentation: https://developers.google.com/maps/documentation/places/web-service/text-search",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "8255341"
+  },
+  "item": [
+    {
+      "name": "Text Search - Address (Essential)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has places\", function () {",
+              "    pm.expect(jsonData).to.have.property('places');",
+              "});",
+              "",
+              "// Log results",
+              "if (jsonData.places && jsonData.places.length > 0) {",
+              "    console.log(\"=== Found \" + jsonData.places.length + \" place(s) ===\");",
+              "    jsonData.places.forEach(function(place, idx) {",
+              "        console.log(\"\\n--- Place \" + (idx + 1) + \" ---\");",
+              "        console.log(\"Display Name: \" + (place.displayName?.text || 'N/A'));",
+              "        console.log(\"Formatted Address: \" + (place.formattedAddress || 'N/A'));",
+              "        console.log(\"Place ID: \" + (place.id || 'N/A'));",
+              "        ",
+              "        if (place.addressComponents) {",
+              "            console.log(\"\\nAddress Components:\");",
+              "            place.addressComponents.forEach(function(comp) {",
+              "                console.log(\"  \" + comp.types.join(', ') + \": \" + comp.longText);",
+              "            });",
+              "        }",
+              "    });",
+              "} else {",
+              "    console.log(\"No places found\");",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "X-Goog-Api-Key",
+            "value": "{{google_api_key}}",
+            "type": "text"
+          },
+          {
+            "key": "X-Goog-FieldMask",
+            "value": "places.id,places.displayName,places.formattedAddress,places.addressComponents",
+            "description": "Essential fields for address validation",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"textQuery\": \"1600 Amphitheatre Pkwy, Mountain View, CA 94043\",\n  \"maxResultCount\": 1,\n  \"languageCode\": \"en\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{google_places_url}}/v1/places:searchText",
+          "host": [
+            "{{google_places_url}}"
+          ],
+          "path": [
+            "v1",
+            "places:searchText"
+          ]
+        },
+        "description": "Text Search with Essential fields only (lowest cost tier).\n\nField mask includes:\n- places.id (Place ID for further lookups)\n- places.displayName\n- places.formattedAddress\n- places.addressComponents (street, city, state, zip, country)"
+      },
+      "response": []
+    },
+    {
+      "name": "Text Search - Address with Location",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "// Log results with location",
+              "if (jsonData.places && jsonData.places.length > 0) {",
+              "    jsonData.places.forEach(function(place, idx) {",
+              "        console.log(\"=== Place \" + (idx + 1) + \" ===\");",
+              "        console.log(\"Formatted Address: \" + place.formattedAddress);",
+              "        if (place.location) {",
+              "            console.log(\"Lat: \" + place.location.latitude);",
+              "            console.log(\"Lng: \" + place.location.longitude);",
+              "        }",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "X-Goog-Api-Key",
+            "value": "{{google_api_key}}",
+            "type": "text"
+          },
+          {
+            "key": "X-Goog-FieldMask",
+            "value": "places.id,places.displayName,places.formattedAddress,places.addressComponents,places.location",
+            "description": "Essential + Location (Pro tier)",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"textQuery\": \"7372 Parkridge Blvd Apt 286, Irving, TX 75063\",\n  \"maxResultCount\": 1,\n  \"languageCode\": \"en\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{google_places_url}}/v1/places:searchText",
+          "host": [
+            "{{google_places_url}}"
+          ],
+          "path": [
+            "v1",
+            "places:searchText"
+          ]
+        },
+        "description": "Text Search with location coordinates (Pro tier pricing)."
+      },
+      "response": []
+    },
+    {
+      "name": "Text Search - US Region Bias",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "if (jsonData.places && jsonData.places.length > 0) {",
+              "    var place = jsonData.places[0];",
+              "    console.log(\"Top Result: \" + place.formattedAddress);",
+              "    ",
+              "    // Check if US address",
+              "    if (place.addressComponents) {",
+              "        var country = place.addressComponents.find(c => c.types.includes('country'));",
+              "        console.log(\"Country: \" + (country?.longText || 'Unknown'));",
+              "    }",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "X-Goog-Api-Key",
+            "value": "{{google_api_key}}",
+            "type": "text"
+          },
+          {
+            "key": "X-Goog-FieldMask",
+            "value": "places.id,places.displayName,places.formattedAddress,places.addressComponents",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"textQuery\": \"123 Main Street\",\n  \"maxResultCount\": 3,\n  \"languageCode\": \"en\",\n  \"regionCode\": \"US\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{google_places_url}}/v1/places:searchText",
+          "host": [
+            "{{google_places_url}}"
+          ],
+          "path": [
+            "v1",
+            "places:searchText"
+          ]
+        },
+        "description": "Text Search with US region bias for ambiguous addresses.\n\nUseful when address doesn't include full details."
+      },
+      "response": []
+    },
+    {
+      "name": "Get Place Details",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var jsonData = pm.response.json();",
+              "",
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "console.log(\"=== Place Details ===\");",
+              "console.log(\"Name: \" + (jsonData.displayName?.text || 'N/A'));",
+              "console.log(\"Address: \" + (jsonData.formattedAddress || 'N/A'));",
+              "",
+              "if (jsonData.addressComponents) {",
+              "    console.log(\"\\nAddress Components:\");",
+              "    jsonData.addressComponents.forEach(function(comp) {",
+              "        console.log(\"  \" + comp.types[0] + \": \" + comp.longText);",
+              "    });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Goog-Api-Key",
+            "value": "{{google_api_key}}",
+            "type": "text"
+          },
+          {
+            "key": "X-Goog-FieldMask",
+            "value": "id,displayName,formattedAddress,addressComponents",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{google_places_url}}/v1/places/{{place_id}}",
+          "host": [
+            "{{google_places_url}}"
+          ],
+          "path": [
+            "v1",
+            "places",
+            "{{place_id}}"
+          ]
+        },
+        "description": "Get full details for a Place ID returned from Text Search.\n\nSet the place_id variable from a previous search result."
+      },
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "google_places_url",
+      "value": "https://places.googleapis.com"
+    },
+    {
+      "key": "google_api_key",
+      "value": "REPLACE_WITH_YOUR_GOOGLE_API_KEY"
+    },
+    {
+      "key": "place_id",
+      "value": "ChIJtYuu0V25j4ARwu5e4wwRYgE",
+      "description": "Place ID from a previous search - update after running Text Search"
+    }
+  ]
+}

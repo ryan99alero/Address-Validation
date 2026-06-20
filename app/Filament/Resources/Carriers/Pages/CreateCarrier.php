@@ -21,7 +21,8 @@ class CreateCarrier extends CreateRecord
             $data['auth_id'],
             $data['auth_token'],
             $data['username'],
-            $data['password']
+            $data['password'],
+            $data['smarty_match_mode']
         );
 
         return $data;
@@ -57,6 +58,7 @@ class CreateCarrier extends CreateRecord
             'api_key' => $credentials = array_filter([
                 'auth_id' => $data['auth_id'] ?? null,
                 'auth_token' => $data['auth_token'] ?? null,
+                'smarty_match_mode' => $data['smarty_match_mode'] ?? null,
             ]),
             'basic' => $credentials = array_filter([
                 'username' => $data['username'] ?? null,

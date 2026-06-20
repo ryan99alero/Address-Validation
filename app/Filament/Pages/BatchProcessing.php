@@ -165,8 +165,12 @@ class BatchProcessing extends Page implements HasSchemas
                             ->label('Automatically start validation after import')
                             ->default(true)
                             ->helperText('If checked, address validation will begin immediately after import'),
+                        Checkbox::make('check_both_sources')
+                            ->label('Check both sources (Invoice DB + Carrier API)')
+                            ->default(false)
+                            ->helperText('Validate against both; addresses where they disagree are flagged Needs Review for a manual pick'),
                         Checkbox::make('include_transit_times')
-                            ->label('Include Time in Transit (FedEx only)')
+                            ->label('Include Time in Transit')
                             ->default(false)
                             ->live()
                             ->afterStateUpdated(function ($state, callable $set) {
@@ -175,12 +179,25 @@ class BatchProcessing extends Page implements HasSchemas
                                     if ($company->postal_code) {
                                         $set('origin_postal_code', $company->postal_code);
                                     }
+                                    // Default to FedEx for transit times if not set
+                                    $fedex = Carrier::where('slug', 'fedex')->where('is_active', true)->first();
+                                    if ($fedex) {
+                                        $set('transit_carrier_id', $fedex->id);
+                                    }
                                 } else {
                                     // Clear BestWay if transit times disabled
                                     $set('find_best_service', false);
                                 }
                             })
-                            ->helperText('Fetch FedEx shipping service options and delivery estimates'),
+                            ->helperText('Fetch shipping service options and delivery estimates'),
+                        Select::make('transit_carrier_id')
+                            ->label('Transit Time Carrier')
+                            ->options(fn () => Carrier::whereIn('slug', ['ups', 'fedex'])
+                                ->where('is_active', true)
+                                ->pluck('name', 'id'))
+                            ->visible(fn ($get) => $get('include_transit_times'))
+                            ->required(fn ($get) => $get('include_transit_times'))
+                            ->helperText('Select UPS or FedEx for transit time lookups'),
                         TextInput::make('origin_postal_code')
                             ->label('Origin ZIP Code')
                             ->placeholder('e.g., 38017')
@@ -347,6 +364,8 @@ class BatchProcessing extends Page implements HasSchemas
                 'total_rows' => $totalRows,
                 'carrier_id' => $data['carrier_id'],
                 'include_transit_times' => $data['include_transit_times'] ?? false,
+                'check_both_sources' => $data['check_both_sources'] ?? false,
+                'transit_carrier_id' => $data['transit_carrier_id'] ?? null,
                 'origin_postal_code' => $data['origin_postal_code'] ?? null,
                 'origin_country_code' => 'US',
                 'find_best_service' => $data['find_best_service'] ?? false,

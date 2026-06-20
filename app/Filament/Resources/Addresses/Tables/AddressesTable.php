@@ -8,6 +8,7 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -25,16 +26,36 @@ class AddressesTable
                         'valid' => 'success',
                         'invalid' => 'danger',
                         'ambiguous' => 'warning',
+                        'needs_review' => 'primary',
                         default => 'gray',
                     })
                     ->formatStateUsing(fn (?string $state): string => match ($state) {
                         'valid' => 'Valid',
                         'invalid' => 'Invalid',
                         'ambiguous' => 'Ambiguous',
+                        'needs_review' => 'Needs Review',
                         'pending' => 'Pending',
                         default => 'Pending',
                     })
                     ->sortable(),
+                TextColumn::make('validation_source')
+                    ->label('Source')
+                    ->badge()
+                    ->color(fn (?string $state): string => match ($state) {
+                        'local_cache' => 'success',
+                        'fedex_api', 'ups_api', 'usps_api' => 'warning',
+                        'manual' => 'info',
+                        default => 'gray',
+                    })
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'local_cache' => 'Invoice DB',
+                        'fedex_api' => 'FedEx API',
+                        'ups_api' => 'UPS API',
+                        'usps_api' => 'USPS API',
+                        'manual' => 'Manual',
+                        default => '-',
+                    })
+                    ->toggleable(),
                 TextColumn::make('confidence_score')
                     ->label('Confidence')
                     ->formatStateUsing(fn ($state): string => $state ? number_format($state * 100, 0).'%' : '-')
@@ -108,6 +129,22 @@ class AddressesTable
                         'valid' => 'Valid',
                         'invalid' => 'Invalid',
                         'ambiguous' => 'Ambiguous',
+                        'needs_review' => 'Needs Review',
+                    ]),
+
+                Filter::make('issues_only')
+                    ->label('Issues only (invalid / ambiguous / needs review)')
+                    ->toggle()
+                    ->query(fn (Builder $query): Builder => $query->issues()),
+
+                SelectFilter::make('validation_source')
+                    ->label('Validation Source')
+                    ->options([
+                        'local_cache' => 'Invoice DB',
+                        'fedex_api' => 'FedEx API',
+                        'ups_api' => 'UPS API',
+                        'usps_api' => 'USPS API',
+                        'manual' => 'Manual',
                     ]),
 
                 SelectFilter::make('confidence')

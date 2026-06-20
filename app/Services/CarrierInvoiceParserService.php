@@ -2,8 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\CarrierCharge;
 use App\Models\CarrierInvoice;
 use App\Models\CarrierInvoiceLine;
+use App\Services\Invoices\ChargeCategoryResolver;
+use App\Services\Invoices\FedExInvoiceParser;
+use App\Services\Invoices\PdfTextExtractor;
+use App\Services\Invoices\UpsPdfInvoiceParser;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
 class CarrierInvoiceParserService
@@ -25,11 +31,16 @@ class CarrierInvoiceParserService
 
         try {
             $carrier = $invoice->carrier;
+            $isPdf = strtolower(pathinfo($filePath, PATHINFO_EXTENSION)) === 'pdf';
 
-            // Route to carrier-specific parser
+            // Route to carrier- and format-specific parser
             $result = match (strtolower($carrier->slug)) {
-                'ups' => $this->parseUpsInvoice($invoice, $filePath),
-                'fedex' => $this->parseFedExInvoice($invoice, $filePath),
+                'ups' => $isPdf
+                    ? $this->parseUpsPdfInvoice($invoice, $filePath)
+                    : $this->parseUpsInvoice($invoice, $filePath),
+                'fedex' => $isPdf
+                    ? $this->parseFedExPdfInvoice($invoice, $filePath)
+                    : $this->parseFedExInvoice($invoice, $filePath),
                 default => throw new \Exception("Unknown carrier: {$carrier->slug}"),
             };
 
@@ -169,8 +180,22 @@ class CarrierInvoiceParserService
         while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
             $totalRecords++;
 
-            // Check if this is an address correction line (charge code ADC)
             $chargeCode = trim($row[35] ?? '');
+
+            // Capture EVERY charge line for fee analytics (one row = one charge).
+            // UPS billing columns: 35=Charge Category Detail Code, 45=Charge
+            // Description, 52=Net Amount, 33=Zone, 11=date, 13=tracking, 28=Billed Weight.
+            $this->recordCharge($invoice, [
+                'charge_code' => $chargeCode,
+                'charge_description' => trim($row[45] ?? ''),
+                'tracking_number' => trim($row[13] ?? ''),
+                'amount' => $this->parseAmount($row[52] ?? '0'),
+                'date' => $this->parseDate($row[11] ?? ''),
+                'zone' => trim($row[33] ?? '') ?: null,
+                'weight' => $this->parseWeight($row[28] ?? ''),
+            ]);
+
+            // Below: address-correction-specific handling for the cache.
             if ($chargeCode !== 'ADC') {
                 continue;
             }
@@ -288,6 +313,15 @@ class CarrierInvoiceParserService
 
         $columnMap = array_flip(array_map('trim', $header));
 
+        // The repeating "Tracking ID Charge Description / Amount" pairs start here.
+        $pairStart = 107;
+        foreach ($header as $idx => $name) {
+            if (trim((string) $name) === 'Tracking ID Charge Description') {
+                $pairStart = (int) $idx;
+                break;
+            }
+        }
+
         $totalRecords = 0;
         $corrections = 0;
         $totalCharges = 0.0;
@@ -296,13 +330,19 @@ class CarrierInvoiceParserService
         while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
             $totalRecords++;
 
-            // Check for address correction charge
+            $trackingNumber = $this->parseTrackingNumber($row[$columnMap['Express or Ground Tracking ID'] ?? 9] ?? '');
+            $shipDate = $this->parseDate($row[$columnMap['Shipment Date'] ?? 14] ?? '');
+
+            // Capture ALL charges for analytics (every row): base transport + the
+            // repeating Charge Description/Amount pairs (fuel, DAS, residential,
+            // handling, address correction, discounts, etc.).
+            $this->recordFedExCharges($invoice, $row, $pairStart, $trackingNumber, $shipDate);
+
+            // --- Address-correction handling for the correction cache only ---
             $correctionCharge = $this->findFedExAddressCorrectionCharge($row, $columnMap);
             if ($correctionCharge <= 0) {
                 continue;
             }
-
-            $trackingNumber = $this->parseTrackingNumber($row[$columnMap['Express or Ground Tracking ID'] ?? 9] ?? '');
             if (empty($trackingNumber)) {
                 continue;
             }
@@ -317,8 +357,6 @@ class CarrierInvoiceParserService
 
             $totalCharges += $correctionCharge;
 
-            // Parse dates
-            $shipDate = $this->parseDate($row[$columnMap['Shipment Date'] ?? 14] ?? '');
             $deliveryDate = $this->parseDate($row[$columnMap['POD Delivery Date'] ?? 15] ?? '');
 
             // Parse corrected address (Recipient columns)
@@ -539,6 +577,292 @@ class CarrierInvoiceParserService
         $amountStr = preg_replace('/[^0-9.\-]/', '', trim($amountStr));
 
         return (float) $amountStr;
+    }
+
+    /**
+     * Parse a billed/rated weight value (e.g. "7.0", "7.0 lbs") to a positive
+     * float, or null when absent/zero.
+     */
+    protected function parseWeight(?string $weightStr): ?float
+    {
+        if ($weightStr === null || trim($weightStr) === '') {
+            return null;
+        }
+
+        $weight = (float) preg_replace('/[^0-9.]/', '', trim($weightStr));
+
+        return $weight > 0 ? $weight : null;
+    }
+
+    /**
+     * Parse a UPS invoice PDF for its Address Corrections.
+     *
+     * @return array{total_records: int, corrections: int, new_corrections: int, duplicates: int, total_charges: float}
+     */
+    protected function parseUpsPdfInvoice(CarrierInvoice $invoice, string $filePath): array
+    {
+        Log::info('Parsing UPS PDF invoice', ['file' => $filePath]);
+
+        $text = (new PdfTextExtractor)->extractFile($filePath);
+        $parsed = (new UpsPdfInvoiceParser)->parse($text);
+
+        // Record invoice metadata when present.
+        $meta = array_filter([
+            'invoice_number' => $parsed['invoice_number'] ?? null,
+            'account_number' => $parsed['account_number'] ?? null,
+        ]);
+        if (! empty($parsed['invoice_date'])) {
+            try {
+                $meta['invoice_date'] = Carbon::parse($parsed['invoice_date'])->toDateString();
+            } catch (\Exception $e) {
+                // Leave invoice_date unset if unparseable.
+            }
+        }
+        if (! empty($meta)) {
+            $invoice->update($meta);
+        }
+
+        $corrections = $this->buildCorrectionLines($invoice, $parsed['corrections']);
+
+        return [
+            'total_records' => count($parsed['corrections']),
+            'corrections' => $corrections,
+            'new_corrections' => 0, // computed later by linkCorrectionsToCache()
+            'duplicates' => 0,
+            'total_charges' => 0.0,
+        ];
+    }
+
+    /**
+     * Parse a FedEx invoice PDF (smalot-based, block state machine): records the
+     * granular charge ledger per shipment AND the original->corrected address
+     * pairs from the Ground Address Correction section.
+     *
+     * @return array{total_records: int, corrections: int, new_corrections: int, duplicates: int, total_charges: float}
+     */
+    protected function parseFedExPdfInvoice(CarrierInvoice $invoice, string $filePath): array
+    {
+        Log::info('Parsing FedEx PDF invoice', ['file' => $filePath]);
+
+        $parsed = (new FedExInvoiceParser)->parse($filePath);
+
+        $meta = array_filter([
+            'invoice_number' => $parsed['meta']['invoice_number'] ?? null,
+            'account_number' => $parsed['meta']['account_number'] ?? null,
+        ]);
+        if (! empty($parsed['meta']['invoice_date'])) {
+            try {
+                $meta['invoice_date'] = Carbon::parse($parsed['meta']['invoice_date'])->toDateString();
+            } catch (\Exception $e) {
+                // leave unset
+            }
+        }
+        if (! empty($meta)) {
+            $invoice->update($meta);
+        }
+
+        // Granular charges for fee analytics.
+        foreach ($parsed['shipments'] as $shipment) {
+            $date = null;
+            if (! empty($shipment['ship_date'])) {
+                try {
+                    $date = Carbon::parse($shipment['ship_date'])->toDateString();
+                } catch (\Exception $e) {
+                    // leave null
+                }
+            }
+            foreach ($shipment['charge_ledger'] as $charge) {
+                $this->recordCharge($invoice, [
+                    'charge_description' => $charge['description'],
+                    'amount' => $charge['amount'],
+                    'tracking_number' => $shipment['tracking_id'] ?? null,
+                    'date' => $date,
+                ]);
+            }
+        }
+
+        // Address corrections (original -> corrected) for the proprietary cache.
+        $corrections = 0;
+        foreach ($parsed['corrections'] as $correction) {
+            $original = $this->parseFedExAddressString($correction['original']);
+            $corrected = $this->parseFedExAddressString($correction['corrected']);
+            if (empty($corrected['address_1'])) {
+                continue;
+            }
+
+            $this->createInvoiceLine($invoice, [
+                'tracking_number' => $correction['tracking'],
+                'original_address_1' => $original['address_1'],
+                'original_city' => $original['city'],
+                'original_state' => $original['state'],
+                'original_postal' => $original['postal'],
+                'original_country' => $original['country'],
+                'corrected_address_1' => $corrected['address_1'],
+                'corrected_city' => $corrected['city'],
+                'corrected_state' => $corrected['state'],
+                'corrected_postal' => $corrected['postal'],
+                'corrected_country' => $corrected['country'],
+                'charge_code' => 'ADDCOR',
+                'charge_description' => 'Address Correction',
+                'charge_amount' => 0.0,
+            ]);
+            $corrections++;
+        }
+
+        return [
+            'total_records' => $parsed['reconciled'],
+            'corrections' => $corrections,
+            'new_corrections' => 0,
+            'duplicates' => $parsed['skipped'],
+            'total_charges' => 0.0,
+        ];
+    }
+
+    /**
+     * Split a FedEx correction address string ("<name/street> CITY ST ZIP CC")
+     * into components, anchoring on the reliable trailing state/zip/country.
+     *
+     * @return array{address_1: ?string, city: ?string, state: ?string, postal: ?string, country: string}
+     */
+    protected function parseFedExAddressString(string $address): array
+    {
+        $out = ['address_1' => null, 'city' => null, 'state' => null, 'postal' => null, 'country' => 'US'];
+
+        if (preg_match('/^(.*?)\s+([A-Za-z .\'-]+?)\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\s+([A-Z]{2})$/', trim($address), $m)) {
+            $out['address_1'] = trim($m[1]);
+            $out['city'] = trim($m[2]);
+            $out['state'] = $m[3];
+            $out['postal'] = $m[4];
+            $out['country'] = $m[5];
+        } else {
+            $out['address_1'] = trim($address);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Create invoice lines from parsed PDF corrections. Returns the count of
+     * lines that carry a usable correction (both original and corrected present).
+     *
+     * @param  array<int, array{tracking_number: string, recorded: array<string, ?string>, corrected: array<string, ?string>}>  $corrections
+     */
+    public function buildCorrectionLines(CarrierInvoice $invoice, array $corrections): int
+    {
+        $count = 0;
+
+        foreach ($corrections as $correction) {
+            $recorded = $correction['recorded'];
+            $corrected = $correction['corrected'];
+
+            // Skip if we couldn't parse a usable corrected address.
+            if (empty($corrected['address_1']) || empty($corrected['postal'])) {
+                continue;
+            }
+
+            $this->createInvoiceLine($invoice, [
+                'tracking_number' => $correction['tracking_number'] ?? null,
+                'original_name' => $recorded['name'] ?? null,
+                'original_address_1' => $recorded['address_1'] ?? null,
+                'original_address_2' => $recorded['address_2'] ?? null,
+                'original_city' => $recorded['city'] ?? null,
+                'original_state' => $recorded['state'] ?? null,
+                'original_postal' => $recorded['postal'] ?? null,
+                'original_country' => 'US',
+                'corrected_address_1' => $corrected['address_1'] ?? null,
+                'corrected_address_2' => $corrected['address_2'] ?? null,
+                'corrected_city' => $corrected['city'] ?? null,
+                'corrected_state' => $corrected['state'] ?? null,
+                'corrected_postal' => $corrected['postal'] ?? null,
+                'corrected_country' => 'US',
+                'charge_code' => 'ADC',
+                'charge_description' => 'Address Correction',
+                'charge_amount' => 0.0,
+            ]);
+
+            $count++;
+        }
+
+        return $count;
+    }
+
+    protected ?ChargeCategoryResolver $chargeCategoryResolver = null;
+
+    /**
+     * Record a single fee line for fee analytics, resolving it to a canonical
+     * charge category. Skips empty/zero non-charges.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function recordCharge(CarrierInvoice $invoice, array $data): void
+    {
+        $code = isset($data['charge_code']) ? trim((string) $data['charge_code']) : null;
+        $description = isset($data['charge_description']) ? trim((string) $data['charge_description']) : null;
+        $amount = (float) ($data['amount'] ?? 0);
+
+        if (($code === null || $code === '') && ($description === null || $description === '')) {
+            return;
+        }
+        if ($amount === 0.0 && empty($data['keep_zero'])) {
+            return;
+        }
+
+        $this->chargeCategoryResolver ??= new ChargeCategoryResolver;
+
+        CarrierCharge::create([
+            'carrier_invoice_id' => $invoice->id,
+            'carrier_id' => $invoice->carrier_id,
+            'invoice_date' => $invoice->invoice_date ?? ($data['date'] ?? null),
+            'account_number' => $invoice->account_number,
+            'tracking_number' => $data['tracking_number'] ?? null,
+            'raw_charge_code' => $code,
+            'raw_charge_description' => $description,
+            'charge_category_id' => $this->chargeCategoryResolver->resolve($invoice->carrier_id, $code, $description),
+            'amount' => $amount,
+            'service' => $data['service'] ?? null,
+            'zone' => $data['zone'] ?? null,
+            'weight' => $data['weight'] ?? null,
+        ]);
+    }
+
+    /**
+     * Capture every charge on a FedEx invoice row: base transport (col 10) and
+     * the repeating Charge Description/Amount pairs from $pairStart onward.
+     *
+     * @param  array<int, string>  $row
+     */
+    protected function recordFedExCharges(CarrierInvoice $invoice, array $row, int $pairStart, string $tracking, ?string $shipDate): void
+    {
+        $tracking = $tracking !== '' ? $tracking : null;
+        $weight = $this->parseWeight($row[21] ?? ''); // col 21 = Rated Weight Amount
+
+        // Base transportation (Transportation Charge Amount, col 10).
+        $base = $this->parseAmount($row[10] ?? '0');
+        if ($base !== 0.0) {
+            $this->recordCharge($invoice, [
+                'charge_description' => 'Transportation',
+                'amount' => $base,
+                'tracking_number' => $tracking,
+                'date' => $shipDate,
+                'weight' => $weight,
+            ]);
+        }
+
+        // Repeating description/amount pairs.
+        for ($i = $pairStart; $i < $pairStart + 100; $i += 2) {
+            $description = trim($row[$i] ?? '');
+            if ($description === '') {
+                continue;
+            }
+
+            $this->recordCharge($invoice, [
+                'charge_description' => $description,
+                'amount' => $this->parseAmount($row[$i + 1] ?? '0'),
+                'tracking_number' => $tracking,
+                'date' => $shipDate,
+                'weight' => $weight,
+            ]);
+        }
     }
 
     /**

@@ -326,16 +326,16 @@ class FedExCarrier extends AbstractCarrier
     protected function formatAddressForRequest(Address $address): array
     {
         $streetLines = array_filter([
-            $address->input_address_1,
-            $address->input_address_2,
-        ]);
+            trim((string) $address->input_address_1),
+            trim((string) $address->input_address_2),
+        ], fn (string $line): bool => $line !== '');
 
         return [
             'streetLines' => array_values($streetLines),
-            'city' => $address->input_city,
-            'stateOrProvinceCode' => $address->input_state,
-            'postalCode' => $address->input_postal,
-            'countryCode' => $address->input_country ?? 'US',
+            'city' => trim((string) $address->input_city),
+            'stateOrProvinceCode' => trim((string) $address->input_state),
+            'postalCode' => trim((string) $address->input_postal),
+            'countryCode' => trim((string) ($address->input_country ?? 'US')),
         ];
     }
 

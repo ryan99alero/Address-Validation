@@ -60,7 +60,7 @@ class ViewAddress extends ViewRecord
                     ]),
                 Section::make('Validation Result')
                     ->columns(2)
-                    ->visible(fn (Address $record): bool => $record->validated_at !== null)
+                    ->visible(fn (Address $record): bool => $record->validated_at !== null && $record->validation_status !== Address::STATUS_NEEDS_REVIEW)
                     ->schema([
                         TextEntry::make('validation_status')
                             ->label('Status')
@@ -69,12 +69,14 @@ class ViewAddress extends ViewRecord
                                 'valid' => 'success',
                                 'invalid' => 'danger',
                                 'ambiguous' => 'warning',
+                                'needs_review' => 'primary',
                                 default => 'gray',
                             })
                             ->formatStateUsing(fn (?string $state): string => match ($state) {
                                 'valid' => 'Valid',
                                 'invalid' => 'Invalid',
                                 'ambiguous' => 'Ambiguous',
+                                'needs_review' => 'Needs Review',
                                 'pending' => 'Pending',
                                 default => 'Unknown',
                             }),

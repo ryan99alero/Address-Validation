@@ -9,6 +9,7 @@ use App\Models\ImportFieldTemplate;
 use App\Models\ShipViaCode;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Maatwebsite\Excel\Facades\Excel;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -16,6 +17,19 @@ use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
 
 class ImportService
 {
+    /**
+     * Normalize an imported cell value: trim leading/trailing whitespace and
+     * collapse internal runs of whitespace to single spaces. Non-string values
+     * (numbers, dates, null) are returned unchanged.
+     *
+     * Shared by both import write paths (this service and the queued
+     * ProcessImportBatchImport job) so normalization stays consistent.
+     */
+    public static function normalizeImportValue(mixed $value): mixed
+    {
+        return is_string($value) ? Str::squish($value) : $value;
+    }
+
     /**
      * Parse headers from an uploaded file - memory efficient.
      *
@@ -263,7 +277,7 @@ class ImportService
             $extraData = [];
 
             foreach ($positionToField as $position => $field) {
-                $value = $row[$position] ?? null;
+                $value = self::normalizeImportValue($row[$position] ?? null);
 
                 if ($value !== null && $value !== '') {
                     // Map legacy field names to new schema

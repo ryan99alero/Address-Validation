@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Address;
 use App\Models\ImportBatch;
 use App\Models\ShipViaCode;
+use App\Services\ImportService;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -229,7 +230,9 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
                 $rowValues = array_values($row);
                 $extraData = [];
                 foreach ($this->positionToField as $position => $field) {
-                    $value = $rowValues[$position] ?? null;
+                    // Normalize: trim ends and collapse internal whitespace runs
+                    $value = ImportService::normalizeImportValue($rowValues[$position] ?? null);
+
                     if ($value !== null && $value !== '') {
                         // Store extra_N fields in the extra_data JSON column
                         if (str_starts_with($field, 'extra_')) {

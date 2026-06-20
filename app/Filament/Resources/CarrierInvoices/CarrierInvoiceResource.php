@@ -4,6 +4,7 @@ namespace App\Filament\Resources\CarrierInvoices;
 
 use App\Filament\Resources\CarrierInvoices\Pages\ListCarrierInvoices;
 use App\Filament\Resources\CarrierInvoices\Pages\ViewCarrierInvoice;
+use App\Filament\Resources\CarrierInvoices\RelationManagers\ChargesRelationManager;
 use App\Filament\Resources\CarrierInvoices\RelationManagers\CorrectionLinesRelationManager;
 use App\Filament\Resources\CarrierInvoices\Schemas\CarrierInvoiceForm;
 use App\Filament\Resources\CarrierInvoices\Tables\CarrierInvoicesTable;
@@ -21,9 +22,9 @@ class CarrierInvoiceResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentText;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Address Corrections';
+    protected static string|UnitEnum|null $navigationGroup = 'Carrier Invoices';
 
-    protected static ?string $navigationLabel = 'Carrier Invoices';
+    protected static ?string $navigationLabel = 'Invoices';
 
     protected static ?int $navigationSort = 1;
 
@@ -40,6 +41,7 @@ class CarrierInvoiceResource extends Resource
     public static function getRelations(): array
     {
         return [
+            ChargesRelationManager::class,
             CorrectionLinesRelationManager::class,
         ];
     }

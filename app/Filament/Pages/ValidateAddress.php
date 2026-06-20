@@ -9,6 +9,7 @@ use App\Models\ShipViaCode;
 use App\Models\TransitTime;
 use App\Services\AddressValidationService;
 use App\Services\FedExServiceAvailabilityService;
+use App\Services\UpsTimeInTransitService;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Checkbox;
@@ -114,6 +115,10 @@ class ValidateAddress extends Page implements HasSchemas
                             ->label('External Reference (Optional)')
                             ->maxLength(255)
                             ->helperText('Your internal reference number'),
+                        Checkbox::make('check_both_sources')
+                            ->label('Check both sources (Invoice DB + Carrier API)')
+                            ->default(false)
+                            ->helperText('Validate against both; flag for review if they disagree'),
                     ]),
 
                 Section::make('Transit Time Options')
@@ -123,7 +128,7 @@ class ValidateAddress extends Page implements HasSchemas
                     ->collapsed()
                     ->schema([
                         Checkbox::make('include_transit_times')
-                            ->label('Include Time in Transit (FedEx)')
+                            ->label('Include Time in Transit')
                             ->default(false)
                             ->live()
                             ->afterStateUpdated(function ($state, callable $set) {
@@ -132,9 +137,22 @@ class ValidateAddress extends Page implements HasSchemas
                                     if ($company->postal_code) {
                                         $set('origin_postal_code', $company->postal_code);
                                     }
+                                    // Default to FedEx for transit times
+                                    $fedex = Carrier::where('slug', 'fedex')->where('is_active', true)->first();
+                                    if ($fedex) {
+                                        $set('transit_carrier_id', $fedex->id);
+                                    }
                                 }
                             })
                             ->helperText('Fetch available shipping services and estimated delivery dates'),
+                        Select::make('transit_carrier_id')
+                            ->label('Transit Time Carrier')
+                            ->options(fn () => Carrier::whereIn('slug', ['ups', 'fedex'])
+                                ->where('is_active', true)
+                                ->pluck('name', 'id'))
+                            ->visible(fn ($get) => $get('include_transit_times'))
+                            ->required(fn ($get) => $get('include_transit_times'))
+                            ->helperText('Select UPS or FedEx for transit time lookups'),
                         TextInput::make('origin_postal_code')
                             ->label('Ship From ZIP Code')
                             ->placeholder('e.g., 38017')
@@ -183,12 +201,22 @@ class ValidateAddress extends Page implements HasSchemas
 
         try {
             $service = app(AddressValidationService::class);
-            $validatedAddress = $service->validateAddress($address, $carrier->slug);
+            $validatedAddress = $service->validateAddress(
+                $address,
+                $carrier->slug,
+                (bool) ($data['check_both_sources'] ?? false),
+            );
 
             $this->result = $validatedAddress;
             $this->transitTimes = null;
 
-            if ($this->result->validation_status === 'valid') {
+            if ($this->result->validation_status === 'needs_review') {
+                Notification::make()
+                    ->title('Needs Review')
+                    ->body('The invoice DB and carrier API returned different addresses. Review the candidates to choose one.')
+                    ->warning()
+                    ->send();
+            } elseif ($this->result->validation_status === 'valid') {
                 Notification::make()
                     ->title('Address Validated')
                     ->body('The address has been validated successfully.')
@@ -198,9 +226,10 @@ class ValidateAddress extends Page implements HasSchemas
                 // Fetch transit times if enabled and address is valid
                 $includeTransitTimes = $data['include_transit_times'] ?? false;
                 $originPostalCode = $data['origin_postal_code'] ?? null;
+                $transitCarrierId = $data['transit_carrier_id'] ?? null;
 
-                if ($includeTransitTimes && $originPostalCode) {
-                    $this->fetchTransitTimes($this->result, $originPostalCode);
+                if ($includeTransitTimes && $originPostalCode && $transitCarrierId) {
+                    $this->fetchTransitTimes($this->result, $originPostalCode, (int) $transitCarrierId);
                 }
             } elseif ($this->result->validation_status === 'ambiguous') {
                 Notification::make()
@@ -226,32 +255,41 @@ class ValidateAddress extends Page implements HasSchemas
     }
 
     /**
-     * Fetch transit times for an address.
+     * Fetch transit times for an address using the selected carrier.
      */
-    public function fetchTransitTimes(Address $address, string $originPostalCode): void
+    public function fetchTransitTimes(Address $address, string $originPostalCode, ?int $carrierId = null): void
     {
         $this->isLoadingTransitTimes = true;
 
         try {
-            $fedexCarrier = Carrier::where('slug', 'fedex')->where('is_active', true)->first();
+            // Use provided carrier ID or default to FedEx
+            $carrier = $carrierId
+                ? Carrier::where('id', $carrierId)->where('is_active', true)->first()
+                : Carrier::where('slug', 'fedex')->where('is_active', true)->first();
 
-            if (! $fedexCarrier) {
+            if (! $carrier) {
                 Notification::make()
                     ->title('Transit Times Unavailable')
-                    ->body('FedEx carrier is not configured or inactive.')
+                    ->body('Selected carrier is not configured or inactive.')
                     ->warning()
                     ->send();
 
                 return;
             }
 
-            $transitService = new FedExServiceAvailabilityService($fedexCarrier);
+            // Use appropriate service based on carrier slug
+            if ($carrier->slug === 'ups') {
+                $transitService = new UpsTimeInTransitService($carrier);
+            } else {
+                $transitService = new FedExServiceAvailabilityService($carrier);
+            }
+
             $this->transitTimes = $transitService->getTransitTimes($address, $originPostalCode);
 
             if ($this->transitTimes->isNotEmpty()) {
                 Notification::make()
                     ->title('Transit Times Retrieved')
-                    ->body('Found '.$this->transitTimes->count().' shipping options.')
+                    ->body('Found '.$this->transitTimes->count().' '.$carrier->name.' shipping options.')
                     ->success()
                     ->send();
             } else {
@@ -283,6 +321,7 @@ class ValidateAddress extends Page implements HasSchemas
         }
 
         $originPostalCode = $this->data['origin_postal_code'] ?? null;
+        $transitCarrierId = $this->data['transit_carrier_id'] ?? null;
 
         if (! $originPostalCode) {
             Notification::make()
@@ -294,7 +333,7 @@ class ValidateAddress extends Page implements HasSchemas
             return;
         }
 
-        $this->fetchTransitTimes($this->result, $originPostalCode);
+        $this->fetchTransitTimes($this->result, $originPostalCode, $transitCarrierId ? (int) $transitCarrierId : null);
     }
 
     public function clearResult(): void

@@ -18,9 +18,9 @@ class AddressCorrectionResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedMapPin;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Address Corrections';
+    protected static string|UnitEnum|null $navigationGroup = 'Carrier Invoices';
 
-    protected static ?string $navigationLabel = 'All Corrections';
+    protected static ?string $navigationLabel = 'Address Corrections';
 
     protected static ?string $modelLabel = 'Address Correction';
 
