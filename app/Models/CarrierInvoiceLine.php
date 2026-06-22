@@ -2,9 +2,12 @@
 
 namespace App\Models;
 
+use App\Observers\CarrierInvoiceLineObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+#[ObservedBy([CarrierInvoiceLineObserver::class])]
 class CarrierInvoiceLine extends Model
 {
     protected $fillable = [
@@ -31,6 +34,9 @@ class CarrierInvoiceLine extends Model
         'charge_code',
         'charge_description',
         'charge_amount',
+        'severity_score',
+        'severity_category',
+        'change_type',
         'corrected_address_id',
         'shipping_lookup_status',
         'shipping_lookup_at',
@@ -53,6 +59,7 @@ class CarrierInvoiceLine extends Model
             'ship_date' => 'date',
             'delivery_date' => 'date',
             'charge_amount' => 'decimal:2',
+            'severity_score' => 'integer',
             'billed_to_pace' => 'boolean',
             'billed_at' => 'datetime',
             'shipping_lookup_at' => 'datetime',

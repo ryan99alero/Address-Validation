@@ -30,7 +30,8 @@ class ProcessExportBatch implements ShouldQueue
         public string $filterStatus = 'all',
         public ?string $filename = null,
         public string $sortBy = 'original',
-        public bool $appendValidationFields = false
+        public bool $appendValidationFields = false,
+        public string $filterSource = 'all'
     ) {}
 
     public function handle(): void
@@ -262,6 +263,14 @@ class ProcessExportBatch implements ShouldQueue
             $query->whereNotNull('validated_at');
         } elseif (in_array($this->filterStatus, ['valid', 'invalid', 'ambiguous', 'pending'])) {
             $query->where('validation_status', $this->filterStatus);
+        }
+
+        // Apply validation-source filter (e.g. only addresses resolved from the
+        // local invoice cache, or only those from a carrier API).
+        if ($this->filterSource === 'local_cache') {
+            $query->where('validation_source', 'local_cache');
+        } elseif ($this->filterSource === 'api') {
+            $query->whereNotNull('validation_source')->where('validation_source', '!=', 'local_cache');
         }
 
         return $query;

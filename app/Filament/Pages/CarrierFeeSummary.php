@@ -146,6 +146,34 @@ class CarrierFeeSummary extends Page implements HasTable
     }
 
     /**
+     * In-page legend so anyone opening the report understands each column.
+     *
+     * @return array{intro: string, metrics: array<int, mixed>, columns: array<int, array{name: string, means: string}>, controls: array<int, array{name: string, means: string}>}
+     */
+    public function viewGuide(): array
+    {
+        return [
+            'intro' => 'Breaks carrier fees down by category (for one carrier or both), with totals. Categories are normalized across carriers, so the same kind of fee lines up regardless of what UPS vs FedEx calls it.',
+            'rule' => 'use Scope "Aux fees only" to focus on surcharges (it drops Base Transportation). Switch "Dollars" to Real when comparing totals across different years, so inflation does not distort the trend. To compare UPS vs FedEx head-to-head on a fee, use the Carrier Comparison report.',
+            'metrics' => [],
+            'columns' => [
+                ['name' => 'Fee Category', 'means' => 'The normalized fee type — e.g. UPS "ADC" and FedEx "ADDCOR" both roll up to Address Correction.'],
+                ['name' => 'Carrier', 'means' => 'UPS or FedEx (each category is shown per carrier).'],
+                ['name' => 'Times Charged', 'means' => 'How many individual charge lines fall in that category (count of charge rows).'],
+                ['name' => 'Total', 'means' => 'Sum of the dollar amounts — nominal, or CPI-adjusted when "Real" is selected.'],
+                ['name' => 'Avg / charge', 'means' => 'Average size of each charge = Total ÷ Times Charged.'],
+                ['name' => '% of fees', 'means' => 'That row\'s share of the filtered total = row Total ÷ sum of all rows × 100.'],
+            ],
+            'controls' => [
+                ['name' => 'Carrier', 'means' => 'Limit to one carrier, or leave blank for both.'],
+                ['name' => 'Scope', 'means' => '"Aux fees only" excludes Base Transportation; "All charges" includes it.'],
+                ['name' => 'Year from / to', 'means' => 'Blank both = all years; set one = single year; set both = a range.'],
+                ['name' => 'Dollars: Nominal vs Real', 'means' => 'Real restates older years into constant 2026 dollars via CPI, so cross-year totals are not skewed by inflation.'],
+            ],
+        ];
+    }
+
+    /**
      * @return array<int, string>
      */
     protected function yearOptions(): array

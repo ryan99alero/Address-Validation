@@ -1,0 +1,110 @@
+Pace Field,Attend Field,Action,Table,Purpose
+address1,address,Match,employees,Street address
+city,city,Match,employees,City
+country,country,Match,employees,Country
+department,department_id,Match,employees,Department (lookup via departments.external_department_id)
+email,email,Match,employees,Email address
+firstName,first_name,Match,employees,First name
+id / primaryKey,external_id,Match,employees,Pace primary key stored as sync identifier
+lastName,last_name,Match,employees,Last name
+payRate01,pay_rate,Match,employees,Primary pay rate
+phoneNumber,phone,Match,employees,Primary phone number
+secureId,identifier,Match,credentials,Badge/card ID for clock-in (related table)
+shift,shift_id,Ignore,employees,Assigned shift
+startDate,date_of_hire,Match,employees,Employment start date
+startTime,start_time,Ignore,shifts,Shift start time (related table)
+state,state,Match,employees,State
+status,is_active,Match,employees,A = true / I = false
+stopTime,end_time,Ignore,shifts,Shift end time (related table)
+terminationDate,termination_date,Match,employees,Termination date
+vacHrsAccrued,accrued_hours,Ignore,vacation_balances,Vacation hours balance (related table)
+zip,zip,Match,employees,ZIP code
+address2,address2,Add,employees,Second address line (apt / suite / etc.) - column does not exist
+birthDate,birth_date,Add,employees,Date of birth - column does not exist
+emergencyContact,emergency_contact,Add,employees,Emergency contact name - column does not exist
+emergencyPhone,emergency_phone,Add,employees,Emergency contact phone number - column does not exist
+lunchStart,lunch_start,Ignore,shifts,Lunch break start time - column does not exist on shifts table
+lunchStop,lunch_stop,Ignore,shifts,Lunch break end time - column does not exist on shifts table
+normalHrsPerDay,normal_hours_per_day,Ignore,employees,Expected daily hours (e.g. 8) - column does not exist
+notes,notes,Add,employees,General employee notes - column does not exist
+phone2,phone2,Ignore,employees,Secondary phone (mobile vs home) - column does not exist
+address3,address3,Ignore,employees,Third address line (rarely used)
+baseHrsPerPd,base_hours_per_period,Ignore,employees,Base hours per pay period (shifts has similar field but per-shift not per-employee)
+defaultRate,default_rate,Ignore,employees,Default billing rate (job costing)
+defaultShift,shift_id,Match,employees,Default shift (may differ from current assignment)
+externalID,pace_external_id,Ignore,employees,Pace external ID (separate from Pace id which uses our external_id) - blank in sample data
+isSupervisor,is_manager,Match,User,Supervisor flag - departments.manager_id exists but requires sync logic to set
+lastIncreaseDate,last_increase_date,Ignore,employees,Date of last pay raise
+lastModified,pace_last_modified,Ignore,employees,Pace timestamp for sync delta detection
+location,location,Ignore,employees,Work location / facility
+paidLunch,paid_lunch,Ignore,employees,Whether lunch is paid (boolean)
+payPdsPerYr,-,Ignore,payroll_frequencies,Pay periods per year - related table has frequency_type but no direct column
+payRate02,pay_rate_02,Ignore,employees,Alternate pay rate 2
+payRate03,pay_rate_03,Ignore,employees,Alternate pay rate 3
+payRate04,pay_rate_04,Ignore,employees,Alternate pay rate 4
+payRate05,pay_rate_05,Ignore,employees,Alternate pay rate 5
+payRate06,pay_rate_06,Ignore,employees,Alternate pay rate 6
+payRate07,pay_rate_07,Ignore,employees,Alternate pay rate 7
+payRate08,pay_rate_08,Ignore,employees,Alternate pay rate 8
+payRate09,pay_rate_09,Ignore,employees,Alternate pay rate 9
+phone3,phone3,Ignore,employees,Third phone number
+plantManagerId,plant_manager_id,Ignore,employees,Plant/facility manager reference
+reviewDate,review_date,Ignore,employees,Next performance review date
+salaryRate,salary_rate,Ignore,employees,Annual salary amount (separate from hourly rate)
+salutation,salutation,Ignore,employees,Mr/Mrs/Ms/Dr
+sickHrsAccrued,sick_hours_accrued,Ignore,employees,Sick time balance
+unionCode,union_code,Ignore,employees,Union membership code
+weeksWorkedQTD,weeks_worked_qtd,Ignore,employees,Weeks worked quarter-to-date (calculated)
+_ACTION_,-,Skip,-,Pace CSV action flag (U=update)
+accessPreviousShift,-,Skip,-,Pace UI: allow viewing previous shift
+activityStatus,-,Skip,-,Signed In/Out - we track via ClockEvents
+allowConcurrentEntries,-,Skip,-,Pace time entry preference
+allowEntryCloning,-,Skip,-,Pace time entry preference
+allowGanging,-,Skip,-,Pace production preference
+allowOverlapping,-,Skip,-,Pace time entry preference
+allowPausing,-,Skip,-,Pace time entry preference
+allowQueries,-,Skip,-,Pace permission flag
+allowReports,-,Skip,-,Pace permission flag
+askJobComponent,-,Skip,-,Pace job costing prompt
+askJobMaterialID,-,Skip,-,Pace job costing prompt
+askJobPlanID,-,Skip,-,Pace job costing prompt
+askNonPlannedReason,-,Skip,-,Pace job costing prompt
+askPayRate,-,Skip,-,Pace time entry prompt
+askShift,-,Skip,-,Pace time entry prompt
+autoPayPd,-,Skip,-,Pace auto pay period setting
+bankAccount,-,Skip,-,Sensitive - banking info / don't store
+completeRuns,-,Skip,-,Pace production setting
+currentNonCharge,-,Skip,-,Pace non-chargeable tracking
+displayClosedJobs,-,Skip,-,Pace UI display preference
+displayEmployeeTime,-,Skip,-,Pace UI display preference
+displayJobPlanning,-,Skip,-,Pace UI display preference
+displayMaterials,-,Skip,-,Pace UI display preference
+displayNonChargeableTime,-,Skip,-,Pace UI display preference
+editOwnEntriesViaKeypad,-,Skip,-,Pace UI permission
+federalExempt,-,Skip,-,Tax config - belongs in ADP
+federalTaxTbl,-,Skip,-,Tax config - belongs in ADP
+glOverrideAccountID,-,Skip,-,GL accounting override
+ioID,-,Skip,-,Pace internal IO identifier
+jobListType,-,Skip,-,Pace job list display type
+localExempt,-,Skip,-,Tax config - belongs in ADP
+localTaxTbl,-,Skip,-,Tax config - belongs in ADP
+nationalInsuranceNum,-,Skip,-,Sensitive - don't store
+noLogoutEmailSent,-,Skip,-,Pace email notification flag
+password,-,Skip,-,Pace system password - never sync
+printer,-,Skip,-,Pace printer assignment
+pullMultipleMaterials,-,Skip,-,Pace production preference
+quickEntry,-,Skip,-,Pace UI preference
+requirePasswordForActionScreen,-,Skip,-,Pace auth setting
+requirePasswordForLogin,-,Skip,-,Pace auth setting
+requirePasswordForTransactions,-,Skip,-,Pace auth setting
+signedIn,-,Skip,-,Current status - we track via ClockEvents
+socialSecurityNum,-,Skip,-,Sensitive - SSN / never store
+sourceOrganizationCompany,-,Skip,-,Pace multi-company field
+stateExempt,-,Skip,-,Tax config - belongs in ADP
+stateKey,-,Skip,-,Tax config - belongs in ADP
+stateTaxTbl,-,Skip,-,Tax config - belongs in ADP
+statutoryEmployee,-,Skip,-,Tax classification - belongs in ADP
+tags,-,Skip,-,Pace internal tagging
+taskListMetaData,-,Skip,-,Pace internal metadata
+templateLine,-,Skip,-,Pace template reference
+useMaterials,-,Skip,-,Pace production preference

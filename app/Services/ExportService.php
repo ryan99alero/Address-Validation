@@ -109,6 +109,14 @@ class ExportService
 
             // Validation fields (directly on address now)
             'validation_status' => $address->validation_status,
+            'validation_source' => match ($address->validation_source) {
+                'local_cache' => 'Invoice DB',
+                'fedex_api' => 'FedEx API',
+                'ups_api' => 'UPS API',
+                'usps_api' => 'USPS API',
+                'manual' => 'Manual',
+                default => '',
+            },
             'is_residential' => $address->is_residential === null ? '' : ($address->is_residential ? 'Yes' : 'No'),
             'classification' => $address->classification,
             'confidence_score' => $address->confidence_score ? number_format($address->confidence_score * 100, 0).'%' : null,

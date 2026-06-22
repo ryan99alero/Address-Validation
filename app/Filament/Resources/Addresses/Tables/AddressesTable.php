@@ -74,19 +74,33 @@ class AddressesTable
                     ->searchable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('input_address_1')
-                    ->label('Address')
+                    ->label('Original Address')
                     ->searchable()
                     ->wrap()
-                    ->limit(50),
+                    ->limit(50)
+                    ->description(fn ($record): ?string => trim(implode(' ', array_filter([$record->input_city, $record->input_state, $record->input_postal]))) ?: null),
+                TextColumn::make('output_address_1')
+                    ->label('Corrected Address')
+                    ->placeholder('Not validated')
+                    ->wrap()
+                    ->limit(50)
+                    ->searchable(['output_address_1', 'output_city', 'output_state', 'output_postal'])
+                    ->color(fn ($record): string => $record->output_address_1 ? 'success' : 'gray')
+                    ->description(fn ($record): ?string => $record->output_address_1
+                        ? (trim(implode(' ', array_filter([$record->output_city, $record->output_state, $record->output_postal.($record->output_postal_ext ? '-'.$record->output_postal_ext : '')]))) ?: null)
+                        : null),
                 TextColumn::make('input_city')
                     ->label('City')
-                    ->searchable(),
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('input_state')
                     ->label('State')
-                    ->searchable(),
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('input_postal')
                     ->label('ZIP')
-                    ->searchable(),
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('classification')
                     ->label('Type')
                     ->badge()

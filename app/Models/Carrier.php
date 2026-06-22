@@ -128,11 +128,14 @@ class Carrier extends Model
      */
     public function getBaseUrl(): string
     {
+        // Use ?: (not ??) so a BLANK ("") url — e.g. a field cleared in the form —
+        // falls back to the carrier default, not an empty base URL that produces
+        // malformed requests.
         if ($this->environment === 'production') {
-            return $this->production_url ?? $this->getDefaultProductionUrl();
+            return $this->production_url ?: $this->getDefaultProductionUrl();
         }
 
-        return $this->sandbox_url ?? $this->getDefaultSandboxUrl();
+        return $this->sandbox_url ?: $this->getDefaultSandboxUrl();
     }
 
     /**

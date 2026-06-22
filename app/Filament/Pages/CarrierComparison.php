@@ -200,6 +200,36 @@ class CarrierComparison extends Page implements HasTable
     }
 
     /**
+     * In-page legend so anyone opening the report understands each metric.
+     *
+     * @return array{intro: string, metrics: array<int, array{name: string, means: string, formula: string, use: string}>, columns: array<int, array{name: string, means: string}>, controls: array<int, array{name: string, means: string}>}
+     */
+    public function viewGuide(): array
+    {
+        return [
+            'intro' => 'Compares UPS vs FedEx on auxiliary (surcharge) fees — per fee category and overall. The first four metrics divide out shipment volume, so the carriers having very different shipment counts does NOT distort the comparison.',
+            'rule' => 'match the metric to the fee. Rate-based fees (Fuel, Delivery Area, Residential — charged as a % of the shipment cost) → use "Fee load %", the true rate. Flat fees (Address Correction, Additional Handling, Oversize) → use "Avg $ per charge". The wrong lens can flip the answer: by $/charge FedEx fuel looks 2.5× pricier, but by rate UPS actually charges more (14.2% vs 10.2%) — the $/charge gap is just FedEx shipping bigger packages.',
+            'metrics' => [
+                ['name' => 'Avg $ per charge', 'means' => 'When a fee is applied, the average dollar size of it.', 'formula' => 'fee $ ÷ number of times that fee was charged', 'use' => 'Pure rate — volume-independent. Best for "whose fuel fee is bigger each time it hits?"'],
+                ['name' => '$ per shipment', 'means' => 'That fee spread across every shipment the carrier made.', 'formula' => 'fee $ ÷ total shipments (distinct tracking #s)', 'use' => 'Blends the rate with how often it is applied.'],
+                ['name' => 'Incidence %', 'means' => 'How often the fee is applied.', 'formula' => 'shipments hit by the fee ÷ total shipments × 100', 'use' => 'Frequency only, not size.'],
+                ['name' => 'Fee load %', 'means' => 'The fee as a share of base shipping cost.', 'formula' => 'fee $ ÷ base transportation $ × 100', 'use' => 'Best for cost-based surcharges like fuel (= the effective rate). Already inflation-neutral.'],
+                ['name' => 'Total $', 'means' => 'Raw dollars billed.', 'formula' => 'sum of the fee', 'use' => 'Not normalized — driven by volume. Use only for absolute totals.'],
+            ],
+            'columns' => [
+                ['name' => 'UPS / FedEx', 'means' => 'The selected metric, computed for each carrier.'],
+                ['name' => 'Costlier', 'means' => 'Which carrier is higher for that fee on the selected metric.'],
+                ['name' => 'Gap', 'means' => 'How many times more the costlier carrier charges (higher ÷ lower).'],
+                ['name' => '▸ ALL AUXILIARY FEES (top row)', 'means' => 'The selected metric aggregated across every aux fee. Excludes base transportation and discounts/credits (those are not charges).'],
+            ],
+            'controls' => [
+                ['name' => 'Dollars: Nominal vs Real', 'means' => 'Real restates each year\'s dollars into constant 2026 dollars using CPI, so comparing $ across years is not distorted by inflation. Affects the $ metrics only; the % metrics are already inflation-neutral.'],
+                ['name' => 'Year from / to', 'means' => 'Blank both = all years; set one = single year; set both = a range.'],
+            ],
+        ];
+    }
+
+    /**
      * @return array<int, string>
      */
     protected function yearOptions(): array

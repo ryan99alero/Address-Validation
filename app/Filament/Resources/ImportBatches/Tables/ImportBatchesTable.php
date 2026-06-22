@@ -68,6 +68,21 @@ class ImportBatchesTable
                         $record->isCompleted() && $record->validated_rows > 0 => 'success',
                         default => 'gray',
                     }),
+                TextColumn::make('source_split')
+                    ->label('Found Local / API')
+                    ->badge()
+                    ->color('info')
+                    ->placeholder('—')
+                    ->state(function ($record): ?string {
+                        $local = $record->localCacheValidatedCount();
+                        $api = $record->apiValidatedCount();
+                        if ($local === 0 && $api === 0) {
+                            return null;
+                        }
+
+                        return "{$local} local · {$api} API";
+                    })
+                    ->tooltip('Addresses resolved from the local invoice correction cache vs. the carrier API'),
                 TextColumn::make('total_rows')
                     ->label('Rows')
                     ->numeric()

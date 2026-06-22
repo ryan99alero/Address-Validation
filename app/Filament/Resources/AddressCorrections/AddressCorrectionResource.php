@@ -4,8 +4,9 @@ namespace App\Filament\Resources\AddressCorrections;
 
 use App\Filament\Resources\AddressCorrections\Pages\ListAddressCorrections;
 use App\Filament\Resources\AddressCorrections\Pages\ViewAddressCorrection;
+use App\Filament\Resources\AddressCorrections\RelationManagers\VariationsRelationManager;
 use App\Filament\Resources\AddressCorrections\Tables\AddressCorrectionsTable;
-use App\Models\CarrierInvoiceLine;
+use App\Models\CorrectedAddress;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
@@ -14,7 +15,7 @@ use UnitEnum;
 
 class AddressCorrectionResource extends Resource
 {
-    protected static ?string $model = CarrierInvoiceLine::class;
+    protected static ?string $model = CorrectedAddress::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedMapPin;
 
@@ -33,6 +34,13 @@ class AddressCorrectionResource extends Resource
     public static function table(Table $table): Table
     {
         return AddressCorrectionsTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            VariationsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

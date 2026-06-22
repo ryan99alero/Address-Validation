@@ -388,6 +388,26 @@ class ImportBatch extends Model
         };
     }
 
+    /**
+     * How many of this batch's addresses were resolved from the local invoice
+     * correction cache (vs. the carrier API).
+     */
+    public function localCacheValidatedCount(): int
+    {
+        return $this->addresses()->where('validation_source', Address::SOURCE_LOCAL_CACHE)->count();
+    }
+
+    /**
+     * How many were resolved by hitting a carrier API.
+     */
+    public function apiValidatedCount(): int
+    {
+        return $this->addresses()
+            ->whereNotNull('validation_source')
+            ->where('validation_source', '!=', Address::SOURCE_LOCAL_CACHE)
+            ->count();
+    }
+
     // Relationships
 
     public function addresses(): HasMany

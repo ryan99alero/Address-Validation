@@ -8,6 +8,7 @@ use Closure;
 use Exception;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -116,18 +117,30 @@ abstract class AbstractCarrier implements CarrierInterface
             // Process chunk with concurrent HTTP requests
             // Further split into concurrent batches if chunk is larger than concurrent limit
             foreach (array_chunk($chunk, $concurrentRequests) as $concurrentBatch) {
-                $responses = Http::pool(function (Pool $pool) use ($concurrentBatch, $requestBuilder) {
-                    foreach ($concurrentBatch as $index => $address) {
-                        $requestBuilder($pool, $address, $index);
-                    }
-                });
+                // A pool-level failure (e.g. cURL thread exhaustion under high
+                // concurrency surfacing as "Cannot change a rejected promise to
+                // fulfilled") must not abort the whole job — degrade to per-address
+                // failures for this batch and keep going.
+                try {
+                    $responses = Http::pool(function (Pool $pool) use ($concurrentBatch, $requestBuilder) {
+                        foreach ($concurrentBatch as $index => $address) {
+                            $requestBuilder($pool, $address, $index);
+                        }
+                    });
+                } catch (\Throwable $e) {
+                    Log::warning($this->getName().' HTTP pool failed for batch', [
+                        'batch_size' => count($concurrentBatch),
+                        'error' => $e->getMessage(),
+                    ]);
+                    $responses = [];
+                }
 
                 // Process responses maintaining order
                 foreach ($concurrentBatch as $index => $address) {
                     $response = $responses[$index] ?? null;
 
                     try {
-                        if ($response && $response->successful()) {
+                        if ($response instanceof Response && $response->successful()) {
                             $validatedAddress = $responseParser($address, $response);
                             $allResults[] = [
                                 'address_id' => $address->id,
@@ -136,7 +149,12 @@ abstract class AbstractCarrier implements CarrierInterface
                                 'error' => null,
                             ];
                         } else {
-                            $errorMsg = $response ? 'API error: '.$response->status() : 'No response';
+                            // Failed pool entries are a ConnectionException, not a Response.
+                            $errorMsg = match (true) {
+                                $response instanceof Response => 'API error: '.$response->status(),
+                                $response instanceof \Throwable => 'Request failed: '.$response->getMessage(),
+                                default => 'No response',
+                            };
                             $allResults[] = [
                                 'address_id' => $address->id,
                                 'success' => false,
@@ -144,7 +162,7 @@ abstract class AbstractCarrier implements CarrierInterface
                                 'error' => $errorMsg,
                             ];
                         }
-                    } catch (Exception $e) {
+                    } catch (\Throwable $e) {
                         Log::error($this->getName().' Concurrent Validation Error', [
                             'address_id' => $address->id,
                             'error' => $e->getMessage(),

@@ -285,6 +285,16 @@ class BatchProcessing extends Page implements HasSchemas
                             ->default('all')
                             ->helperText('Filter which addresses to include in the export'),
 
+                        Select::make('filter_source')
+                            ->label('Filter by Validation Source')
+                            ->options([
+                                'all' => 'All Sources',
+                                'local_cache' => 'Invoice DB (Local) Only',
+                                'api' => 'Carrier API Only',
+                            ])
+                            ->default('all')
+                            ->helperText('Export only addresses resolved from the local invoice cache, or only those from a carrier API'),
+
                         Select::make('sort_by')
                             ->label('Sort By')
                             ->options(ExportTemplate::getSortOptions())
@@ -707,6 +717,7 @@ class BatchProcessing extends Page implements HasSchemas
         $this->updateExportBatchStats((string) $batch->id);
 
         $filterStatus = $data['filter_status'] ?? 'all';
+        $filterSource = $data['filter_source'] ?? 'all';
         $sortBy = $data['sort_by'] ?? 'original';
         $filename = $data['filename'] ?? null;
 
@@ -726,7 +737,8 @@ class BatchProcessing extends Page implements HasSchemas
             $filterStatus,
             $filename,
             $sortBy,
-            $useImportWithValidation
+            $useImportWithValidation,
+            $filterSource
         );
 
         Notification::make()

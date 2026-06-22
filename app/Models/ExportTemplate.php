@@ -96,6 +96,7 @@ class ExportTemplate extends Model
             'full_postal_code' => 'Full Postal Code (with +4)',
             'country_code' => 'Country Code',
             'validation_status' => 'Validation Status',
+            'validation_source' => 'Validation Source (Invoice DB / API)',
             'is_residential' => 'Is Residential',
             'classification' => 'Classification',
             'confidence_score' => 'Confidence Score',
