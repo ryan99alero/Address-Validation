@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\CompanySetting;
+use App\Models\SystemLog;
 use App\Services\WorkerService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -34,3 +36,16 @@ Schedule::command('mail:process-invoices --due')
     ->name('mail-invoice-polling')
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/mail-invoices.log'));
+
+// Purge Pace address-correction audit logs older than the configured retention
+// (Company Setup → Retention days). 0 = keep forever.
+Schedule::call(function () {
+    $days = (int) (CompanySetting::instance()->pace_correction_retention_days ?? 0);
+
+    if ($days > 0) {
+        SystemLog::query()
+            ->where('type', 'pace_address_correction')
+            ->where('created_at', '<', now()->subDays($days))
+            ->delete();
+    }
+})->dailyAt('01:00')->name('pace-correction-purge')->withoutOverlapping();

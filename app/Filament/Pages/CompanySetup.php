@@ -58,6 +58,7 @@ class CompanySetup extends Page implements HasSchemas
             'fedex_account_number' => $settings->fedex_account_number,
             'extra_field_count' => $settings->extra_field_count ?? 20,
             'current_extra_field_count' => $dynamicFieldService->getCurrentExtraFieldCount(),
+            'pace_correction_retention_days' => $settings->pace_correction_retention_days ?? 0,
         ]);
     }
 
@@ -154,6 +155,17 @@ class CompanySetup extends Page implements HasSchemas
                             ->label('Current DB Fields')
                             ->disabled()
                             ->helperText('Number of extra fields currently in the database.'),
+                    ]),
+
+                Section::make('Pace Address Corrections')
+                    ->description('Audit history retention for real-time Pace address corrections.')
+                    ->schema([
+                        TextInput::make('pace_correction_retention_days')
+                            ->label('Retention (days)')
+                            ->numeric()
+                            ->minValue(0)
+                            ->default(0)
+                            ->helperText('Correction records older than this are purged daily. 0 = keep forever.'),
                     ]),
             ])
             ->statePath('data');

@@ -21,6 +21,7 @@ class CompanySetting extends Model
         'ups_account_number',
         'fedex_account_number',
         'extra_field_count',
+        'pace_correction_retention_days',
     ];
 
     /**
@@ -30,6 +31,7 @@ class CompanySetting extends Model
     {
         return [
             'extra_field_count' => 'integer',
+            'pace_correction_retention_days' => 'integer',
         ];
     }
 
