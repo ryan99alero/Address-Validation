@@ -37,19 +37,22 @@ class PaceWebhookController
         }
 
         $contactId = $data['contact_id'] ?? $data['contactNumber'] ?? null;
+        $shipmentId = $data['shipment_id'] ?? $data['id'] ?? null;
 
-        if (empty($contactId)) {
+        if (empty($shipmentId) && empty($contactId)) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'contact_id (or contactNumber) is required.',
+                'message' => 'shipment_id (or contact_id) is required.',
             ], 422);
         }
 
         ProcessPaceAddressCorrection::dispatch($connection->id, $data);
 
+        // Pace Connect only treats HTTP 200 as a successful delivery; a 202 makes it
+        // retry forever (jobs pile up in Pace's outgoing queue).
         return response()->json([
             'status' => 'accepted',
             'contact_id' => $contactId,
-        ], 202);
+        ], 200);
     }
 }
