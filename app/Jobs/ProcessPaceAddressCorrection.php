@@ -242,7 +242,31 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             return (bool) $new !== (bool) $current;
         }
 
-        return trim((string) $new) !== trim((string) $current);
+        $new = trim((string) $new);
+        $current = trim((string) $current);
+
+        if ($new === $current) {
+            return false;
+        }
+
+        // Never treat a 5-digit ZIP as a change when the current value is that ZIP+4.
+        if (preg_match('/^\d{5}$/', $new) && str_starts_with($current, $new.'-')) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Recombine a validator's 5-digit ZIP and +4 extension into Pace's ZIP+4 form.
+     */
+    protected function fullZip(?string $postal, ?string $ext): ?string
+    {
+        if (empty($postal)) {
+            return null;
+        }
+
+        return ($ext && ! str_contains($postal, '-')) ? $postal.'-'.$ext : $postal;
     }
 
     /**
@@ -256,7 +280,7 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             'address3' => null,
             'city' => $a->output_city ?? $a->input_city,
             'state' => $a->output_state ?? $a->input_state,
-            'zip' => $a->output_postal ?? $a->input_postal,
+            'zip' => $this->fullZip($a->output_postal, $a->output_postal_ext) ?? $a->input_postal,
             'postal_ext' => $a->output_postal_ext,
             'country' => $a->output_country ?? $a->input_country,
             'residential' => $a->is_residential,
