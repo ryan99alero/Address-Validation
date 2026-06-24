@@ -6,10 +6,11 @@ use App\Jobs\ProcessPaceAddressCorrection;
 use App\Models\IntegrationConnection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class PaceWebhookController
 {
-    public function __invoke(Request $request, string $token): JsonResponse
+    public function __invoke(Request $request, string $token): Response|JsonResponse
     {
         $connection = IntegrationConnection::query()
             ->where('webhook_token', $token)
@@ -48,11 +49,19 @@ class PaceWebhookController
 
         ProcessPaceAddressCorrection::dispatch($connection->id, $data);
 
-        // Pace Connect only treats HTTP 200 as a successful delivery; a 202 makes it
-        // retry forever (jobs pile up in Pace's outgoing queue).
-        return response()->json([
-            'status' => 'accepted',
-            'contact_id' => $contactId,
-        ], 200);
+        // Pace Connect expects an XML acknowledgment (text/xml) and re-sends the
+        // message if it doesn't receive one. We ack immediately; the correction
+        // runs asynchronously on the queue.
+        return $this->ack();
+    }
+
+    /**
+     * Minimal XML acknowledgment Pace Connect treats as a successful delivery.
+     */
+    private function ack(): Response
+    {
+        $body = '<?xml version="1.0" encoding="UTF-8"?>'."\n".'<Response><Status>OK</Status></Response>'."\n";
+
+        return response($body, 200)->header('Content-Type', 'text/xml; charset=UTF-8');
     }
 }
