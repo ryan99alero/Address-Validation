@@ -19,12 +19,13 @@ use Throwable;
 
 /**
  * Real-time Pace address correction. The inbound punch-out provides the
- * contact id + address directly, so we consume the payload (no JobShipment read
- * in the normal path — only as a fallback if the id is missing). The Contact is
- * cleansed against the connection's configured validators (priority order with
- * fallback); only the fields that actually changed are pushed back to the
- * Contact (config-driven via the object's field mappings). We do NOT write the
- * JobShipment — the trackingNumber constraint gates re-firing on the Pace side.
+ * contact id + address directly, so we consume the payload with NO Pace reads in
+ * the normal path (a JobShipment read is a fallback only if the contact id is
+ * missing). The payload address is cleansed against the connection's configured
+ * validators (priority order with fallback); only the fields that actually
+ * changed are pushed back to the Contact as a partial merge — {id + changed
+ * fields}, verified safe — config-driven by the object's field mappings. We do
+ * NOT write the JobShipment (the trackingNumber constraint gates re-firing).
  * Before/after values are recorded for the correction audit.
  */
 class ProcessPaceAddressCorrection implements ShouldQueue
@@ -63,12 +64,8 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                 throw new RuntimeException("No contact id in payload for shipment {$shipmentId}");
             }
 
-            // Read the contact: its current values are what we diff against, and Pace's
-            // updateContact is a full-object write, so we modify a copy and send it back.
-            $contact = $client->readContact((string) $contactId);
-
             $carrierSlugs = $connection->validation_carriers ?: ['smarty', 'ups', 'fedex'];
-            $corrected = $this->cleanse($validation, $contact, $carrierSlugs);
+            $corrected = $this->cleanse($validation, $this->payload, $carrierSlugs);
 
             // Only act when the address was actually validated. On an API error / no
             // deliverable result, do nothing so the constraint re-fires it later.
@@ -93,13 +90,15 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                 return;
             }
 
-            // Push ONLY the fields whose validated value differs from the current value
-            // (config-driven by the Contact object's push-enabled field mappings).
+            // Diff the validated address against the payload's current values and push
+            // ONLY the changed fields (config-driven by the Contact's push-enabled
+            // mappings). Pace updateContact merges — verified — so we send just
+            // {id + changed fields}, no Contact read.
             $contactObject = $connection->objects()->where('object_name', 'Contact')->first();
-            [$changes, $diff] = $this->buildContactChanges($contactObject, $corrected, $contact);
+            [$changes, $diff] = $this->buildContactChanges($contactObject, $corrected, $this->payload);
 
             if (! empty($changes)) {
-                $client->updateContact(array_merge($contact, $changes));
+                $client->updateContact(['id' => (int) $contactId] + $changes);
             }
 
             SystemLog::create([
@@ -165,8 +164,8 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             'input_country' => 'US',
             // Company/name are NOT corrected, but Smarty uses them as the
             // "addressee" hint to better resolve the address (firm matching).
-            'input_company' => $source['companyName'] ?? $source['name'] ?? null,
-            'input_name' => null,
+            'input_company' => $source['company'] ?? $source['companyName'] ?? null,
+            'input_name' => $source['name'] ?? null,
         ];
 
         $carriers = Carrier::query()
