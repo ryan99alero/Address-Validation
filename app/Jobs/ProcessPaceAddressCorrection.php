@@ -246,8 +246,10 @@ class ProcessPaceAddressCorrection implements ShouldQueue
 
     protected function valueChanged(mixed $new, mixed $current): bool
     {
+        // Boolean-ish fields (e.g. residential): normalize both sides, so a string
+        // "false" / "0" / "no" from the payload reads as false, not true.
         if (is_bool($new) || is_bool($current)) {
-            return (bool) $new !== (bool) $current;
+            return $this->toBool($new) !== $this->toBool($current);
         }
 
         $new = trim((string) $new);
@@ -263,6 +265,18 @@ class ProcessPaceAddressCorrection implements ShouldQueue
         }
 
         return true;
+    }
+
+    /**
+     * Normalize a boolean-ish value (true/false, "true"/"false", 1/0, "yes"/"no").
+     */
+    protected function toBool(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return in_array(strtolower(trim((string) $value)), ['1', 'true', 'yes', 't', 'y'], true);
     }
 
     /**
