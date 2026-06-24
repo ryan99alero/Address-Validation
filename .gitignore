@@ -22,3 +22,7 @@ yarn-error.log
 /.vscode
 /.zed
 deploy.conf
+
+# wire captures may contain auth headers
+*.pcap
+.DS_Store
