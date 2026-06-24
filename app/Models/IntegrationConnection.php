@@ -36,6 +36,7 @@ class IntegrationConnection extends Model
         'retry_attempts',
         'rate_limit_per_minute',
         'validation_carriers',
+        'dry_run',
         'is_active',
         'last_connected_at',
         'last_error_at',
@@ -65,6 +66,7 @@ class IntegrationConnection extends Model
             'retry_attempts' => 'integer',
             'rate_limit_per_minute' => 'integer',
             'validation_carriers' => 'array',
+            'dry_run' => 'boolean',
             'sync_interval_minutes' => 'integer',
             'last_synced_at' => 'datetime',
         ];

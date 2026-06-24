@@ -138,6 +138,9 @@ class IntegrationConnectionForm
                                         ->reorderable()
                                         ->options(fn (): array => Carrier::query()->orderBy('name')->pluck('name', 'slug')->all())
                                         ->helperText('e.g. Smarty → UPS → FedEx. Leave empty to use all active carriers (Smarty preferred).'),
+                                    Toggle::make('dry_run')
+                                        ->label('Shadow / dry-run mode (no write-back)')
+                                        ->helperText('When ON: the engine validates and logs exactly what it WOULD change, but does NOT push anything back to Pace. Use to observe corrections for a while before going live.'),
                                 ]),
                             Section::make('Sync')
                                 ->schema([

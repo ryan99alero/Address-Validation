@@ -97,7 +97,10 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             $contactObject = $connection->objects()->where('object_name', 'Contact')->first();
             [$changes, $diff] = $this->buildContactChanges($contactObject, $corrected, $this->payload);
 
-            if (! empty($changes)) {
+            // Shadow / dry-run mode: validate and log what WOULD change, but do not
+            // write anything back to Pace.
+            $dryRun = (bool) $connection->dry_run;
+            if (! empty($changes) && ! $dryRun) {
                 $client->updateContact(['id' => (int) $contactId] + $changes);
             }
 
@@ -108,14 +111,17 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                 'loggable_type' => IntegrationConnection::class,
                 'loggable_id' => $connection->id,
                 'status' => 'success',
-                'summary' => empty($changes)
-                    ? "Pace address validated (no changes) for Contact {$contactId}"
-                    : "Pace address corrected & pushed for Contact {$contactId}",
+                'summary' => match (true) {
+                    empty($changes) => "Pace address validated (no changes) for Contact {$contactId}",
+                    $dryRun => "DRY RUN — would correct Contact {$contactId} (nothing pushed)",
+                    default => "Pace address corrected & pushed for Contact {$contactId}",
+                },
                 'completed_at' => now(),
                 'metadata' => [
                     'job_number' => $jobNumber,
                     'shipment_id' => $shipmentId,
                     'contact_id' => $contactId,
+                    'dry_run' => $dryRun,
                     'changed_fields' => array_keys($changes),
                     'changes' => $diff,
                     'source' => $corrected['source'],

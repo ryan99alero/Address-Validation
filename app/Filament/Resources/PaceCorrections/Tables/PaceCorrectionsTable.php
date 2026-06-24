@@ -41,6 +41,11 @@ class PaceCorrectionsTable
                         'failed' => 'danger',
                         default => 'gray',
                     }),
+                TextColumn::make('mode')
+                    ->label('Mode')
+                    ->badge()
+                    ->getStateUsing(fn ($record): string => ($record->metadata['dry_run'] ?? false) ? 'Dry-run' : 'Live')
+                    ->color(fn (string $state): string => $state === 'Dry-run' ? 'info' : 'gray'),
                 TextColumn::make('changes')
                     ->label('Field changes (old → new)')
                     ->html()
