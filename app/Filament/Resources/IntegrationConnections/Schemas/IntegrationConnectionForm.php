@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\IntegrationConnections\Schemas;
 
+use App\Models\Carrier;
 use App\Models\IntegrationConnection;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
@@ -127,6 +128,16 @@ class IntegrationConnectionForm
                                     TextInput::make('timeout_seconds')->label('Timeout (seconds)')->numeric()->default(30)->minValue(5)->maxValue(300),
                                     TextInput::make('retry_attempts')->label('Retry Attempts')->numeric()->default(3)->minValue(0)->maxValue(10),
                                     TextInput::make('rate_limit_per_minute')->label('Rate Limit (per min)')->numeric()->minValue(1)->helperText('Blank = unlimited'),
+                                ]),
+                            Section::make('Address Validation')
+                                ->description('Validators used for address correction, in priority order. The first that returns a result wins; the rest are fallbacks.')
+                                ->schema([
+                                    Select::make('validation_carriers')
+                                        ->label('Validators (drag to set priority)')
+                                        ->multiple()
+                                        ->reorderable()
+                                        ->options(fn (): array => Carrier::query()->orderBy('name')->pluck('name', 'slug')->all())
+                                        ->helperText('e.g. Smarty → UPS → FedEx. Leave empty to use all active carriers (Smarty preferred).'),
                                 ]),
                             Section::make('Sync')
                                 ->schema([

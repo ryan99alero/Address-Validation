@@ -35,6 +35,7 @@ class IntegrationConnection extends Model
         'timeout_seconds',
         'retry_attempts',
         'rate_limit_per_minute',
+        'validation_carriers',
         'is_active',
         'last_connected_at',
         'last_error_at',
@@ -63,6 +64,7 @@ class IntegrationConnection extends Model
             'timeout_seconds' => 'integer',
             'retry_attempts' => 'integer',
             'rate_limit_per_minute' => 'integer',
+            'validation_carriers' => 'array',
             'sync_interval_minutes' => 'integer',
             'last_synced_at' => 'datetime',
         ];
