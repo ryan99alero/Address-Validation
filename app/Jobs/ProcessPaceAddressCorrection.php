@@ -18,15 +18,14 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Real-time Pace address correction. The inbound punch-out only needs the
- * JobShipment id — we read the shipment + contact straight from the Pace API
- * (authoritative, scalar values) rather than trusting Velocity's field
- * rendering. The Contact's address is cleansed against the connection's
- * configured validators (in priority order, with fallback), and only the
- * fields that actually changed are pushed back to the Contact. When the
- * address is successfully validated the JobShipment is flagged corrected so it
- * is never re-checked; on a validator error / no result we leave it unflagged
- * so it can be retried.
+ * Real-time Pace address correction. The inbound punch-out provides the
+ * contact id + address directly, so we consume the payload (no JobShipment read
+ * in the normal path — only as a fallback if the id is missing). The Contact is
+ * cleansed against the connection's configured validators (priority order with
+ * fallback); only the fields that actually changed are pushed back to the
+ * Contact (config-driven via the object's field mappings). We do NOT write the
+ * JobShipment — the trackingNumber constraint gates re-firing on the Pace side.
+ * Before/after values are recorded for the correction audit.
  */
 class ProcessPaceAddressCorrection implements ShouldQueue
 {
@@ -48,29 +47,31 @@ class ProcessPaceAddressCorrection implements ShouldQueue
         }
 
         $shipmentId = $this->payload['shipment_id'] ?? $this->payload['id'] ?? null;
-        $contactId = null;
+        $jobNumber = $this->payload['job_number'] ?? $this->payload['job'] ?? null;
+        $contactId = $this->payload['contact_id'] ?? $this->payload['contactNumber'] ?? null;
 
         try {
             $client = new PaceApiClient($connection);
 
-            // Read the shipment for the REAL numeric contactNumber (Velocity renders
-            // contactNumber as the contact's display name; the API returns the id).
-            $shipment = $shipmentId ? $client->readJobShipment((string) $shipmentId) : [];
-            $contactId = $shipment['contactNumber'] ?? $this->payload['contact_id'] ?? $this->payload['contactNumber'] ?? null;
-
-            if (empty($contactId)) {
-                throw new RuntimeException("No contactNumber resolved for shipment {$shipmentId}");
+            // The payload carries the contact id directly. Only fall back to a
+            // shipment read if it's missing — no JobShipment read in the normal path.
+            if (empty($contactId) && $shipmentId) {
+                $contactId = $client->readJobShipment((string) $shipmentId)['contactNumber'] ?? null;
             }
 
-            // Read the contact: its current address is what we cleanse, and we need
-            // the full object for Pace's read-modify-write update.
+            if (empty($contactId)) {
+                throw new RuntimeException("No contact id in payload for shipment {$shipmentId}");
+            }
+
+            // Read the contact: its current values are what we diff against, and Pace's
+            // updateContact is a full-object write, so we modify a copy and send it back.
             $contact = $client->readContact((string) $contactId);
 
             $carrierSlugs = $connection->validation_carriers ?: ['smarty', 'ups', 'fedex'];
             $corrected = $this->cleanse($validation, $contact, $carrierSlugs);
 
             // Only act when the address was actually validated. On an API error / no
-            // deliverable result, leave U_addressCorrected unset so it is re-checked.
+            // deliverable result, do nothing so the constraint re-fires it later.
             if (! $corrected['validated']) {
                 SystemLog::create([
                     'category' => 'integration',
@@ -79,11 +80,12 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                     'loggable_type' => IntegrationConnection::class,
                     'loggable_id' => $connection->id,
                     'status' => 'skipped',
-                    'summary' => "Address not validated for Contact {$contactId} — left unflagged for retry",
+                    'summary' => "Address not validated for Contact {$contactId} — left for retry",
                     'completed_at' => now(),
                     'metadata' => [
-                        'contact_id' => $contactId,
+                        'job_number' => $jobNumber,
                         'shipment_id' => $shipmentId,
+                        'contact_id' => $contactId,
                         'carriers_tried' => array_values($carrierSlugs),
                     ],
                 ]);
@@ -91,17 +93,13 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                 return;
             }
 
-            // Push ONLY the fields whose validated value differs from the current value.
+            // Push ONLY the fields whose validated value differs from the current value
+            // (config-driven by the Contact object's push-enabled field mappings).
             $contactObject = $connection->objects()->where('object_name', 'Contact')->first();
-            $changes = $this->buildContactChanges($contactObject, $corrected, $contact);
+            [$changes, $diff] = $this->buildContactChanges($contactObject, $corrected, $contact);
+
             if (! empty($changes)) {
                 $client->updateContact(array_merge($contact, $changes));
-            }
-
-            // Validated (even with zero edits) → always flag so it is never re-checked.
-            if (! empty($shipment)) {
-                $shipment['U_addressCorrected'] = true;
-                $client->updateJobShipment($shipment);
             }
 
             SystemLog::create([
@@ -116,12 +114,13 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                     : "Pace address corrected & pushed for Contact {$contactId}",
                 'completed_at' => now(),
                 'metadata' => [
-                    'contact_id' => $contactId,
+                    'job_number' => $jobNumber,
                     'shipment_id' => $shipmentId,
-                    'corrected' => $corrected['corrected'],
-                    'residential' => $corrected['residential'],
-                    'source' => $corrected['source'],
+                    'contact_id' => $contactId,
                     'changed_fields' => array_keys($changes),
+                    'changes' => $diff,
+                    'source' => $corrected['source'],
+                    'residential' => $corrected['residential'],
                 ],
             ]);
         } catch (Throwable $e) {
@@ -137,7 +136,7 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                 'summary' => "Pace address correction failed (shipment {$shipmentId}, contact {$contactId})",
                 'completed_at' => now(),
                 'error_message' => $e->getMessage(),
-                'metadata' => ['contact_id' => $contactId, 'shipment_id' => $shipmentId],
+                'metadata' => ['job_number' => $jobNumber, 'shipment_id' => $shipmentId, 'contact_id' => $contactId],
             ]);
 
             throw $e;
@@ -148,7 +147,7 @@ class ProcessPaceAddressCorrection implements ShouldQueue
      * Cleanse the source address against the configured validators, trying each in
      * priority order until one returns a usable result. Returns a normalized
      * corrected-address array plus a 'validated' flag (false = API error / no
-     * deliverable result, so the shipment must NOT be flagged corrected).
+     * deliverable result).
      *
      * @param  array<string, mixed>  $source  The Contact (Pace scalar fields)
      * @param  array<int, string>  $carrierSlugs  Validator slugs in priority order
@@ -207,16 +206,18 @@ class ProcessPaceAddressCorrection implements ShouldQueue
     /**
      * Build the Contact writeback from push-enabled mappings, including ONLY the
      * fields whose validated value differs from the Contact's current value.
+     * Returns [changes (external_field => value), diff (external_field => [from,to])].
      *
      * @param  array<string, mixed>  $corrected
      * @param  array<string, mixed>  $current  The Contact as read from Pace
-     * @return array<string, mixed>
+     * @return array{0: array<string, mixed>, 1: array<string, array{from: mixed, to: mixed}>}
      */
     protected function buildContactChanges(?IntegrationObject $contactObject, array $corrected, array $current): array
     {
         $changes = [];
+        $diff = [];
         if (! $contactObject) {
-            return $changes;
+            return [$changes, $diff];
         }
 
         foreach ($contactObject->fieldMappings()->where('sync_on_push', true)->get() as $mapping) {
@@ -227,13 +228,15 @@ class ProcessPaceAddressCorrection implements ShouldQueue
 
             $field = $mapping->external_field ?: ltrim((string) $mapping->external_xpath, '@');
             $newValue = $mapping->transformToExternal($corrected[$localKey]);
+            $currentValue = $current[$field] ?? null;
 
-            if ($this->valueChanged($newValue, $current[$field] ?? null)) {
+            if ($this->valueChanged($newValue, $currentValue)) {
                 $changes[$field] = $newValue;
+                $diff[$field] = ['from' => $currentValue, 'to' => $newValue];
             }
         }
 
-        return $changes;
+        return [$changes, $diff];
     }
 
     protected function valueChanged(mixed $new, mixed $current): bool
