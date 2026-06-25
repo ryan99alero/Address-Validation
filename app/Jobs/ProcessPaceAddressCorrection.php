@@ -104,6 +104,23 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                 $client->updateContact(['id' => (int) $contactId] + $changes);
             }
 
+            // Audit snapshot: original as received, and corrected = original with ONLY
+            // the pushed changes applied (so the view highlights exactly what moved).
+            $originalSnapshot = [
+                'name' => $this->payload['name'] ?? null,
+                'company' => $this->payload['company'] ?? null,
+                'address1' => $this->payload['address1'] ?? null,
+                'address2' => $this->payload['address2'] ?? null,
+                'city' => $this->payload['city'] ?? null,
+                'state' => $this->payload['state'] ?? null,
+                'zip' => $this->payload['zip'] ?? null,
+                'country' => $this->payload['country'] ?? null,
+            ];
+            $correctedSnapshot = $originalSnapshot;
+            foreach ($diff as $field => $fromTo) {
+                $correctedSnapshot[$field] = $fromTo['to'] ?? null;
+            }
+
             SystemLog::create([
                 'category' => 'integration',
                 'type' => 'pace_address_correction',
@@ -124,26 +141,8 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                     'dry_run' => $dryRun,
                     'changed_fields' => array_keys($changes),
                     'changes' => $diff,
-                    'original' => [
-                        'name' => $this->payload['name'] ?? null,
-                        'company' => $this->payload['company'] ?? null,
-                        'address1' => $this->payload['address1'] ?? null,
-                        'address2' => $this->payload['address2'] ?? null,
-                        'city' => $this->payload['city'] ?? null,
-                        'state' => $this->payload['state'] ?? null,
-                        'zip' => $this->payload['zip'] ?? null,
-                        'country' => $this->payload['country'] ?? null,
-                    ],
-                    'corrected' => [
-                        'name' => $this->payload['name'] ?? null,
-                        'company' => $this->payload['company'] ?? null,
-                        'address1' => $corrected['address1'],
-                        'address2' => $corrected['address2'],
-                        'city' => $corrected['city'],
-                        'state' => $corrected['state'],
-                        'zip' => $corrected['zip'],
-                        'country' => $this->payload['country'] ?? null,
-                    ],
+                    'original' => $originalSnapshot,
+                    'corrected' => $correctedSnapshot,
                     'source' => $corrected['source'],
                     'residential' => $corrected['residential'],
                 ],
