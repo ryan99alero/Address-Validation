@@ -274,7 +274,8 @@ class ProcessPaceAddressCorrection implements ShouldQueue
         $new = trim((string) $new);
         $current = trim((string) $current);
 
-        if ($new === $current) {
+        // Case-insensitive: standardizing case alone is not a "change".
+        if (strcasecmp($new, $current) === 0) {
             return false;
         }
 
@@ -315,19 +316,32 @@ class ProcessPaceAddressCorrection implements ShouldQueue
      */
     protected function normalizeFromOutput(Address $a): array
     {
+        // The corrected (good) address is emitted in CASS-standard UPPERCASE; the
+        // abbreviation (Drive→DR, Suite→STE) is already done upstream by the carrier
+        // or the cache's normalize(), so this just enforces the capitalization.
         return [
-            'address1' => $a->output_address_1 ?? $a->input_address_1,
-            'address2' => $a->output_address_2 ?? $a->input_address_2,
+            'address1' => $this->upper($a->output_address_1 ?? $a->input_address_1),
+            'address2' => $this->upper($a->output_address_2 ?? $a->input_address_2),
             'address3' => null,
-            'city' => $a->output_city ?? $a->input_city,
-            'state' => $a->output_state ?? $a->input_state,
+            'city' => $this->upper($a->output_city ?? $a->input_city),
+            'state' => $this->upper($a->output_state ?? $a->input_state),
             'zip' => $this->fullZip($a->output_postal, $a->output_postal_ext) ?? $a->input_postal,
             'postal_ext' => $a->output_postal_ext,
-            'country' => $a->output_country ?? $a->input_country,
+            'country' => $this->upper($a->output_country ?? $a->input_country),
             'residential' => $a->is_residential,
             'corrected' => $a->output_address_1 !== null && $a->output_address_1 !== $a->input_address_1,
             'source' => $a->validation_source,
         ];
+    }
+
+    /**
+     * Uppercase a value for CASS-standard output (null/empty stays null).
+     */
+    protected function upper(?string $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value === '' ? null : mb_strtoupper($value);
     }
 
     /**
