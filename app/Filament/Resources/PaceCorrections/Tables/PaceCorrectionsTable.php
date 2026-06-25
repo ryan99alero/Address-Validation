@@ -50,6 +50,13 @@ class PaceCorrectionsTable
                 TextColumn::make('comparison')
                     ->label('Address (original → corrected)')
                     ->html()
+                    ->searchable(query: fn (Builder $query, string $search): Builder => $query->where(function (Builder $q) use ($search): void {
+                        foreach (['original', 'corrected'] as $side) {
+                            foreach (['company', 'address1', 'address2', 'city', 'state', 'zip'] as $field) {
+                                $q->orWhere("metadata->{$side}->{$field}", 'like', "%{$search}%");
+                            }
+                        }
+                    }))
                     ->getStateUsing(function ($record): string {
                         if ($record->status === 'failed') {
                             return '<span style="color:#ef4444">'.e(Str::limit((string) $record->error_message, 140)).'</span>';
