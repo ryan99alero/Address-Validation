@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Contracts\ReportSnapshotProvider;
+use App\Filament\Pages\Concerns\HasReportSnapshots;
 use App\Models\Carrier;
 use App\Services\InflationIndex;
 use BackedEnum;
@@ -19,9 +21,38 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
-class CarrierComparison extends Page implements HasTable
+class CarrierComparison extends Page implements HasTable, ReportSnapshotProvider
 {
+    use HasReportSnapshots;
     use InteractsWithTable;
+
+    public static function reportKey(): string
+    {
+        return 'carrier_comparison';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function defaultFilters(): array
+    {
+        return ['metric' => 'avg', 'basis' => 'nominal', 'year_from' => null, 'year_to' => null];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function currentFilters(): array
+    {
+        $year = $this->getTableFilterState('year') ?? [];
+
+        return [
+            'metric' => $this->getTableFilterState('metric')['value'] ?? 'avg',
+            'basis' => $this->getTableFilterState('basis')['value'] ?? 'nominal',
+            'year_from' => $year['year_from'] ?? null,
+            'year_to' => $year['year_to'] ?? null,
+        ];
+    }
 
     protected string $view = 'filament.pages.carrier-comparison';
 
@@ -36,7 +67,7 @@ class CarrierComparison extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->records(fn (): Collection => $this->compare())
+            ->records(fn (): Collection => $this->reportRecords(fn (array $filters): Collection => static::computeData($filters)))
             ->columns([
                 TextColumn::make('category')->label('Fee Category')->weight('bold'),
                 TextColumn::make('ups')->label('UPS')->alignEnd()
@@ -91,17 +122,17 @@ class CarrierComparison extends Page implements HasTable
     }
 
     /**
+     * @param  array<string, mixed>  $filters
      * @return Collection<int, array<string, mixed>>
      */
-    protected function compare(): Collection
+    public static function computeData(array $filters): Collection
     {
-        $metric = $this->getTableFilterState('metric')['value'] ?? 'per_ship';
-        $yearState = $this->getTableFilterState('year') ?? [];
-        $from = $yearState['year_from'] ?? null;
-        $to = $yearState['year_to'] ?? null;
+        $metric = $filters['metric'] ?? 'avg';
+        $from = $filters['year_from'] ?? null;
+        $to = $filters['year_to'] ?? null;
 
         // Optionally restate dollars in constant base-year terms.
-        $real = ($this->getTableFilterState('basis')['value'] ?? 'nominal') === 'real';
+        $real = ($filters['basis'] ?? 'nominal') === 'real';
         $amount = $real ? 'cc.amount * '.InflationIndex::sqlFactor('cc.invoice_date') : 'cc.amount';
 
         $carriers = Carrier::whereIn('slug', ['ups', 'fedex'])->pluck('slug', 'id');

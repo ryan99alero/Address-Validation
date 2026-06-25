@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Contracts\ReportSnapshotProvider;
+use App\Filament\Pages\Concerns\HasReportSnapshots;
 use App\Models\Carrier;
 use BackedEnum;
 use Filament\Forms\Components\Select;
@@ -18,9 +20,37 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
-class CarrierCorrectionAudit extends Page implements HasTable
+class CarrierCorrectionAudit extends Page implements HasTable, ReportSnapshotProvider
 {
+    use HasReportSnapshots;
     use InteractsWithTable;
+
+    public static function reportKey(): string
+    {
+        return 'carrier_correction_audit';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function defaultFilters(): array
+    {
+        return ['segment' => 'severity_category', 'year_from' => null, 'year_to' => null];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function currentFilters(): array
+    {
+        $year = $this->getTableFilterState('year') ?? [];
+
+        return [
+            'segment' => $this->getTableFilterState('segment')['value'] ?? 'severity_category',
+            'year_from' => $year['year_from'] ?? null,
+            'year_to' => $year['year_to'] ?? null,
+        ];
+    }
 
     protected string $view = 'filament.pages.carrier-correction-audit';
 
@@ -35,7 +65,7 @@ class CarrierCorrectionAudit extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->records(fn (): Collection => $this->audit())
+            ->records(fn (): Collection => $this->reportRecords(fn (array $filters): Collection => static::computeData($filters)))
             ->columns([
                 TextColumn::make('segment')->label('Correction Type')->weight('bold'),
                 TextColumn::make('ups_count')->label('UPS #')->numeric()->alignEnd()->color('gray'),
@@ -73,15 +103,15 @@ class CarrierCorrectionAudit extends Page implements HasTable
     }
 
     /**
+     * @param  array<string, mixed>  $filters
      * @return Collection<int, array<string, mixed>>
      */
-    protected function audit(): Collection
+    public static function computeData(array $filters): Collection
     {
-        $segment = $this->getTableFilterState('segment')['value'] ?? 'severity_category';
+        $segment = $filters['segment'] ?? 'severity_category';
         $column = $segment === 'change_type' ? 'change_type' : 'severity_category';
-        $yearState = $this->getTableFilterState('year') ?? [];
-        $from = $yearState['year_from'] ?? null;
-        $to = $yearState['year_to'] ?? null;
+        $from = $filters['year_from'] ?? null;
+        $to = $filters['year_to'] ?? null;
 
         $carriers = Carrier::whereIn('slug', ['ups', 'fedex'])->pluck('slug', 'id');
         $upsId = $carriers->search('ups');

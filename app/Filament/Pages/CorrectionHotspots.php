@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Contracts\ReportSnapshotProvider;
+use App\Filament\Pages\Concerns\HasReportSnapshots;
 use App\Models\Carrier;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -16,9 +18,34 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
-class CorrectionHotspots extends Page implements HasTable
+class CorrectionHotspots extends Page implements HasTable, ReportSnapshotProvider
 {
+    use HasReportSnapshots;
     use InteractsWithTable;
+
+    public static function reportKey(): string
+    {
+        return 'correction_hotspots';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function defaultFilters(): array
+    {
+        return ['carrier_id' => null, 'min' => 5];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function currentFilters(): array
+    {
+        return [
+            'carrier_id' => $this->getTableFilterState('carrier_id')['value'] ?? null,
+            'min' => (int) ($this->getTableFilterState('min')['value'] ?? 5),
+        ];
+    }
 
     protected string $view = 'filament.pages.correction-hotspots';
 
@@ -33,7 +60,7 @@ class CorrectionHotspots extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->records(fn (): Collection => $this->hotspots())
+            ->records(fn (): Collection => $this->reportRecords(fn (array $filters): Collection => static::computeData($filters)))
             ->columns([
                 TextColumn::make('location')->label('Street Cluster')->weight('bold')->wrap(),
                 TextColumn::make('city_state_zip')->label('City / State / Zip'),
@@ -57,12 +84,13 @@ class CorrectionHotspots extends Page implements HasTable
     }
 
     /**
+     * @param  array<string, mixed>  $filters
      * @return Collection<int, array<string, mixed>>
      */
-    protected function hotspots(): Collection
+    public static function computeData(array $filters): Collection
     {
-        $carrierId = $this->getTableFilterState('carrier_id')['value'] ?? null;
-        $min = (int) ($this->getTableFilterState('min')['value'] ?? 5);
+        $carrierId = $filters['carrier_id'] ?? null;
+        $min = (int) ($filters['min'] ?? 5);
 
         $rows = DB::table('carrier_invoice_lines as l')
             ->join('carrier_invoices as ci', 'ci.id', '=', 'l.carrier_invoice_id')
@@ -93,14 +121,14 @@ class CorrectionHotspots extends Page implements HasTable
             'corrections' => (int) $r->corrections,
             'fees' => (float) $r->fees,
             'avg_fee' => $r->corrections ? (float) $r->fees / (int) $r->corrections : 0.0,
-            'main_issue' => $this->dominant((string) $r->change_types),
+            'main_issue' => self::dominant((string) $r->change_types),
         ]);
     }
 
     /**
      * Most frequent change_type from a comma-separated list (GROUP_CONCAT).
      */
-    protected function dominant(string $list): string
+    protected static function dominant(string $list): string
     {
         if ($list === '') {
             return '—';

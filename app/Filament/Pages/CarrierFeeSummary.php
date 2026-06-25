@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Contracts\ReportSnapshotProvider;
+use App\Filament\Pages\Concerns\HasReportSnapshots;
 use App\Models\Carrier;
 use App\Services\InflationIndex;
 use BackedEnum;
@@ -19,9 +21,39 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
-class CarrierFeeSummary extends Page implements HasTable
+class CarrierFeeSummary extends Page implements HasTable, ReportSnapshotProvider
 {
+    use HasReportSnapshots;
     use InteractsWithTable;
+
+    public static function reportKey(): string
+    {
+        return 'carrier_fee_summary';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function defaultFilters(): array
+    {
+        return ['carrier_id' => null, 'year_from' => null, 'year_to' => null, 'scope' => 'fees', 'basis' => 'nominal'];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function currentFilters(): array
+    {
+        $year = $this->getTableFilterState('year') ?? [];
+
+        return [
+            'carrier_id' => $this->getTableFilterState('carrier_id')['value'] ?? null,
+            'year_from' => $year['year_from'] ?? null,
+            'year_to' => $year['year_to'] ?? null,
+            'scope' => $this->getTableFilterState('scope')['value'] ?? 'fees',
+            'basis' => $this->getTableFilterState('basis')['value'] ?? 'nominal',
+        ];
+    }
 
     protected string $view = 'filament.pages.carrier-fee-summary';
 
@@ -36,7 +68,7 @@ class CarrierFeeSummary extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->records(fn (): Collection => $this->aggregate())
+            ->records(fn (): Collection => $this->reportRecords(fn (array $filters): Collection => static::computeData($filters)))
             ->columns([
                 TextColumn::make('category')
                     ->label('Fee Category')
@@ -100,14 +132,16 @@ class CarrierFeeSummary extends Page implements HasTable
     }
 
     /**
+     * @param  array<string, mixed>  $filters
      * @return Collection<int, array<string, mixed>>
      */
-    protected function aggregate(): Collection
+    public static function computeData(array $filters): Collection
     {
-        $carrierId = $this->getTableFilterState('carrier_id')['value'] ?? null;
-        $yearState = $this->getTableFilterState('year') ?? [];
-        $scope = $this->getTableFilterState('scope')['value'] ?? 'fees';
-        $real = ($this->getTableFilterState('basis')['value'] ?? 'nominal') === 'real';
+        $carrierId = $filters['carrier_id'] ?? null;
+        $from = $filters['year_from'] ?? null;
+        $to = $filters['year_to'] ?? null;
+        $scope = $filters['scope'] ?? 'fees';
+        $real = ($filters['basis'] ?? 'nominal') === 'real';
         $amount = $real ? 'cc.amount * '.InflationIndex::sqlFactor('cc.invoice_date') : 'cc.amount';
 
         $query = DB::table('carrier_charges as cc')
@@ -119,10 +153,10 @@ class CarrierFeeSummary extends Page implements HasTable
         if ($carrierId) {
             $query->where('cc.carrier_id', $carrierId);
         }
-        if ($from = $yearState['year_from'] ?? null) {
+        if ($from) {
             $query->whereDate('cc.invoice_date', '>=', "{$from}-01-01");
         }
-        if ($to = $yearState['year_to'] ?? null) {
+        if ($to) {
             $query->whereDate('cc.invoice_date', '<=', "{$to}-12-31");
         }
         if ($scope === 'fees') {

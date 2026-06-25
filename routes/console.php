@@ -49,3 +49,11 @@ Schedule::call(function () {
             ->delete();
     }
 })->dailyAt('01:00')->name('pace-correction-purge')->withoutOverlapping();
+
+// Rebuild the heavy report snapshots after the nightly invoice import (the only
+// thing that changes their numbers), so the report pages open instantly.
+Schedule::command('reports:refresh')
+    ->dailyAt('01:15')
+    ->name('report-snapshots-refresh')
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/report-snapshots.log'));
