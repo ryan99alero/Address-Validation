@@ -5,6 +5,7 @@ namespace App\Filament\Resources\AddressCorrections\Tables;
 use App\Filament\Resources\AddressCorrections\AddressCorrectionResource;
 use App\Models\Carrier;
 use App\Models\CorrectedAddress;
+use App\Support\AddressComparison;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -18,12 +19,28 @@ class AddressCorrectionsTable
         return $table
             ->columns([
                 TextColumn::make('full_address')
-                    ->label('Corrected (Good) Address')
-                    ->state(fn (CorrectedAddress $record): string => $record->full_address)
-                    ->weight('bold')
-                    ->wrap()
-                    ->color('success')
-                    ->description(fn (CorrectedAddress $record): ?string => self::sampleOriginal($record))
+                    ->label('Variation → Corrected (good)')
+                    ->html()
+                    ->state(function (CorrectedAddress $record): string {
+                        $variant = $record->variants->first();
+
+                        $original = $variant ? [
+                            'address1' => $variant->input_address_1,
+                            'city' => $variant->input_city,
+                            'state' => $variant->input_state,
+                            'zip' => $variant->input_postal,
+                        ] : [];
+
+                        $corrected = [
+                            'address1' => $record->address_1,
+                            'address2' => $record->address_2,
+                            'city' => $record->city,
+                            'state' => $record->state,
+                            'zip' => $record->postal,
+                        ];
+
+                        return AddressComparison::render($original, $corrected)->toHtml();
+                    })
                     // Search the corrected address itself...
                     ->searchable(['address_1', 'address_2', 'city', 'state', 'postal'])
                     ->sortable(['address_1']),
@@ -72,20 +89,5 @@ class AddressCorrectionsTable
                 ViewAction::make()
                     ->url(fn (CorrectedAddress $record): string => AddressCorrectionResource::getUrl('view', ['record' => $record])),
             ]);
-    }
-
-    /**
-     * Show one representative bad original under the corrected address.
-     */
-    protected static function sampleOriginal(CorrectedAddress $record): ?string
-    {
-        $variant = $record->variants->first();
-        if (! $variant) {
-            return null;
-        }
-
-        $parts = array_filter([$variant->input_address_1, $variant->input_city, $variant->input_state, $variant->input_postal]);
-
-        return 'was: '.implode(', ', $parts);
     }
 }
