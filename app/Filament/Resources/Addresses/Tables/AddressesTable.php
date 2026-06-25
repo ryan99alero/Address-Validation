@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Addresses\Tables;
 
 use App\Models\Address;
 use App\Models\Carrier;
+use App\Support\AddressComparison;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -74,35 +75,39 @@ class AddressesTable
                     ->label('Company')
                     ->searchable()
                     ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('input_address_1')
-                    ->label('Original Address')
+                TextColumn::make('comparison')
+                    ->label('Address (original → corrected)')
                     ->html()
-                    ->wrap()
-                    ->searchable()
-                    ->getStateUsing(fn (Address $record): string => self::addressBlock([
-                        'address1' => $record->input_address_1,
-                        'address2' => $record->input_address_2,
-                        'city' => $record->input_city,
-                        'state' => $record->input_state,
-                        'zip' => $record->input_postal,
-                    ], self::changedAddressFields($record), 'removed')),
-                TextColumn::make('output_address_1')
-                    ->label('Corrected Address')
-                    ->html()
-                    ->wrap()
-                    ->searchable(['output_address_1', 'output_city', 'output_state', 'output_postal'])
+                    ->searchable(['input_address_1', 'input_city', 'input_state', 'input_postal', 'output_address_1', 'output_city', 'output_state', 'output_postal'])
                     ->getStateUsing(function (Address $record): string {
+                        $original = [
+                            'name' => $record->input_name,
+                            'company' => $record->input_company,
+                            'address1' => $record->input_address_1,
+                            'address2' => $record->input_address_2,
+                            'city' => $record->input_city,
+                            'state' => $record->input_state,
+                            'zip' => $record->input_postal,
+                            'country' => $record->input_country,
+                        ];
+
                         if (empty($record->output_address_1)) {
-                            return '<span style="color:#6b7280">Not validated</span>';
+                            return AddressComparison::render($original, [])->toHtml()
+                                .'<div style="color:#6b7280;font-size:0.75rem;margin-top:2px">Not validated</div>';
                         }
 
-                        return self::addressBlock([
+                        $corrected = [
+                            'name' => $record->input_name,
+                            'company' => $record->input_company,
                             'address1' => $record->output_address_1,
                             'address2' => $record->output_address_2,
                             'city' => $record->output_city,
                             'state' => $record->output_state,
                             'zip' => $record->output_postal.($record->output_postal_ext ? '-'.$record->output_postal_ext : ''),
-                        ], self::changedAddressFields($record), 'added');
+                            'country' => $record->output_country ?: $record->input_country,
+                        ];
+
+                        return AddressComparison::render($original, $corrected)->toHtml();
                     }),
                 TextColumn::make('input_city')
                     ->label('City')
@@ -261,67 +266,5 @@ class AddressesTable
                     DeleteBulkAction::make(),
                 ]),
             ]);
-    }
-
-    /**
-     * Which address fields the validator actually changed (output differs from input).
-     *
-     * @return array<int, string>
-     */
-    protected static function changedAddressFields(Address $record): array
-    {
-        $pairs = [
-            'address1' => ['input_address_1', 'output_address_1'],
-            'address2' => ['input_address_2', 'output_address_2'],
-            'city' => ['input_city', 'output_city'],
-            'state' => ['input_state', 'output_state'],
-            'zip' => ['input_postal', 'output_postal'],
-        ];
-
-        $changed = [];
-        foreach ($pairs as $key => [$in, $out]) {
-            $outValue = trim((string) $record->{$out});
-            if ($outValue === '') {
-                continue;
-            }
-            if (strcasecmp(trim((string) $record->{$in}), $outValue) !== 0) {
-                $changed[] = $key;
-            }
-        }
-
-        return $changed;
-    }
-
-    /**
-     * Render an address as a clean two-line block. Changed fields are highlighted:
-     * 'removed' = red strike-through (the old value), 'added' = green/bold (the new value).
-     *
-     * @param  array<string, mixed>  $addr
-     * @param  array<int, string>  $changedFields
-     */
-    protected static function addressBlock(array $addr, array $changedFields = [], ?string $highlight = null): string
-    {
-        $fmt = function (string $field) use ($addr, $changedFields, $highlight): string {
-            $value = trim((string) ($addr[$field] ?? ''));
-            if ($value === '') {
-                return '';
-            }
-            $value = e($value);
-
-            if ($highlight !== null && in_array($field, $changedFields, true)) {
-                return $highlight === 'removed'
-                    ? '<span style="color:#ef4444;text-decoration:line-through">'.$value.'</span>'
-                    : '<span style="color:#22c55e;font-weight:600">'.$value.'</span>';
-            }
-
-            return $value;
-        };
-
-        $street = trim(implode(' ', array_filter([$fmt('address1'), $fmt('address2')])));
-        $cityState = implode(', ', array_filter([$fmt('city'), $fmt('state')]));
-        $lastLine = trim(implode(' ', array_filter([$cityState, $fmt('zip')])));
-        $lines = array_filter([$street, $lastLine]);
-
-        return empty($lines) ? '<span style="color:#6b7280">—</span>' : implode('<br>', $lines);
     }
 }

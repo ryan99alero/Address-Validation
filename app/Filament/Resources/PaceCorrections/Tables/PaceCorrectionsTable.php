@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PaceCorrections\Tables;
 
+use App\Support\AddressComparison;
 use Filament\Forms\Components\DatePicker;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
@@ -46,32 +47,20 @@ class PaceCorrectionsTable
                     ->badge()
                     ->getStateUsing(fn ($record): string => ($record->metadata['dry_run'] ?? false) ? 'Dry-run' : 'Live')
                     ->color(fn (string $state): string => $state === 'Dry-run' ? 'info' : 'gray'),
-                TextColumn::make('original')
-                    ->label('Original address')
+                TextColumn::make('comparison')
+                    ->label('Address (original → corrected)')
                     ->html()
-                    ->wrap()
-                    ->getStateUsing(fn ($record): string => self::addressBlock(
-                        $record->metadata['original'] ?? self::sideFromChanges($record->metadata['changes'] ?? [], 'from'),
-                        array_keys($record->metadata['changes'] ?? []),
-                        'removed'
-                    )),
-                TextColumn::make('corrected')
-                    ->label('Corrected address')
-                    ->html()
-                    ->wrap()
                     ->getStateUsing(function ($record): string {
                         if ($record->status === 'failed') {
-                            return '<span style="color:#ef4444">'.e(Str::limit((string) $record->error_message, 120)).'</span>';
+                            return '<span style="color:#ef4444">'.e(Str::limit((string) $record->error_message, 140)).'</span>';
                         }
 
-                        $changed = array_keys($record->metadata['changes'] ?? []);
-                        $block = self::addressBlock(
-                            $record->metadata['corrected'] ?? self::sideFromChanges($record->metadata['changes'] ?? [], 'to'),
-                            $changed,
-                            'added'
-                        );
+                        $changes = $record->metadata['changes'] ?? [];
+                        $original = $record->metadata['original'] ?? AddressComparison::fromChanges($changes, 'from');
+                        $corrected = $record->metadata['corrected'] ?? AddressComparison::fromChanges($changes, 'to');
+                        $html = AddressComparison::render($original, $corrected)->toHtml();
 
-                        return empty($changed) ? $block.'<br><span style="color:#6b7280">(no changes)</span>' : $block;
+                        return empty($changes) ? $html.'<div style="color:#6b7280;font-size:0.75rem;margin-top:2px">(no changes)</div>' : $html;
                     }),
                 TextColumn::make('source')
                     ->label('Validator')
@@ -96,56 +85,5 @@ class PaceCorrectionsTable
                             ->when($data['until'] ?? null, fn (Builder $q, $date): Builder => $q->whereDate('created_at', '<=', $date));
                     }),
             ]);
-    }
-
-    /**
-     * Render an address as a clean two-line block. Changed fields are highlighted:
-     * 'removed' = red strike-through (the old value), 'added' = green/bold (the new value).
-     *
-     * @param  array<string, mixed>|null  $addr
-     * @param  array<int, string>  $changedFields
-     */
-    protected static function addressBlock(?array $addr, array $changedFields = [], ?string $highlight = null): string
-    {
-        $addr = $addr ?: [];
-        $fmt = function (string $field) use ($addr, $changedFields, $highlight): string {
-            $value = trim((string) ($addr[$field] ?? ''));
-            if ($value === '') {
-                return '';
-            }
-            $value = e($value);
-
-            if ($highlight !== null && in_array($field, $changedFields, true)) {
-                return $highlight === 'removed'
-                    ? '<span style="color:#ef4444;text-decoration:line-through">'.$value.'</span>'
-                    : '<span style="color:#22c55e;font-weight:600">'.$value.'</span>';
-            }
-
-            return $value;
-        };
-
-        $street = trim(implode(' ', array_filter([$fmt('address1'), $fmt('address2')])));
-        $cityState = implode(', ', array_filter([$fmt('city'), $fmt('state')]));
-        $lastLine = trim(implode(' ', array_filter([$cityState, $fmt('zip')])));
-        $lines = array_filter([$street, $lastLine]);
-
-        return empty($lines) ? '<span style="color:#6b7280">—</span>' : implode('<br>', $lines);
-    }
-
-    /**
-     * Fallback for rows logged before original/corrected snapshots existed:
-     * reconstruct a partial address from the changes diff.
-     *
-     * @param  array<string, array{from?: mixed, to?: mixed}>  $changes
-     * @return array<string, mixed>
-     */
-    protected static function sideFromChanges(array $changes, string $side): array
-    {
-        $address = [];
-        foreach ($changes as $field => $fromTo) {
-            $address[$field] = $fromTo[$side] ?? null;
-        }
-
-        return $address;
     }
 }
