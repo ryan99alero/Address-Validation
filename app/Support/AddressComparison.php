@@ -38,6 +38,13 @@ class AddressComparison
             $old = trim((string) ($original[$key] ?? ''));
             $new = trim((string) ($corrected[$key] ?? ''));
 
+            // The corrected address displays in USPS-standard UPPERCASE (the original
+            // stays as received). The comparison below is case-insensitive, so a
+            // case-only difference is never flagged as a change.
+            if (in_array($key, ['address1', 'address2', 'city', 'state', 'country'], true)) {
+                $new = strtoupper($new);
+            }
+
             if ($old === '' && $new === '') {
                 continue;
             }
