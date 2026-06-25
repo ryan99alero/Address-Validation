@@ -51,7 +51,9 @@ class PaceCorrectionsTable
                     ->html()
                     ->wrap()
                     ->getStateUsing(fn ($record): string => self::addressBlock(
-                        $record->metadata['original'] ?? self::sideFromChanges($record->metadata['changes'] ?? [], 'from')
+                        $record->metadata['original'] ?? self::sideFromChanges($record->metadata['changes'] ?? [], 'from'),
+                        array_keys($record->metadata['changes'] ?? []),
+                        'removed'
                     )),
                 TextColumn::make('corrected')
                     ->label('Corrected address')
@@ -59,13 +61,14 @@ class PaceCorrectionsTable
                     ->wrap()
                     ->getStateUsing(function ($record): string {
                         if ($record->status === 'failed') {
-                            return '<span style="color:#dc2626">'.e(Str::limit((string) $record->error_message, 120)).'</span>';
+                            return '<span style="color:#ef4444">'.e(Str::limit((string) $record->error_message, 120)).'</span>';
                         }
 
                         $changed = array_keys($record->metadata['changes'] ?? []);
                         $block = self::addressBlock(
                             $record->metadata['corrected'] ?? self::sideFromChanges($record->metadata['changes'] ?? [], 'to'),
-                            $changed
+                            $changed,
+                            'added'
                         );
 
                         return empty($changed) ? $block.'<br><span style="color:#6b7280">(no changes)</span>' : $block;
@@ -96,22 +99,29 @@ class PaceCorrectionsTable
     }
 
     /**
-     * Render an address as a clean two-line block, bolding the changed fields.
+     * Render an address as a clean two-line block. Changed fields are highlighted:
+     * 'removed' = red strike-through (the old value), 'added' = green/bold (the new value).
      *
      * @param  array<string, mixed>|null  $addr
-     * @param  array<int, string>  $boldFields
+     * @param  array<int, string>  $changedFields
      */
-    protected static function addressBlock(?array $addr, array $boldFields = []): string
+    protected static function addressBlock(?array $addr, array $changedFields = [], ?string $highlight = null): string
     {
         $addr = $addr ?: [];
-        $fmt = function (string $field) use ($addr, $boldFields): string {
+        $fmt = function (string $field) use ($addr, $changedFields, $highlight): string {
             $value = trim((string) ($addr[$field] ?? ''));
             if ($value === '') {
                 return '';
             }
             $value = e($value);
 
-            return in_array($field, $boldFields, true) ? '<strong>'.$value.'</strong>' : $value;
+            if ($highlight !== null && in_array($field, $changedFields, true)) {
+                return $highlight === 'removed'
+                    ? '<span style="color:#ef4444;text-decoration:line-through">'.$value.'</span>'
+                    : '<span style="color:#22c55e;font-weight:600">'.$value.'</span>';
+            }
+
+            return $value;
         };
 
         $street = trim(implode(' ', array_filter([$fmt('address1'), $fmt('address2')])));
