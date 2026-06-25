@@ -120,6 +120,13 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             foreach ($diff as $field => $fromTo) {
                 $correctedSnapshot[$field] = $fromTo['to'] ?? null;
             }
+            // The corrected address is the CASS-standard answer — uppercase it (the
+            // original stays as received). Name/company/zip are left untouched.
+            foreach (['address1', 'address2', 'city', 'state', 'country'] as $field) {
+                if (! empty($correctedSnapshot[$field])) {
+                    $correctedSnapshot[$field] = mb_strtoupper((string) $correctedSnapshot[$field]);
+                }
+            }
 
             SystemLog::create([
                 'category' => 'integration',
