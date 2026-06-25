@@ -46,28 +46,29 @@ class PaceCorrectionsTable
                     ->badge()
                     ->getStateUsing(fn ($record): string => ($record->metadata['dry_run'] ?? false) ? 'Dry-run' : 'Live')
                     ->color(fn (string $state): string => $state === 'Dry-run' ? 'info' : 'gray'),
-                TextColumn::make('changes')
-                    ->label('Field changes (old → new)')
+                TextColumn::make('original')
+                    ->label('Original address')
+                    ->html()
+                    ->wrap()
+                    ->getStateUsing(fn ($record): string => self::addressBlock(
+                        $record->metadata['original'] ?? self::sideFromChanges($record->metadata['changes'] ?? [], 'from')
+                    )),
+                TextColumn::make('corrected')
+                    ->label('Corrected address')
                     ->html()
                     ->wrap()
                     ->getStateUsing(function ($record): string {
                         if ($record->status === 'failed') {
-                            return '<span style="color:#dc2626">'.e(Str::limit((string) $record->error_message, 140)).'</span>';
+                            return '<span style="color:#dc2626">'.e(Str::limit((string) $record->error_message, 120)).'</span>';
                         }
 
-                        $changes = $record->metadata['changes'] ?? [];
-                        if (empty($changes)) {
-                            return '<span style="color:#6b7280">validated — no changes</span>';
-                        }
+                        $changed = array_keys($record->metadata['changes'] ?? []);
+                        $block = self::addressBlock(
+                            $record->metadata['corrected'] ?? self::sideFromChanges($record->metadata['changes'] ?? [], 'to'),
+                            $changed
+                        );
 
-                        $lines = [];
-                        foreach ($changes as $field => $fromTo) {
-                            $from = (string) ($fromTo['from'] ?? '');
-                            $to = (string) ($fromTo['to'] ?? '');
-                            $lines[] = '<strong>'.e($field).'</strong>: '.e($from).' → <strong>'.e($to).'</strong>';
-                        }
-
-                        return implode('<br>', $lines);
+                        return empty($changed) ? $block.'<br><span style="color:#6b7280">(no changes)</span>' : $block;
                     }),
                 TextColumn::make('source')
                     ->label('Validator')
@@ -92,5 +93,49 @@ class PaceCorrectionsTable
                             ->when($data['until'] ?? null, fn (Builder $q, $date): Builder => $q->whereDate('created_at', '<=', $date));
                     }),
             ]);
+    }
+
+    /**
+     * Render an address as a clean two-line block, bolding the changed fields.
+     *
+     * @param  array<string, mixed>|null  $addr
+     * @param  array<int, string>  $boldFields
+     */
+    protected static function addressBlock(?array $addr, array $boldFields = []): string
+    {
+        $addr = $addr ?: [];
+        $fmt = function (string $field) use ($addr, $boldFields): string {
+            $value = trim((string) ($addr[$field] ?? ''));
+            if ($value === '') {
+                return '';
+            }
+            $value = e($value);
+
+            return in_array($field, $boldFields, true) ? '<strong>'.$value.'</strong>' : $value;
+        };
+
+        $street = trim(implode(' ', array_filter([$fmt('address1'), $fmt('address2')])));
+        $cityState = implode(', ', array_filter([$fmt('city'), $fmt('state')]));
+        $lastLine = trim(implode(' ', array_filter([$cityState, $fmt('zip')])));
+        $lines = array_filter([$street, $lastLine]);
+
+        return empty($lines) ? '<span style="color:#6b7280">—</span>' : implode('<br>', $lines);
+    }
+
+    /**
+     * Fallback for rows logged before original/corrected snapshots existed:
+     * reconstruct a partial address from the changes diff.
+     *
+     * @param  array<string, array{from?: mixed, to?: mixed}>  $changes
+     * @return array<string, mixed>
+     */
+    protected static function sideFromChanges(array $changes, string $side): array
+    {
+        $address = [];
+        foreach ($changes as $field => $fromTo) {
+            $address[$field] = $fromTo[$side] ?? null;
+        }
+
+        return $address;
     }
 }
