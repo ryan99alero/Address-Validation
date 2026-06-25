@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PaceCorrections\Tables;
 
+use App\Models\Carrier;
 use App\Support\AddressComparison;
 use Filament\Forms\Components\DatePicker;
 use Filament\Tables\Columns\TextColumn;
@@ -72,7 +73,7 @@ class PaceCorrectionsTable
                 TextColumn::make('source')
                     ->label('Validator')
                     ->badge()
-                    ->getStateUsing(fn ($record): string => (string) ($record->metadata['source'] ?? '—')),
+                    ->getStateUsing(fn ($record): string => self::validatorLabel($record->metadata['source'] ?? null)),
             ])
             ->filters([
                 SelectFilter::make('status')
@@ -81,6 +82,10 @@ class PaceCorrectionsTable
                         'skipped' => 'Skipped (not validated)',
                         'failed' => 'Failed',
                     ]),
+                SelectFilter::make('source')
+                    ->label('Validator')
+                    ->options(fn (): array => self::validatorOptions())
+                    ->query(fn (Builder $query, array $data): Builder => $query->when($data['value'] ?? null, fn (Builder $q, $value): Builder => $q->where('metadata->source', $value))),
                 Filter::make('created_at')
                     ->schema([
                         DatePicker::make('from')->label('From'),
@@ -92,5 +97,37 @@ class PaceCorrectionsTable
                             ->when($data['until'] ?? null, fn (Builder $q, $date): Builder => $q->whereDate('created_at', '<=', $date));
                     }),
             ]);
+    }
+
+    /**
+     * Validator filter options: the active address-validation carriers (UPS, FedEx,
+     * Smarty…) keyed by their source value, plus the local cache.
+     *
+     * @return array<string, string>
+     */
+    protected static function validatorOptions(): array
+    {
+        $options = ['local_cache' => 'Local Cache'];
+
+        foreach (Carrier::query()->orderBy('name')->pluck('name', 'slug') as $slug => $name) {
+            $options[$slug.'_api'] = $name;
+        }
+
+        return $options;
+    }
+
+    /**
+     * Friendly label for a stored validation source value.
+     */
+    protected static function validatorLabel(?string $source): string
+    {
+        return match ($source) {
+            'local_cache' => 'Local Cache',
+            'ups_api' => 'UPS',
+            'fedex_api' => 'FedEx',
+            'smarty_api' => 'Smarty',
+            'usps_api' => 'USPS',
+            default => $source ? ucfirst(str_replace('_api', '', $source)) : '—',
+        };
     }
 }

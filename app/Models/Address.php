@@ -20,6 +20,8 @@ class Address extends Model
 
     public const SOURCE_FEDEX_API = 'fedex_api';
 
+    public const SOURCE_SMARTY_API = 'smarty_api';
+
     public const SOURCE_USPS_API = 'usps_api';
 
     public const SOURCE_MANUAL = 'manual';

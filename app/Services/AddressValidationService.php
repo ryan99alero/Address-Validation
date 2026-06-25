@@ -99,6 +99,7 @@ class AddressValidationService
             'ups' => Address::SOURCE_UPS_API,
             'fedex' => Address::SOURCE_FEDEX_API,
             'usps' => Address::SOURCE_USPS_API,
+            'smarty' => Address::SOURCE_SMARTY_API,
             default => Address::SOURCE_UPS_API,
         };
 

@@ -45,7 +45,7 @@ class AddressesTable
                     ->badge()
                     ->color(fn (?string $state): string => match ($state) {
                         'local_cache' => 'success',
-                        'fedex_api', 'ups_api', 'usps_api' => 'warning',
+                        'fedex_api', 'ups_api', 'usps_api', 'smarty_api' => 'warning',
                         'manual' => 'info',
                         default => 'gray',
                     })
@@ -54,6 +54,7 @@ class AddressesTable
                         'fedex_api' => 'FedEx API',
                         'ups_api' => 'UPS API',
                         'usps_api' => 'USPS API',
+                        'smarty_api' => 'Smarty API',
                         'manual' => 'Manual',
                         default => '-',
                     })
@@ -178,6 +179,7 @@ class AddressesTable
                         'fedex_api' => 'FedEx API',
                         'ups_api' => 'UPS API',
                         'usps_api' => 'USPS API',
+                        'smarty_api' => 'Smarty API',
                         'manual' => 'Manual',
                     ]),
 
