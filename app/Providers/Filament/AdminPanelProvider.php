@@ -35,6 +35,10 @@ class AdminPanelProvider extends PanelProvider
             ->login(Login::class)
             ->brandName('Address Validation')
             ->darkMode(true)
+            // Bell (top-right) with an unread-count badge — where completed exports
+            // land with a Download link, so no email/mail server is needed.
+            ->databaseNotifications()
+            ->databaseNotificationsPolling('30s')
             ->colors([
                 'primary' => Color::Amber,
             ])
