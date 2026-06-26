@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\MailIntegrations;
 
+use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\MailIntegrations\Pages\CreateMailIntegration;
 use App\Filament\Resources\MailIntegrations\Pages\EditMailIntegration;
 use App\Filament\Resources\MailIntegrations\Pages\ListMailIntegrations;
@@ -17,6 +18,8 @@ use UnitEnum;
 
 class MailIntegrationResource extends Resource
 {
+    use AdminOnly;
+
     protected static ?string $model = MailIntegration::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedEnvelope;

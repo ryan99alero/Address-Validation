@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\IntegrationConnections;
 
+use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\IntegrationConnections\Pages\CreateIntegrationConnection;
 use App\Filament\Resources\IntegrationConnections\Pages\EditIntegrationConnection;
 use App\Filament\Resources\IntegrationConnections\Pages\ListIntegrationConnections;
@@ -17,6 +18,8 @@ use UnitEnum;
 
 class IntegrationConnectionResource extends Resource
 {
+    use AdminOnly;
+
     protected static ?string $model = IntegrationConnection::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-server-stack';

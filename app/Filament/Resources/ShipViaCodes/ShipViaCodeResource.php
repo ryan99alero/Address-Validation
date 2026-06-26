@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ShipViaCodes;
 
+use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\ShipViaCodes\Pages\CreateShipViaCode;
 use App\Filament\Resources\ShipViaCodes\Pages\EditShipViaCode;
 use App\Filament\Resources\ShipViaCodes\Pages\ListShipViaCodes;
@@ -17,6 +18,8 @@ use UnitEnum;
 
 class ShipViaCodeResource extends Resource
 {
+    use AdminOnly;
+
     protected static ?string $model = ShipViaCode::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTruck;

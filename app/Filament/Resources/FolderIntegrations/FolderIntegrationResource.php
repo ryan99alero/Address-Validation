@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\FolderIntegrations;
 
+use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\FolderIntegrations\Pages\CreateFolderIntegration;
 use App\Filament\Resources\FolderIntegrations\Pages\EditFolderIntegration;
 use App\Filament\Resources\FolderIntegrations\Pages\ListFolderIntegrations;
@@ -17,6 +18,8 @@ use UnitEnum;
 
 class FolderIntegrationResource extends Resource
 {
+    use AdminOnly;
+
     protected static ?string $model = FolderIntegration::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedFolderOpen;

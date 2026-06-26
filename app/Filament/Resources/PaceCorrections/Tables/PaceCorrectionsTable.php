@@ -2,8 +2,10 @@
 
 namespace App\Filament\Resources\PaceCorrections\Tables;
 
+use App\Filament\Exports\PaceCorrectionExporter;
 use App\Models\Carrier;
 use App\Support\AddressComparison;
+use Filament\Actions\ExportBulkAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
@@ -96,6 +98,11 @@ class PaceCorrectionsTable
                             ->when($data['from'] ?? null, fn (Builder $q, $date): Builder => $q->whereDate('created_at', '>=', $date))
                             ->when($data['until'] ?? null, fn (Builder $q, $date): Builder => $q->whereDate('created_at', '<=', $date));
                     }),
+            ])
+            ->toolbarActions([
+                ExportBulkAction::make()
+                    ->label('Export to Excel')
+                    ->exporter(PaceCorrectionExporter::class),
             ]);
     }
 

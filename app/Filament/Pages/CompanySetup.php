@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Concerns\AdminOnly;
 use App\Models\CompanySetting;
 use App\Services\DynamicFieldService;
 use BackedEnum;
@@ -21,6 +22,7 @@ use UnitEnum;
 
 class CompanySetup extends Page implements HasSchemas
 {
+    use AdminOnly;
     use InteractsWithSchemas;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBuildingOffice2;
