@@ -2,9 +2,8 @@
 
 namespace App\Filament\Pages;
 
-use App\Contracts\ReportSnapshotProvider;
-use App\Filament\Pages\Concerns\HasReportSnapshots;
 use App\Models\Carrier;
+use App\Models\CarrierChargeRollup;
 use App\Services\InflationIndex;
 use BackedEnum;
 use Filament\Forms\Components\Select;
@@ -21,23 +20,9 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
-class CarrierFeeSummary extends Page implements HasTable, ReportSnapshotProvider
+class CarrierFeeSummary extends Page implements HasTable
 {
-    use HasReportSnapshots;
     use InteractsWithTable;
-
-    public static function reportKey(): string
-    {
-        return 'carrier_fee_summary';
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public static function defaultFilters(): array
-    {
-        return ['carrier_id' => null, 'year_from' => null, 'year_to' => null, 'scope' => 'fees', 'basis' => 'nominal'];
-    }
 
     /**
      * @return array<string, mixed>
@@ -68,7 +53,7 @@ class CarrierFeeSummary extends Page implements HasTable, ReportSnapshotProvider
     public function table(Table $table): Table
     {
         return $table
-            ->records(fn (): Collection => $this->reportRecords(fn (array $filters): Collection => static::computeData($filters)))
+            ->records(fn (): Collection => static::computeData($this->currentFilters()))
             ->columns([
                 TextColumn::make('category')
                     ->label('Fee Category')
@@ -142,30 +127,35 @@ class CarrierFeeSummary extends Page implements HasTable, ReportSnapshotProvider
         $to = $filters['year_to'] ?? null;
         $scope = $filters['scope'] ?? 'fees';
         $real = ($filters['basis'] ?? 'nominal') === 'real';
-        $amount = $real ? 'cc.amount * '.InflationIndex::sqlFactor('cc.invoice_date') : 'cc.amount';
+        $weigh = fn (int $year, float $amount): float => $real ? $amount * InflationIndex::factor($year) : $amount;
 
-        $query = DB::table('carrier_charges as cc')
-            ->leftJoin('charge_categories as cat', 'cat.id', '=', 'cc.charge_category_id')
-            ->leftJoin('carriers as car', 'car.id', '=', 'cc.carrier_id')
-            ->selectRaw("COALESCE(cat.name, \"(Uncategorized)\") as category, car.name as carrier, COUNT(*) as times, SUM({$amount}) as total")
-            ->groupBy('category', 'carrier');
+        // Read the rollup (few hundred rows) instead of the 3.4M-row charges table.
+        $rows = CarrierChargeRollup::query()
+            ->leftJoin('charge_categories as cat', 'cat.id', '=', 'carrier_charge_rollup.charge_category_id')
+            ->join('carriers as car', 'car.id', '=', 'carrier_charge_rollup.carrier_id')
+            ->when($carrierId, fn ($q) => $q->where('carrier_charge_rollup.carrier_id', $carrierId))
+            ->when($from, fn ($q) => $q->where('year', '>=', $from))
+            ->when($to, fn ($q) => $q->where('year', '<=', $to))
+            ->when($scope === 'fees', fn ($q) => $q->where(function ($w): void {
+                $w->whereNull('cat.name')->orWhere('cat.name', '!=', 'Base Transportation');
+            }))
+            ->get([
+                'carrier_charge_rollup.year',
+                'carrier_charge_rollup.charge_count',
+                'carrier_charge_rollup.total_amount',
+                DB::raw('COALESCE(cat.name, \'(Uncategorized)\') as category'),
+                DB::raw('car.name as carrier'),
+            ])
+            ->groupBy(fn ($r): string => $r->category.'|'.$r->carrier)
+            ->map(fn ($group): object => (object) [
+                'category' => $group->first()->category,
+                'carrier' => $group->first()->carrier,
+                'times' => (int) $group->sum('charge_count'),
+                'total' => $group->sum(fn ($r): float => $weigh((int) $r->year, (float) $r->total_amount)),
+            ])
+            ->sortByDesc('total')
+            ->values();
 
-        if ($carrierId) {
-            $query->where('cc.carrier_id', $carrierId);
-        }
-        if ($from) {
-            $query->whereDate('cc.invoice_date', '>=', "{$from}-01-01");
-        }
-        if ($to) {
-            $query->whereDate('cc.invoice_date', '<=', "{$to}-12-31");
-        }
-        if ($scope === 'fees') {
-            $query->where(function ($q): void {
-                $q->whereNull('cat.name')->orWhere('cat.name', '!=', 'Base Transportation');
-            });
-        }
-
-        $rows = $query->orderByDesc('total')->get();
         $grandTotal = (float) $rows->sum('total') ?: 1.0;
 
         return $rows->values()->map(fn ($r, $i): array => [

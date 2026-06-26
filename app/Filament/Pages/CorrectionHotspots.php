@@ -2,8 +2,6 @@
 
 namespace App\Filament\Pages;
 
-use App\Contracts\ReportSnapshotProvider;
-use App\Filament\Pages\Concerns\HasReportSnapshots;
 use App\Models\Carrier;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -18,23 +16,9 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
-class CorrectionHotspots extends Page implements HasTable, ReportSnapshotProvider
+class CorrectionHotspots extends Page implements HasTable
 {
-    use HasReportSnapshots;
     use InteractsWithTable;
-
-    public static function reportKey(): string
-    {
-        return 'correction_hotspots';
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public static function defaultFilters(): array
-    {
-        return ['carrier_id' => null, 'min' => 5];
-    }
 
     /**
      * @return array<string, mixed>
@@ -60,7 +44,7 @@ class CorrectionHotspots extends Page implements HasTable, ReportSnapshotProvide
     public function table(Table $table): Table
     {
         return $table
-            ->records(fn (): Collection => $this->reportRecords(fn (array $filters): Collection => static::computeData($filters)))
+            ->records(fn (): Collection => static::computeData($this->currentFilters()))
             ->columns([
                 TextColumn::make('location')->label('Street Cluster')->weight('bold')->wrap(),
                 TextColumn::make('city_state_zip')->label('City / State / Zip'),

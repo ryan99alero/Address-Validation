@@ -2,9 +2,9 @@
 
 namespace App\Filament\Pages;
 
-use App\Contracts\ReportSnapshotProvider;
-use App\Filament\Pages\Concerns\HasReportSnapshots;
 use App\Models\Carrier;
+use App\Models\CarrierChargeRollup;
+use App\Models\CarrierShipRollup;
 use BackedEnum;
 use Filament\Forms\Components\Select;
 use Filament\Pages\Page;
@@ -20,23 +20,9 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
-class CarrierCorrectionAudit extends Page implements HasTable, ReportSnapshotProvider
+class CarrierCorrectionAudit extends Page implements HasTable
 {
-    use HasReportSnapshots;
     use InteractsWithTable;
-
-    public static function reportKey(): string
-    {
-        return 'carrier_correction_audit';
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public static function defaultFilters(): array
-    {
-        return ['segment' => 'severity_category', 'year_from' => null, 'year_to' => null];
-    }
 
     /**
      * @return array<string, mixed>
@@ -65,7 +51,7 @@ class CarrierCorrectionAudit extends Page implements HasTable, ReportSnapshotPro
     public function table(Table $table): Table
     {
         return $table
-            ->records(fn (): Collection => $this->reportRecords(fn (array $filters): Collection => static::computeData($filters)))
+            ->records(fn (): Collection => static::computeData($this->currentFilters()))
             ->columns([
                 TextColumn::make('segment')->label('Correction Type')->weight('bold'),
                 TextColumn::make('ups_count')->label('UPS #')->numeric()->alignEnd()->color('gray'),
@@ -117,27 +103,28 @@ class CarrierCorrectionAudit extends Page implements HasTable, ReportSnapshotPro
         $upsId = $carriers->search('ups');
         $fedexId = $carriers->search('fedex');
 
-        // Denominator: shipments per carrier (distinct tracking in carrier_charges).
-        $ships = DB::table('carrier_charges as cc')
-            ->when($from, fn ($q) => $q->whereDate('cc.invoice_date', '>=', "{$from}-01-01"))
-            ->when($to, fn ($q) => $q->whereDate('cc.invoice_date', '<=', "{$to}-12-31"))
-            ->selectRaw('cc.carrier_id, COUNT(DISTINCT cc.tracking_number) AS ships')
-            ->groupBy('cc.carrier_id')
-            ->pluck('ships', 'carrier_id');
+        // Denominator: shipments per carrier, summed from the ship rollup.
+        $ships = CarrierShipRollup::query()
+            ->when($from, fn ($q) => $q->where('year', '>=', $from))
+            ->when($to, fn ($q) => $q->where('year', '<=', $to))
+            ->get()
+            ->groupBy('carrier_id')
+            ->map(fn ($rows): int => (int) $rows->sum('total_ships'));
 
         $upsShips = max(1, (int) ($ships[$upsId] ?? 0));
         $fedexShips = max(1, (int) ($ships[$fedexId] ?? 0));
 
-        // RELIABLE total: Address Correction *charges* (captured for both carriers,
-        // unlike address-detail lines which FedEx CSV imports don't produce).
-        $totalCorrections = DB::table('carrier_charges as cc')
-            ->join('charge_categories as cat', 'cat.id', '=', 'cc.charge_category_id')
+        // RELIABLE total: Address Correction *charges* per carrier (from the rollup;
+        // captured for both carriers, unlike address-detail lines which FedEx CSV
+        // imports don't produce).
+        $totalCorrections = CarrierChargeRollup::query()
+            ->join('charge_categories as cat', 'cat.id', '=', 'carrier_charge_rollup.charge_category_id')
             ->where('cat.name', 'Address Correction')
-            ->when($from, fn ($q) => $q->whereDate('cc.invoice_date', '>=', "{$from}-01-01"))
-            ->when($to, fn ($q) => $q->whereDate('cc.invoice_date', '<=', "{$to}-12-31"))
-            ->selectRaw('cc.carrier_id, COUNT(*) AS n')
-            ->groupBy('cc.carrier_id')
-            ->pluck('n', 'carrier_id');
+            ->when($from, fn ($q) => $q->where('year', '>=', $from))
+            ->when($to, fn ($q) => $q->where('year', '<=', $to))
+            ->get(['carrier_id', 'charge_count'])
+            ->groupBy('carrier_id')
+            ->map(fn ($rows): int => (int) $rows->sum('charge_count'));
 
         // Severity/change segmentation: only available where we captured the
         // address detail (a graded line). Complete for UPS, partial for FedEx.

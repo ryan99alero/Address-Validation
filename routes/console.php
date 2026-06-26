@@ -50,10 +50,11 @@ Schedule::call(function () {
     }
 })->dailyAt('01:00')->name('pace-correction-purge')->withoutOverlapping();
 
-// Rebuild the heavy report snapshots after the nightly invoice import (the only
-// thing that changes their numbers), so the report pages open instantly.
-Schedule::command('reports:refresh')
+// Rebuild the carrier reporting rollups after the nightly invoice import (the only
+// thing that changes the numbers), so every report + filter stays instant. Imports
+// and deletions also trigger a rebuild via the CarrierInvoice observer.
+Schedule::command('reports:rebuild')
     ->dailyAt('01:15')
-    ->name('report-snapshots-refresh')
+    ->name('carrier-rollups-rebuild')
     ->withoutOverlapping()
-    ->appendOutputTo(storage_path('logs/report-snapshots.log'));
+    ->appendOutputTo(storage_path('logs/report-rollups.log'));

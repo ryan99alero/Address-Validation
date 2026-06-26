@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Observers\CarrierInvoiceObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+#[ObservedBy([CarrierInvoiceObserver::class])]
 class CarrierInvoice extends Model
 {
     public const STATUS_PENDING = 'pending';

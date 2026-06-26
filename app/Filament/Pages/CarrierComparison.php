@@ -2,9 +2,9 @@
 
 namespace App\Filament\Pages;
 
-use App\Contracts\ReportSnapshotProvider;
-use App\Filament\Pages\Concerns\HasReportSnapshots;
 use App\Models\Carrier;
+use App\Models\CarrierChargeRollup;
+use App\Models\CarrierShipRollup;
 use App\Services\InflationIndex;
 use BackedEnum;
 use Filament\Forms\Components\Select;
@@ -21,23 +21,9 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
-class CarrierComparison extends Page implements HasTable, ReportSnapshotProvider
+class CarrierComparison extends Page implements HasTable
 {
-    use HasReportSnapshots;
     use InteractsWithTable;
-
-    public static function reportKey(): string
-    {
-        return 'carrier_comparison';
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public static function defaultFilters(): array
-    {
-        return ['metric' => 'avg', 'basis' => 'nominal', 'year_from' => null, 'year_to' => null];
-    }
 
     /**
      * @return array<string, mixed>
@@ -67,7 +53,7 @@ class CarrierComparison extends Page implements HasTable, ReportSnapshotProvider
     public function table(Table $table): Table
     {
         return $table
-            ->records(fn (): Collection => $this->reportRecords(fn (array $filters): Collection => static::computeData($filters)))
+            ->records(fn (): Collection => static::computeData($this->currentFilters()))
             ->columns([
                 TextColumn::make('category')->label('Fee Category')->weight('bold'),
                 TextColumn::make('ups')->label('UPS')->alignEnd()
@@ -131,32 +117,52 @@ class CarrierComparison extends Page implements HasTable, ReportSnapshotProvider
         $from = $filters['year_from'] ?? null;
         $to = $filters['year_to'] ?? null;
 
-        // Optionally restate dollars in constant base-year terms.
+        // Optionally restate dollars in constant base-year terms. The rollup is
+        // summarised by year, so CPI is applied per-year in PHP.
         $real = ($filters['basis'] ?? 'nominal') === 'real';
-        $amount = $real ? 'cc.amount * '.InflationIndex::sqlFactor('cc.invoice_date') : 'cc.amount';
+        $weigh = fn (int $year, float $amount): float => $real ? $amount * InflationIndex::factor($year) : $amount;
 
         $carriers = Carrier::whereIn('slug', ['ups', 'fedex'])->pluck('slug', 'id');
         $upsId = $carriers->search('ups');
         $fedexId = $carriers->search('fedex');
 
-        // Per carrier+category: fee dollars + shipments that incurred the fee.
-        $byCat = DB::table('carrier_charges as cc')
-            ->leftJoin('charge_categories as cat', 'cat.id', '=', 'cc.charge_category_id')
-            ->selectRaw("cc.carrier_id, COALESCE(cat.name, \"(Uncategorized)\") as category, SUM({$amount}) as amount, COUNT(DISTINCT cc.tracking_number) as ships, COUNT(*) as charge_count")
-            ->when($from, fn ($q) => $q->whereDate('cc.invoice_date', '>=', "{$from}-01-01"))
-            ->when($to, fn ($q) => $q->whereDate('cc.invoice_date', '<=', "{$to}-12-31"))
-            ->groupBy('cc.carrier_id', 'category')
-            ->get();
+        // Per carrier+category: fee dollars + shipments that incurred the fee — read
+        // from the rollup (few hundred rows) and summed across the year range.
+        $byCat = CarrierChargeRollup::query()
+            ->leftJoin('charge_categories as cat', 'cat.id', '=', 'carrier_charge_rollup.charge_category_id')
+            ->when($from, fn ($q) => $q->where('year', '>=', $from))
+            ->when($to, fn ($q) => $q->where('year', '<=', $to))
+            ->get([
+                'carrier_id', 'year', 'charge_count', 'total_amount', 'distinct_ships',
+                DB::raw('COALESCE(cat.name, \'(Uncategorized)\') as category'),
+            ])
+            ->groupBy(fn ($r): string => $r->carrier_id.'|'.$r->category)
+            ->map(fn ($rows): object => (object) [
+                'carrier_id' => (int) $rows->first()->carrier_id,
+                'category' => $rows->first()->category,
+                'amount' => $rows->sum(fn ($r): float => $weigh((int) $r->year, (float) $r->total_amount)),
+                'ships' => (int) $rows->sum('distinct_ships'),
+                'charge_count' => (int) $rows->sum('charge_count'),
+            ])
+            ->values();
 
-        // Per carrier denominators: total shipments + base-transport spend.
-        $totals = DB::table('carrier_charges as cc')
-            ->leftJoin('charge_categories as cat', 'cat.id', '=', 'cc.charge_category_id')
-            ->selectRaw("cc.carrier_id, COUNT(DISTINCT cc.tracking_number) as total_ships, SUM(CASE WHEN cat.name = \"Base Transportation\" THEN {$amount} ELSE 0 END) as base_spend, COUNT(DISTINCT CASE WHEN (cat.name IS NULL OR cat.name NOT IN (\"Base Transportation\", \"Discount / Credit\")) AND cc.amount > 0 THEN cc.tracking_number END) as aux_ships")
-            ->when($from, fn ($q) => $q->whereDate('cc.invoice_date', '>=', "{$from}-01-01"))
-            ->when($to, fn ($q) => $q->whereDate('cc.invoice_date', '<=', "{$to}-12-31"))
-            ->groupBy('cc.carrier_id')
+        // Per carrier denominators: total + auxiliary ships from the ship rollup,
+        // base-transport spend from the Base Transportation rows above.
+        $shipsByCarrier = CarrierShipRollup::query()
+            ->when($from, fn ($q) => $q->where('year', '>=', $from))
+            ->when($to, fn ($q) => $q->where('year', '<=', $to))
             ->get()
-            ->keyBy('carrier_id');
+            ->groupBy('carrier_id');
+
+        $totals = collect([$upsId, $fedexId])->filter()->mapWithKeys(function ($carrierId) use ($shipsByCarrier, $byCat): array {
+            $carrierShips = $shipsByCarrier->get($carrierId) ?? collect();
+
+            return [$carrierId => (object) [
+                'total_ships' => (int) $carrierShips->sum('total_ships'),
+                'aux_ships' => (int) $carrierShips->sum('aux_ships'),
+                'base_spend' => $byCat->filter(fn ($r): bool => $r->carrier_id === (int) $carrierId && $r->category === 'Base Transportation')->sum('amount'),
+            ]];
+        });
 
         $value = function (?object $row, ?object $tot) use ($metric): float {
             if (! $row || ! $tot) {
