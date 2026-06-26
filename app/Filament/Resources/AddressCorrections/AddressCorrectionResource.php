@@ -4,6 +4,7 @@ namespace App\Filament\Resources\AddressCorrections;
 
 use App\Filament\Resources\AddressCorrections\Pages\ListAddressCorrections;
 use App\Filament\Resources\AddressCorrections\Pages\ViewAddressCorrection;
+use App\Filament\Resources\AddressCorrections\RelationManagers\InvoiceSourcesRelationManager;
 use App\Filament\Resources\AddressCorrections\RelationManagers\VariationsRelationManager;
 use App\Filament\Resources\AddressCorrections\Tables\AddressCorrectionsTable;
 use App\Models\CorrectedAddress;
@@ -40,6 +41,7 @@ class AddressCorrectionResource extends Resource
     {
         return [
             VariationsRelationManager::class,
+            InvoiceSourcesRelationManager::class,
         ];
     }
 
