@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Services\CarrierRollupService;
+use App\Services\ShipmentSummaryService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -23,8 +24,9 @@ class RebuildCarrierRollup implements ShouldBeUnique, ShouldQueue
         return 'carrier-rollup';
     }
 
-    public function handle(CarrierRollupService $service): void
+    public function handle(CarrierRollupService $rollups, ShipmentSummaryService $shipments): void
     {
-        $service->rebuild();
+        $rollups->rebuild();
+        $shipments->rebuild();
     }
 }
