@@ -44,7 +44,19 @@ class CorrectionHotspots extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->records(fn (): Collection => static::computeData($this->currentFilters()))
+            ->records(function (?string $sortColumn, ?string $sortDirection): Collection {
+                $records = static::computeData($this->currentFilters());
+
+                // computeData returns the top hotspots by fees; honour the clicked
+                // column header by re-sorting the collection (Filament paginates it).
+                if ($sortColumn !== null) {
+                    $records = ($sortDirection === 'desc'
+                        ? $records->sortByDesc($sortColumn)
+                        : $records->sortBy($sortColumn))->values();
+                }
+
+                return $records;
+            })
             ->columns([
                 TextColumn::make('location')->label('Street Cluster')->weight('bold')->wrap(),
                 TextColumn::make('city_state_zip')->label('City / State / Zip'),
