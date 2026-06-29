@@ -4,12 +4,14 @@ namespace App\Filament\Pages;
 
 use App\Models\Carrier;
 use BackedEnum;
+use Filament\Forms\Components\TextInput;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Enums\FiltersLayout;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
@@ -28,6 +30,8 @@ class CorrectionHotspots extends Page implements HasTable
         return [
             'carrier_id' => $this->getTableFilterState('carrier_id')['value'] ?? null,
             'min' => (int) ($this->getTableFilterState('min')['value'] ?? 5),
+            'address' => $this->getTableFilterState('address')['value'] ?? null,
+            'tracking' => $this->getTableFilterState('tracking')['value'] ?? null,
         ];
     }
 
@@ -75,6 +79,20 @@ class CorrectionHotspots extends Page implements HasTable
                     ->options([3 => '3+', 5 => '5+', 10 => '10+', 25 => '25+'])
                     ->default(5)
                     ->selectablePlaceholder(false),
+                Filter::make('address')
+                    ->schema([
+                        TextInput::make('value')
+                            ->label('Address contains')
+                            ->placeholder('street, city, state, or zip'),
+                    ])
+                    ->indicateUsing(fn (array $data): ?string => filled($data['value'] ?? null) ? 'Address: '.$data['value'] : null),
+                Filter::make('tracking')
+                    ->schema([
+                        TextInput::make('value')
+                            ->label('Tracking / Shipment #')
+                            ->placeholder('tracking number'),
+                    ])
+                    ->indicateUsing(fn (array $data): ?string => filled($data['value'] ?? null) ? 'Tracking: '.$data['value'] : null),
             ], layout: FiltersLayout::AboveContent)
             ->paginated([25, 50, 100]);
     }
@@ -86,7 +104,14 @@ class CorrectionHotspots extends Page implements HasTable
     public static function computeData(array $filters): Collection
     {
         $carrierId = $filters['carrier_id'] ?? null;
-        $min = (int) ($filters['min'] ?? 5);
+        $address = trim((string) ($filters['address'] ?? ''));
+        $tracking = trim((string) ($filters['tracking'] ?? ''));
+        $searching = $address !== '' || $tracking !== '';
+
+        // A targeted search should surface the matching hotspot regardless of size
+        // or fee rank, so relax the min + the fee-ranked cap while searching.
+        $min = $searching ? 1 : (int) ($filters['min'] ?? 5);
+        $limit = $searching ? 1000 : 300;
 
         $rows = DB::table('carrier_invoice_lines as l')
             ->join('carrier_invoices as ci', 'ci.id', '=', 'l.carrier_invoice_id')
@@ -105,8 +130,16 @@ class CorrectionHotspots extends Page implements HasTable
             ')
             ->groupBy('zip', 'cluster')
             ->havingRaw('COUNT(*) >= ?', [$min])
+            ->when($address !== '', fn ($q) => $q->havingRaw(
+                'SUM(CASE WHEN l.original_address_1 LIKE ? OR l.original_city LIKE ? OR l.original_state LIKE ? OR l.original_postal LIKE ? THEN 1 ELSE 0 END) > 0',
+                ["%{$address}%", "%{$address}%", "%{$address}%", "%{$address}%"]
+            ))
+            ->when($tracking !== '', fn ($q) => $q->havingRaw(
+                'SUM(CASE WHEN l.tracking_number LIKE ? THEN 1 ELSE 0 END) > 0',
+                ["%{$tracking}%"]
+            ))
             ->orderByDesc('fees')
-            ->limit(300)
+            ->limit($limit)
             ->get();
 
         return $rows->values()->map(fn ($r, int $i): array => [
