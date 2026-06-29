@@ -85,7 +85,8 @@ class BatchProcessing extends Page implements HasSchemas
     public function mount(): void
     {
         $this->uploadForm->fill([
-            'carrier_id' => Carrier::where('is_active', true)->first()?->id,
+            'carrier_id' => Carrier::where('slug', 'fedex')->where('is_active', true)->first()?->id
+                ?? Carrier::where('is_active', true)->first()?->id,
             'auto_validate' => true,
         ]);
         $this->exportForm->fill([]);
@@ -167,7 +168,7 @@ class BatchProcessing extends Page implements HasSchemas
                             ->helperText('If checked, address validation will begin immediately after import'),
                         Checkbox::make('check_both_sources')
                             ->label('Check both sources (Invoice DB + Carrier API)')
-                            ->default(false)
+                            ->default(true)
                             ->helperText('Validate against both; addresses where they disagree are flagged Needs Review for a manual pick'),
                         Checkbox::make('include_transit_times')
                             ->label('Include Time in Transit')
@@ -614,7 +615,8 @@ class BatchProcessing extends Page implements HasSchemas
         $this->lastProcessedFile = null;
 
         $this->uploadForm->fill([
-            'carrier_id' => Carrier::where('is_active', true)->first()?->id,
+            'carrier_id' => Carrier::where('slug', 'fedex')->where('is_active', true)->first()?->id
+                ?? Carrier::where('is_active', true)->first()?->id,
             'auto_validate' => true,
         ]);
     }
