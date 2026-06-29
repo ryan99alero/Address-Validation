@@ -37,6 +37,14 @@ class PaceCorrectionsTable
                     ->label('Contact')
                     ->getStateUsing(fn ($record): string => (string) ($record->metadata['contact_id'] ?? '—'))
                     ->searchable(query: fn (Builder $query, string $search): Builder => $query->where('metadata->contact_id', 'like', "%{$search}%")),
+                TextColumn::make('csr')
+                    ->label('CSR')
+                    ->getStateUsing(fn ($record): string => (string) ($record->metadata['csr'] ?? '—'))
+                    ->searchable(query: fn (Builder $query, string $search): Builder => $query->where('metadata->csr', 'like', "%{$search}%")),
+                TextColumn::make('sales_person')
+                    ->label('Salesperson')
+                    ->getStateUsing(fn ($record): string => (string) ($record->metadata['sales_person'] ?? '—'))
+                    ->searchable(query: fn (Builder $query, string $search): Builder => $query->where('metadata->sales_person', 'like', "%{$search}%")),
                 TextColumn::make('status')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {

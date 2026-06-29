@@ -24,6 +24,10 @@ class PaceCorrectionExporter extends Exporter
                 ->getStateUsing(fn (SystemLog $r): ?string => $r->metadata['shipment_id'] ?? null),
             ExportColumn::make('contact_id')->label('Contact')
                 ->getStateUsing(fn (SystemLog $r): ?string => $r->metadata['contact_id'] ?? null),
+            ExportColumn::make('csr')->label('CSR')
+                ->getStateUsing(fn (SystemLog $r): ?string => $r->metadata['csr'] ?? null),
+            ExportColumn::make('sales_person')->label('Salesperson')
+                ->getStateUsing(fn (SystemLog $r): ?string => $r->metadata['sales_person'] ?? null),
             ExportColumn::make('status')->label('Status'),
             ExportColumn::make('mode')->label('Mode')
                 ->getStateUsing(fn (SystemLog $r): string => ($r->metadata['dry_run'] ?? false) ? 'Dry-run' : 'Live'),

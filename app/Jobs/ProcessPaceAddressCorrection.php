@@ -51,6 +51,11 @@ class ProcessPaceAddressCorrection implements ShouldQueue
         $jobNumber = $this->payload['job_number'] ?? $this->payload['job'] ?? null;
         $contactId = $this->payload['contact_id'] ?? $this->payload['contactNumber'] ?? null;
 
+        // CSR + salesperson ride along in the webhook payload (Pace Connect output),
+        // so we capture them with no extra Pace reads.
+        $csr = trim((string) ($this->payload['csr'] ?? $this->payload['csrName'] ?? '')) ?: null;
+        $salesPerson = trim((string) ($this->payload['salesPerson'] ?? $this->payload['sales_person'] ?? $this->payload['salesPersonName'] ?? '')) ?: null;
+
         try {
             $client = new PaceApiClient($connection);
 
@@ -83,6 +88,8 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                         'job_number' => $jobNumber,
                         'shipment_id' => $shipmentId,
                         'contact_id' => $contactId,
+                        'csr' => $csr,
+                        'sales_person' => $salesPerson,
                         'carriers_tried' => array_values($carrierSlugs),
                     ],
                 ]);
@@ -145,6 +152,8 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                     'job_number' => $jobNumber,
                     'shipment_id' => $shipmentId,
                     'contact_id' => $contactId,
+                    'csr' => $csr,
+                    'sales_person' => $salesPerson,
                     'dry_run' => $dryRun,
                     'changed_fields' => array_keys($changes),
                     'changes' => $diff,
@@ -167,7 +176,7 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                 'summary' => "Pace address correction failed (shipment {$shipmentId}, contact {$contactId})",
                 'completed_at' => now(),
                 'error_message' => $e->getMessage(),
-                'metadata' => ['job_number' => $jobNumber, 'shipment_id' => $shipmentId, 'contact_id' => $contactId],
+                'metadata' => ['job_number' => $jobNumber, 'shipment_id' => $shipmentId, 'contact_id' => $contactId, 'csr' => $csr, 'sales_person' => $salesPerson],
             ]);
 
             throw $e;

@@ -414,6 +414,52 @@ class PaceApiClient
     }
 
     /**
+     * SalesPerson id => name, cached per client instance so the same rep isn't
+     * re-read across many jobs.
+     *
+     * @var array<int, ?string>
+     */
+    private array $salesPersonNames = [];
+
+    /**
+     * Resolve the CSR and salesperson NAMES for a job, via the Job's csr /
+     * salesPerson references (each a SalesPerson record).
+     *
+     * @return array{csr: ?string, sales_person: ?string, csr_id: ?int, sales_person_id: ?int}
+     */
+    public function jobReps(string $jobNumber): array
+    {
+        $job = $this->readObject('Job', $jobNumber);
+
+        $csrId = ((int) ($job['csr'] ?? 0)) ?: null;
+        $salesId = ((int) ($job['salesPerson'] ?? 0)) ?: null;
+
+        return [
+            'csr_id' => $csrId,
+            'sales_person_id' => $salesId,
+            'csr' => $this->salesPersonName($csrId),
+            'sales_person' => $this->salesPersonName($salesId),
+        ];
+    }
+
+    private function salesPersonName(?int $id): ?string
+    {
+        if ($id === null) {
+            return null;
+        }
+
+        if (! array_key_exists($id, $this->salesPersonNames)) {
+            try {
+                $this->salesPersonNames[$id] = $this->readObject('SalesPerson', (string) $id)['name'] ?? null;
+            } catch (\Throwable) {
+                $this->salesPersonNames[$id] = null;
+            }
+        }
+
+        return $this->salesPersonNames[$id];
+    }
+
+    /**
      * Build the HTTP client with authentication
      */
     protected function buildClient(): PendingRequest
