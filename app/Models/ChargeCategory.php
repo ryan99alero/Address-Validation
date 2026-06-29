@@ -10,10 +10,19 @@ class ChargeCategory extends Model
 {
     protected $fillable = [
         'name',
+        'abbreviation',
         'parent_id',
         'sort_order',
         'is_active',
     ];
+
+    /**
+     * Short code for compact display, falling back to the full name.
+     */
+    public function getAbbrAttribute(): string
+    {
+        return $this->abbreviation ?: $this->name;
+    }
 
     /**
      * @return array<string, string>
