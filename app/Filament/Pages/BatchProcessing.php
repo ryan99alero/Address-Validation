@@ -88,6 +88,7 @@ class BatchProcessing extends Page implements HasSchemas
             'carrier_id' => Carrier::where('slug', 'fedex')->where('is_active', true)->first()?->id
                 ?? Carrier::where('is_active', true)->first()?->id,
             'auto_validate' => true,
+            'check_both_sources' => true,
         ]);
         $this->exportForm->fill([]);
 
@@ -618,6 +619,7 @@ class BatchProcessing extends Page implements HasSchemas
             'carrier_id' => Carrier::where('slug', 'fedex')->where('is_active', true)->first()?->id
                 ?? Carrier::where('is_active', true)->first()?->id,
             'auto_validate' => true,
+            'check_both_sources' => true,
         ]);
     }
 
