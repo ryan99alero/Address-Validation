@@ -57,7 +57,9 @@ class ValidateAddress extends Page implements HasSchemas
     {
         $this->form->fill([
             'input_country' => 'US',
-            'carrier_id' => Carrier::where('is_active', true)->first()?->id,
+            'carrier_id' => Carrier::where('slug', 'fedex')->where('is_active', true)->first()?->id
+                ?? Carrier::where('is_active', true)->first()?->id,
+            'check_both_sources' => true,
         ]);
     }
 
