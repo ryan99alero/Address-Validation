@@ -117,7 +117,7 @@ class ValidateAddress extends Page implements HasSchemas
                             ->helperText('Your internal reference number'),
                         Checkbox::make('check_both_sources')
                             ->label('Check both sources (Invoice DB + Carrier API)')
-                            ->default(false)
+                            ->default(true)
                             ->helperText('Validate against both; flag for review if they disagree'),
                     ]),
 
