@@ -113,7 +113,15 @@ class FolderInvoiceIngestService
                 break;
             }
 
+            // Preserve the real extension so the parser routes PDF vs CSV correctly —
+            // an extensionless temp file makes every download parse as CSV.
+            $ext = strtolower(pathinfo($remotePath, PATHINFO_EXTENSION)) ?: 'dat';
             $temp = (string) tempnam(sys_get_temp_dir(), 'smbinv_');
+            $withExt = $temp.'.'.$ext;
+            @rename($temp, $withExt);
+            $temp = $withExt;
+
+            $invoice = null;
 
             try {
                 $this->smb->download($folder, $remotePath, $temp);
@@ -137,6 +145,8 @@ class FolderInvoiceIngestService
                 $this->parser->parse($invoice, $temp);
                 $stats['processed']++;
             } catch (Throwable $e) {
+                // Drop the part-imported invoice so it retries on the next scan.
+                $invoice?->delete();
                 $stats['failed']++;
                 $stats['errors'][] = basename($remotePath).': '.$e->getMessage();
             } finally {
