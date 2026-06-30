@@ -875,25 +875,95 @@ class CarrierInvoiceParserService
             'tracking_number' => $data['tracking_number'] ?? null,
             'ship_date' => $data['ship_date'] ?? null,
             'delivery_date' => $data['delivery_date'] ?? null,
-            'original_name' => $data['original_name'] ?? null,
-            'original_company' => $data['original_company'] ?? null,
-            'original_address_1' => $data['original_address_1'] ?? null,
-            'original_address_2' => $data['original_address_2'] ?? null,
-            'original_address_3' => $data['original_address_3'] ?? null,
-            'original_city' => $data['original_city'] ?? null,
-            'original_state' => $data['original_state'] ?? null,
-            'original_postal' => $data['original_postal'] ?? null,
-            'original_country' => $data['original_country'] ?? 'US',
-            'corrected_address_1' => $data['corrected_address_1'] ?? null,
-            'corrected_address_2' => $data['corrected_address_2'] ?? null,
-            'corrected_address_3' => $data['corrected_address_3'] ?? null,
-            'corrected_city' => $data['corrected_city'] ?? null,
-            'corrected_state' => $data['corrected_state'] ?? null,
-            'corrected_postal' => $data['corrected_postal'] ?? null,
-            'corrected_country' => $data['corrected_country'] ?? 'US',
+            'original_name' => $this->cap($data['original_name'] ?? null, 100),
+            'original_company' => $this->cap($data['original_company'] ?? null, 100),
+            'original_address_1' => $this->cap($data['original_address_1'] ?? null, 100),
+            'original_address_2' => $this->cap($data['original_address_2'] ?? null, 100),
+            'original_address_3' => $this->cap($data['original_address_3'] ?? null, 100),
+            'original_city' => $this->cap($data['original_city'] ?? null, 50),
+            'original_state' => $this->cap($data['original_state'] ?? null, 50),
+            'original_postal' => $this->cap($data['original_postal'] ?? null, 20),
+            'original_country' => $this->cap($data['original_country'] ?? 'US', 2),
+            'corrected_address_1' => $this->cap($data['corrected_address_1'] ?? null, 100),
+            'corrected_address_2' => $this->cap($data['corrected_address_2'] ?? null, 100),
+            'corrected_address_3' => $this->cap($data['corrected_address_3'] ?? null, 100),
+            'corrected_city' => $this->cap($data['corrected_city'] ?? null, 50),
+            'corrected_state' => $this->cap($data['corrected_state'] ?? null, 50),
+            'corrected_postal' => $this->cap($data['corrected_postal'] ?? null, 20),
+            'corrected_country' => $this->cap($data['corrected_country'] ?? 'US', 2),
             'charge_code' => $data['charge_code'] ?? null,
             'charge_description' => $data['charge_description'] ?? null,
             'charge_amount' => $data['charge_amount'] ?? 0.0,
         ]);
+    }
+
+    /**
+     * Trim a value to fit its varchar column — guards against a parser that
+     * over-captures (e.g. a malformed address spilling into the city field),
+     * which would otherwise abort the whole invoice on a "data too long" error.
+     */
+    private function cap(?string $value, int $length): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return mb_substr($value, 0, $length);
+    }
+
+    /**
+     * Supplement an already-imported invoice with shipments that exist only in
+     * the PDF (FedEx CSV exports occasionally omit a shipment the PDF has).
+     *
+     * Cost-safe by construction: a PDF shipment is added ONLY when it carries a
+     * valid tracking number that is not already on the invoice. Blocks without a
+     * real tracking number — summary / multiweight / payor-type totals — are
+     * skipped, so a charge can never be counted twice.
+     */
+    public function supplementFromPdf(CarrierInvoice $invoice, string $pdfPath): int
+    {
+        if (strtolower($invoice->carrier->slug ?? '') !== 'fedex') {
+            return 0;
+        }
+
+        $parsed = (new FedExInvoiceParser)->parse($pdfPath);
+
+        $existing = $invoice->charges()
+            ->whereNotNull('tracking_number')
+            ->where('tracking_number', '<>', '')
+            ->pluck('tracking_number')
+            ->map(fn ($t): string => (string) $t)
+            ->flip();
+
+        $added = 0;
+        foreach ($parsed['shipments'] as $shipment) {
+            $tracking = (string) ($shipment['tracking_id'] ?? '');
+            if (! preg_match('/^\d{12,22}$/', $tracking) || $existing->has($tracking)) {
+                continue;
+            }
+
+            $date = null;
+            if (! empty($shipment['ship_date'])) {
+                try {
+                    $date = Carbon::parse($shipment['ship_date'])->toDateString();
+                } catch (\Exception $e) {
+                    // leave null
+                }
+            }
+
+            foreach ($shipment['charge_ledger'] as $charge) {
+                $this->recordCharge($invoice, [
+                    'charge_description' => $charge['description'],
+                    'amount' => $charge['amount'],
+                    'tracking_number' => $tracking,
+                    'date' => $date,
+                ]);
+            }
+
+            $existing->put($tracking, true);
+            $added++;
+        }
+
+        return $added;
     }
 }

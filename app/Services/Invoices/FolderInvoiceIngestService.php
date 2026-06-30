@@ -100,32 +100,26 @@ class FolderInvoiceIngestService
         $stats = ['found' => 0, 'processed' => 0, 'skipped' => 0, 'failed' => 0, 'errors' => []];
         $extensions = $folder->extensions() ?: ['csv', 'pdf'];
 
-        $files = $this->dedupePreferCsv(
+        $invoices = $this->pairByInvoice(
             $this->smb->listFiles($folder, $extensions, $folder->recursive),
             $folder->prefer_csv,
         );
-        $stats['found'] = count($files);
+        $stats['found'] = count($invoices);
 
         $unc = '//'.$folder->smb_host.'/'.$folder->smb_share.'/';
 
-        foreach ($files as $remotePath) {
+        foreach ($invoices as $pair) {
             if ($limit > 0 && $stats['processed'] >= $limit) {
                 break;
             }
 
-            // Preserve the real extension so the parser routes PDF vs CSV correctly —
-            // an extensionless temp file makes every download parse as CSV.
-            $ext = strtolower(pathinfo($remotePath, PATHINFO_EXTENSION)) ?: 'dat';
-            $temp = (string) tempnam(sys_get_temp_dir(), 'smbinv_');
-            $withExt = $temp.'.'.$ext;
-            @rename($temp, $withExt);
-            $temp = $withExt;
-
+            $primaryTemp = $this->toTemp($pair['primary']);
+            $supplementTemp = $pair['supplement'] !== null ? $this->toTemp($pair['supplement']) : null;
             $invoice = null;
 
             try {
-                $this->smb->download($folder, $remotePath, $temp);
-                $hash = hash_file('sha256', $temp);
+                $this->smb->download($folder, $pair['primary'], $primaryTemp);
+                $hash = hash_file('sha256', $primaryTemp);
 
                 if (CarrierInvoice::where('file_hash', $hash)->exists()) {
                     $stats['skipped']++;
@@ -136,21 +130,32 @@ class FolderInvoiceIngestService
                 $invoice = CarrierInvoice::create([
                     'carrier_id' => $folder->carrier_id,
                     'source' => 'watch_folder',
-                    'source_reference' => $unc.$remotePath,
-                    'filename' => basename($remotePath),
-                    'original_path' => $unc.$remotePath,
+                    'source_reference' => $unc.$pair['primary'],
+                    'filename' => basename($pair['primary']),
+                    'original_path' => $unc.$pair['primary'],
                     'file_hash' => $hash,
                     'status' => 'pending',
                 ]);
-                $this->parser->parse($invoice, $temp);
+                $this->parser->parse($invoice, $primaryTemp);
+
+                // Fill shipments the CSV omitted from the matching PDF. Cost-safe:
+                // only tracking numbers not already on the invoice are added.
+                if ($supplementTemp !== null) {
+                    $this->smb->download($folder, $pair['supplement'], $supplementTemp);
+                    $this->parser->supplementFromPdf($invoice, $supplementTemp);
+                }
+
                 $stats['processed']++;
             } catch (Throwable $e) {
                 // Drop the part-imported invoice so it retries on the next scan.
                 $invoice?->delete();
                 $stats['failed']++;
-                $stats['errors'][] = basename($remotePath).': '.$e->getMessage();
+                $stats['errors'][] = basename($pair['primary']).': '.$e->getMessage();
             } finally {
-                @unlink($temp);
+                @unlink($primaryTemp);
+                if ($supplementTemp !== null) {
+                    @unlink($supplementTemp);
+                }
             }
         }
 
@@ -160,26 +165,70 @@ class FolderInvoiceIngestService
     }
 
     /**
-     * Keep one file per invoice (same folder + basename), preferring CSV.
+     * Download a remote file to a temp path that keeps its real extension, so the
+     * parser routes PDF vs CSV correctly (an extensionless file parses as CSV).
+     */
+    private function toTemp(string $remotePath): string
+    {
+        $ext = strtolower(pathinfo($remotePath, PATHINFO_EXTENSION)) ?: 'dat';
+        $base = (string) tempnam(sys_get_temp_dir(), 'smbinv_');
+        $withExt = $base.'.'.$ext;
+        @rename($base, $withExt);
+
+        return $withExt;
+    }
+
+    /**
+     * Group files into one entry per invoice, pairing the CSV (primary) with its
+     * PDF (supplement). FedEx writes the CSV and PDF with different filename
+     * timestamps, so pairing on the basename would import the same invoice twice —
+     * we pair on the invoice date in the filename instead.
      *
      * @param  array<int, string>  $paths
-     * @return array<int, string>
+     * @return array<int, array{primary: string, supplement: ?string}>
      */
-    protected function dedupePreferCsv(array $paths, bool $preferCsv): array
+    protected function pairByInvoice(array $paths, bool $preferCsv): array
     {
-        $byInvoice = [];
-
+        $groups = [];
         foreach ($paths as $path) {
-            $key = dirname($path).'/'.pathinfo($path, PATHINFO_FILENAME);
-            $existing = $byInvoice[$key] ?? null;
+            $key = preg_match('/(\d{4}-\d{2}-\d{2})/', basename($path), $m)
+                ? dirname($path).'|'.$m[1]
+                : dirname($path).'|'.pathinfo($path, PATHINFO_FILENAME);
+            $groups[$key][] = $path;
+        }
 
-            if ($existing === null
-                || ($preferCsv && strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'csv' && strtolower(pathinfo($existing, PATHINFO_EXTENSION)) !== 'csv')) {
-                $byInvoice[$key] = $path;
+        $invoices = [];
+        foreach ($groups as $files) {
+            $csvs = [];
+            $pdfs = [];
+            $others = [];
+            foreach ($files as $p) {
+                $ext = strtolower(pathinfo($p, PATHINFO_EXTENSION));
+                if ($ext === 'csv') {
+                    $csvs[] = $p;
+                } elseif ($ext === 'pdf') {
+                    $pdfs[] = $p;
+                } else {
+                    $others[] = $p;
+                }
+            }
+
+            // Clean weekly invoice: one CSV (+ its single PDF) → CSV primary, PDF
+            // supplement. This is the case that was double-importing.
+            if ($preferCsv && count($csvs) === 1 && count($pdfs) <= 1 && $others === []) {
+                $invoices[] = ['primary' => $csvs[0], 'supplement' => $pdfs[0] ?? null];
+
+                continue;
+            }
+
+            // Anything ambiguous (no CSV, or multiple files of a type) → import each
+            // on its own so nothing is lost; hash-dedup still blocks exact re-imports.
+            foreach (array_merge($csvs, $pdfs, $others) as $p) {
+                $invoices[] = ['primary' => $p, 'supplement' => null];
             }
         }
 
-        return array_values($byInvoice);
+        return $invoices;
     }
 
     /**
