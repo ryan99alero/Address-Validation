@@ -72,6 +72,8 @@ class FolderIntegrationForm
                             ->required(fn ($get): bool => $get('connection_type') === 'smb'),
                         TextInput::make('smb_username')
                             ->label('Username')
+                            ->placeholder('DOMAIN\\username  (e.g. RAND\\jdoe)')
+                            ->helperText('For an Active Directory account include the domain: DOMAIN\\username.')
                             ->visible(fn ($get): bool => $get('connection_type') === 'smb'),
                         TextInput::make('smb_password')
                             ->label('Password')

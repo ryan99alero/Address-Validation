@@ -59,7 +59,7 @@ class SmbInvoiceReader
         try {
             return count($this->share($folder)->dir(trim((string) $folder->base_path, '/')));
         } catch (Throwable $e) {
-            throw new RuntimeException($this->friendly($e->getMessage()), 0, $e);
+            throw new RuntimeException($this->friendly($e), 0, $e);
         }
     }
 
@@ -104,15 +104,22 @@ class SmbInvoiceReader
         return ['', $username];
     }
 
-    private function friendly(string $message): string
+    private function friendly(Throwable $e): string
     {
+        $class = class_basename($e->getPrevious() ?? $e);
+        $message = $e->getMessage() ?: (string) ($e->getPrevious()?->getMessage() ?? '');
+
         return match (true) {
-            str_contains($message, 'NT_STATUS_LOGON_FAILURE') => 'Authentication failed — check the username and password.',
+            // smbclient maps "authenticated but no rights" to ACCESS_DENIED, and the
+            // wrapper surfaces it as ConnectionRefused/Forbidden — almost always a
+            // missing AD domain on the username.
+            $class === 'ForbiddenException' || $class === 'ConnectionRefusedException' || str_contains($message, 'ACCESS_DENIED') => 'Access denied. The account authenticated but lacks permission to the share/path — for an Active Directory account, set the Username as DOMAIN\\username (e.g. RAND\\jdoe).',
+            $class === 'AuthenticationException' || str_contains($message, 'NT_STATUS_LOGON_FAILURE') => 'Authentication failed — check the password and use DOMAIN\\username for an AD account.',
             str_contains($message, 'NT_STATUS_BAD_NETWORK_NAME') => 'Share not found — check the Share / UNC Root.',
-            str_contains($message, 'NT_STATUS_OBJECT_PATH_NOT_FOUND'), str_contains($message, 'NT_STATUS_OBJECT_NAME_NOT_FOUND') => 'Path within the share not found.',
-            str_contains($message, 'Connection to') || str_contains($message, 'NT_STATUS_HOST') => 'Could not reach the server — check the Server Name / IP.',
-            str_contains($message, 'smbclient') || str_contains($message, 'libsmbclient') => 'SMB client not available on the server (install smbclient).',
-            default => $message,
+            $class === 'NotFoundException' || str_contains($message, 'NOT_FOUND') => 'Path within the share not found — check the Path within Share.',
+            str_contains($message, 'NT_STATUS_HOST') || str_contains($message, 'getaddrinfo') || str_contains($message, 'Connection to') => 'Could not reach the server — check the Server Name / IP.',
+            str_contains($message, 'smbclient') || str_contains($message, 'libsmbclient') => 'SMB client not available on the server.',
+            default => $message !== '' ? $message : 'SMB error ('.$class.') — for an AD account, try Username = DOMAIN\\username.',
         };
     }
 }
