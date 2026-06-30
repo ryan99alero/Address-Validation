@@ -19,6 +19,9 @@ class RebuildCarrierRollup implements ShouldBeUnique, ShouldQueue
 
     public int $uniqueFor = 600;
 
+    /** The full rebuild (charges + shipment summary) runs minutes, not the default 60s. */
+    public int $timeout = 900;
+
     public function uniqueId(): string
     {
         return 'carrier-rollup';

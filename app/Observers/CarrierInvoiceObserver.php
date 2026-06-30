@@ -2,33 +2,26 @@
 
 namespace App\Observers;
 
-use App\Jobs\RebuildCarrierRollup;
 use App\Models\CarrierInvoice;
 
+/**
+ * Reporting rollups are intentionally NOT rebuilt per invoice. The full rebuild
+ * (carrier rollup + shipment summary) runs for minutes and locks carrier_charges,
+ * so firing it on every create/delete during a bulk import or purge starved the
+ * queue workers and deadlocked against the imports themselves (lock-wait timeouts).
+ *
+ * Rollups now rebuild on the nightly schedule and on-demand via
+ * `php artisan reports:rebuild`, which never competes with an active import.
+ */
 class CarrierInvoiceObserver
 {
-    /**
-     * A new invoice adds charges to the reporting tables, so queue a rebuild.
-     */
     public function created(CarrierInvoice $invoice): void
     {
-        $this->queueRebuild();
+        // no-op — see class docblock
     }
 
-    /**
-     * A deleted invoice cascade-deletes its carrier_charges, so the rollups are
-     * now stale — queue a full rebuild (which simply re-derives from current data,
-     * no reversal entries needed).
-     */
     public function deleted(CarrierInvoice $invoice): void
     {
-        $this->queueRebuild();
-    }
-
-    private function queueRebuild(): void
-    {
-        // Short delay so a bulk import/purge settles before the (deduplicated)
-        // rebuild fires.
-        RebuildCarrierRollup::dispatch()->delay(now()->addSeconds(60));
+        // no-op — see class docblock
     }
 }
