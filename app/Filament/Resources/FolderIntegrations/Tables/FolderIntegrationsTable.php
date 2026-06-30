@@ -4,6 +4,7 @@ namespace App\Filament\Resources\FolderIntegrations\Tables;
 
 use App\Jobs\ProcessFolderIntegration;
 use App\Models\FolderIntegration;
+use App\Services\Invoices\SmbInvoiceReader;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -43,6 +44,21 @@ class FolderIntegrationsTable
                     ])
                     ->action(function (FolderIntegration $record, array $data): void {
                         $limit = (int) ($data['limit'] ?? 0);
+
+                        // SMB scans the whole share recursively in one resilient job —
+                        // no local directory checks / per-subfolder chunking.
+                        if ($record->connection_type === FolderIntegration::TYPE_SMB) {
+                            ProcessFolderIntegration::dispatch($record, $limit);
+
+                            Notification::make()
+                                ->title('Scan queued')
+                                ->body('Queued an SMB scan on the queue worker. "Last Run" updates when it finishes. A queue worker must be running.')
+                                ->success()
+                                ->send();
+
+                            return;
+                        }
+
                         $base = rtrim($record->base_path, '/');
 
                         if (! is_dir($base)) {
@@ -70,6 +86,28 @@ class FolderIntegrationsTable
                             ->body("Queued {$count} scan job(s) (one per year folder) on the queue worker. \"Last Run\" updates as they finish. A queue worker must be running.")
                             ->success()
                             ->send();
+                    }),
+                Action::make('testConnection')
+                    ->label('Test')
+                    ->icon('heroicon-o-signal')
+                    ->color('gray')
+                    ->action(function (FolderIntegration $record): void {
+                        try {
+                            if ($record->connection_type === FolderIntegration::TYPE_SMB) {
+                                $count = app(SmbInvoiceReader::class)->testConnection($record);
+                                $body = "Connected to \\\\{$record->smb_host}\\{$record->smb_share} — {$count} item(s) in the base folder.";
+                            } elseif (is_dir((string) $record->base_path)) {
+                                $body = 'Folder path is accessible.';
+                            } else {
+                                throw new \RuntimeException("Folder not found: {$record->base_path}");
+                            }
+
+                            $record->markChecked('ok');
+                            Notification::make()->title('Connection OK')->body($body)->success()->send();
+                        } catch (\Throwable $e) {
+                            $record->markChecked('error', $e->getMessage());
+                            Notification::make()->title('Connection failed')->body($e->getMessage())->danger()->persistent()->send();
+                        }
                     }),
                 EditAction::make(),
             ])

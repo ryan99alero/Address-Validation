@@ -78,7 +78,7 @@ class FolderIntegrationForm
                             ->password()
                             ->revealable()
                             ->visible(fn ($get): bool => $get('connection_type') === 'smb')
-                            ->helperText('Stored encrypted. Note: direct SMB requires the server-side connector; while the share is OS-mounted, use Local.'),
+                            ->helperText('Stored encrypted. Use DOMAIN\\username for an AD account. After saving, hit "Test" to verify the connection.'),
                     ]),
 
                 Section::make('Scanning')
