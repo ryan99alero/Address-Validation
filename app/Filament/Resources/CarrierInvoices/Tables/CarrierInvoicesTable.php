@@ -43,7 +43,7 @@ class CarrierInvoicesTable
                     ->label('Records')
                     ->numeric()
                     ->sortable(),
-                TextColumn::make('corrections_count')
+                TextColumn::make('correction_records')
                     ->label('Corrections')
                     ->numeric()
                     ->sortable(),
@@ -52,7 +52,7 @@ class CarrierInvoicesTable
                     ->numeric()
                     ->sortable()
                     ->color('success'),
-                TextColumn::make('total_charges')
+                TextColumn::make('total_correction_charges')
                     ->label('Charges')
                     ->money('USD')
                     ->sortable(),
