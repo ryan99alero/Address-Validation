@@ -27,10 +27,27 @@ class CarrierInvoicesTable
                         default => 'gray',
                     })
                     ->sortable(),
-                TextColumn::make('filename')
-                    ->label('File')
+                TextColumn::make('invoice_number')
+                    ->label('Invoice #')
+                    ->weight('bold')
                     ->searchable()
-                    ->limit(40),
+                    ->sortable(),
+                TextColumn::make('invoice_date')
+                    ->label('Invoice Date')
+                    ->date('M j, Y')
+                    ->sortable(),
+                TextColumn::make('account_number')
+                    ->label('Account')
+                    ->searchable()
+                    ->toggleable(),
+                TextColumn::make('total_records')
+                    ->label('Shipments')
+                    ->numeric()
+                    ->sortable(),
+                TextColumn::make('total_amount')
+                    ->label('Charges')
+                    ->money('USD')
+                    ->getStateUsing(fn (CarrierInvoice $record): float => (float) $record->charges()->sum('amount')),
                 TextColumn::make('status')
                     ->badge()
                     ->color(fn ($state) => match ($state) {
@@ -39,29 +56,13 @@ class CarrierInvoicesTable
                         CarrierInvoice::STATUS_FAILED => 'danger',
                         default => 'gray',
                     }),
-                TextColumn::make('total_records')
-                    ->label('Records')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('correction_records')
-                    ->label('Corrections')
-                    ->numeric()
-                    ->sortable(),
-                TextColumn::make('new_corrections')
-                    ->label('New')
-                    ->numeric()
-                    ->sortable()
-                    ->color('success'),
-                TextColumn::make('total_correction_charges')
-                    ->label('Charges')
-                    ->money('USD')
-                    ->sortable(),
-                TextColumn::make('processed_at')
-                    ->label('Processed')
+                TextColumn::make('created_at')
+                    ->label('Imported')
                     ->dateTime('M j, Y g:i A')
-                    ->sortable(),
+                    ->sortable()
+                    ->toggleable(),
             ])
-            ->defaultSort('processed_at', 'desc')
+            ->defaultSort('invoice_date', 'desc')
             ->filters([
                 SelectFilter::make('carrier')
                     ->relationship('carrier', 'name')
