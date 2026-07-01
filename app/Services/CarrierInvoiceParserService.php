@@ -919,8 +919,9 @@ class CarrierInvoiceParserService
             }
         }
 
-        // Per-shipment date column varies by FedEx export vintage.
+        // Per-shipment date columns vary by FedEx export vintage.
         $shipDateCol = $col['Shipment Date'] ?? $col['Ship Date'] ?? $col['Tendered Date'] ?? $col['Pickup Date'] ?? null;
+        $deliveryDateCol = $col['POD Delivery Date'] ?? $col['Delivery Date'] ?? null;
 
         $this->chargeCategoryResolver ??= new ChargeCategoryResolver;
 
@@ -928,6 +929,8 @@ class CarrierInvoiceParserService
         $invoices = [];
         /** @var array<int, array<string, int>> $seen */
         $seen = [];
+        /** @var array<int, array<string, bool>> $corr */
+        $corr = [];
 
         while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
             $number = InvoiceIdentity::number($row[$col['Invoice Number'] ?? 3] ?? null);
@@ -942,9 +945,11 @@ class CarrierInvoiceParserService
                 InvoiceIdentity::account($row[$col['Bill to Account Number'] ?? 1] ?? null),
             );
             $seen[$invoice->id] ??= $this->loadChargeMultiset($invoice);
+            $corr[$invoice->id] ??= $this->loadCorrectionTrackings($invoice);
 
             $tracking = $this->parseTrackingNumber($row[$col['Express or Ground Tracking ID'] ?? 9] ?? '') ?: null;
             $shipDate = $shipDateCol !== null ? $this->parseDate($row[$shipDateCol] ?? '') : null;
+            $deliveryDate = $deliveryDateCol !== null ? $this->parseDate($row[$deliveryDateCol] ?? '') : null;
             $weight = $this->parseWeight($row[21] ?? '');
 
             $items = [];
@@ -962,6 +967,8 @@ class CarrierInvoiceParserService
             foreach ($items as [$desc, $amount]) {
                 $this->mergeCharge($invoice, $seen[$invoice->id], $carrierId, $tracking, $desc, (float) $amount, $shipDate, $weight);
             }
+
+            $this->recordFedExCorrection($invoice, $corr[$invoice->id], $col, $row, $tracking, $shipDate, $deliveryDate);
         }
         fclose($handle);
 
@@ -972,11 +979,78 @@ class CarrierInvoiceParserService
 
                 continue;
             }
+            $this->linkCorrectionsToCache($invoice);
             $this->refreshInvoiceTotals($invoice);
             $survived[] = $invoice->id;
         }
 
         return $survived;
+    }
+
+    /**
+     * Record a FedEx address-correction line (original → corrected address, carrying
+     * ship + delivery dates) for the correction cache, once per tracking number.
+     *
+     * @param  array<string, int>  $col
+     * @param  array<int, string>  $row
+     * @param  array<string, bool>  $seen
+     */
+    protected function recordFedExCorrection(CarrierInvoice $invoice, array &$seen, array $col, array $row, ?string $tracking, ?string $shipDate, ?string $deliveryDate): void
+    {
+        if ($tracking === null || isset($seen[$tracking])) {
+            return;
+        }
+        $charge = $this->findFedExAddressCorrectionCharge($row, $col);
+        if ($charge <= 0) {
+            return;
+        }
+        $corrected1 = trim((string) ($row[$col['Recipient Address Line 1'] ?? 35] ?? ''));
+        if ($corrected1 === '') {
+            return;
+        }
+
+        $origAddr1 = trim((string) ($row[$col['Original Recipient Address Line 1'] ?? 58] ?? ''));
+        $hasOrig = $origAddr1 !== '';
+
+        $this->createInvoiceLine($invoice, [
+            'tracking_number' => $tracking,
+            'ship_date' => $shipDate,
+            'delivery_date' => $deliveryDate,
+            'original_name' => trim((string) ($row[$col['Recipient Name'] ?? 33] ?? '')),
+            'original_company' => trim((string) ($row[$col['Recipient Company'] ?? 34] ?? '')),
+            'original_address_1' => $hasOrig ? $origAddr1 : null,
+            'original_address_2' => $hasOrig ? trim((string) ($row[$col['Original Recipient Address Line 2'] ?? 59] ?? '')) : null,
+            'original_city' => $hasOrig ? trim((string) ($row[$col['Original Recipient City'] ?? 60] ?? '')) : null,
+            'original_state' => $hasOrig ? trim((string) ($row[$col['Original Recipient State'] ?? 61] ?? '')) : null,
+            'original_postal' => $hasOrig ? trim((string) ($row[$col['Original Recipient Zip Code'] ?? 62] ?? '')) : null,
+            'original_country' => $hasOrig ? (trim((string) ($row[$col['Original Recipient Country/Territory'] ?? 63] ?? '')) ?: 'US') : null,
+            'corrected_address_1' => $corrected1,
+            'corrected_address_2' => trim((string) ($row[$col['Recipient Address Line 2'] ?? 36] ?? '')),
+            'corrected_city' => trim((string) ($row[$col['Recipient City'] ?? 37] ?? '')),
+            'corrected_state' => trim((string) ($row[$col['Recipient State'] ?? 38] ?? '')),
+            'corrected_postal' => trim((string) ($row[$col['Recipient Zip Code'] ?? 39] ?? '')),
+            'corrected_country' => trim((string) ($row[$col['Recipient Country/Territory'] ?? 40] ?? '')) ?: 'US',
+            'charge_code' => 'ADDCOR',
+            'charge_description' => 'Address Correction',
+            'charge_amount' => $charge,
+        ]);
+
+        $seen[$tracking] = true;
+    }
+
+    /**
+     * The tracking numbers that already have a correction line on this invoice.
+     *
+     * @return array<string, bool>
+     */
+    protected function loadCorrectionTrackings(CarrierInvoice $invoice): array
+    {
+        $set = [];
+        foreach ($invoice->correctionLines()->whereNotNull('tracking_number')->pluck('tracking_number') as $t) {
+            $set[(string) $t] = true;
+        }
+
+        return $set;
     }
 
     /**
@@ -993,7 +1067,12 @@ class CarrierInvoiceParserService
 
         /** @var array<int, CarrierInvoice> $touched */
         $touched = [];
-        foreach ($parsed as $section) {
+        /** @var array<string, CarrierInvoice> $trackingToInvoice */
+        $trackingToInvoice = [];
+        /** @var array<string, ?string> $trackingShipDate */
+        $trackingShipDate = [];
+
+        foreach ($parsed['invoices'] as $section) {
             $number = InvoiceIdentity::number($section['number']);
             if ($number === null) {
                 continue;
@@ -1027,8 +1106,50 @@ class CarrierInvoiceParserService
                 foreach ($shipment['charge_ledger'] as $charge) {
                     $this->mergeCharge($invoice, $seen, $carrierId, $tracking, (string) $charge['description'], (float) $charge['amount'], $shipDate, null);
                 }
+                $trackingToInvoice[$tracking] = $invoice;
+                $trackingShipDate[$tracking] = $shipDate;
             }
             $touched[$invoice->id] = $invoice;
+        }
+
+        // Address corrections (Ground Address Correction section) → route to the
+        // invoice owning each tracking, deduped, carrying the shipment's ship date.
+        $corrSeen = [];
+        foreach ($parsed['corrections'] as $correction) {
+            $tracking = (string) ($correction['tracking'] ?? '');
+            $invoice = $trackingToInvoice[$tracking] ?? null;
+            if ($invoice === null) {
+                continue;
+            }
+            $corrSeen[$invoice->id] ??= $this->loadCorrectionTrackings($invoice);
+            if (isset($corrSeen[$invoice->id][$tracking])) {
+                continue;
+            }
+
+            $original = $this->parseFedExAddressString((string) ($correction['original'] ?? ''));
+            $corrected = $this->parseFedExAddressString((string) ($correction['corrected'] ?? ''));
+            if (empty($corrected['address_1'])) {
+                continue;
+            }
+
+            $this->createInvoiceLine($invoice, [
+                'tracking_number' => $tracking,
+                'ship_date' => $trackingShipDate[$tracking] ?? null,
+                'original_address_1' => $original['address_1'],
+                'original_city' => $original['city'],
+                'original_state' => $original['state'],
+                'original_postal' => $original['postal'],
+                'original_country' => $original['country'],
+                'corrected_address_1' => $corrected['address_1'],
+                'corrected_city' => $corrected['city'],
+                'corrected_state' => $corrected['state'],
+                'corrected_postal' => $corrected['postal'],
+                'corrected_country' => $corrected['country'],
+                'charge_code' => 'ADDCOR',
+                'charge_description' => 'Address Correction',
+                'charge_amount' => 0.0,
+            ]);
+            $corrSeen[$invoice->id][$tracking] = true;
         }
 
         $survived = [];
@@ -1038,6 +1159,7 @@ class CarrierInvoiceParserService
 
                 continue;
             }
+            $this->linkCorrectionsToCache($invoice);
             $this->refreshInvoiceTotals($invoice);
             $survived[] = $invoice->id;
         }

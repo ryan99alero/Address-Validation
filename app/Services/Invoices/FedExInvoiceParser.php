@@ -110,11 +110,16 @@ class FedExInvoiceParser
      * each delimited by "Invoice Number X-XXX-XXXXX". Each invoice carries its own
      * number/date/account and its shipments (each with its own ship date).
      *
-     * @return array<int, array{number: string, invoice_date: ?string, account: ?string, shipments: array<int, array<string, mixed>>}>
+     * @return array{invoices: array<int, array{number: string, invoice_date: ?string, account: ?string, shipments: array<int, array<string, mixed>>}>, corrections: array<int, array{tracking: string, original: string, corrected: string}>}
      */
     public function parseStructured(string $path): array
     {
-        return $this->splitBySection((new Parser)->parseFile($path)->getText(), basename($path));
+        $text = (new Parser)->parseFile($path)->getText();
+
+        return [
+            'invoices' => $this->splitBySection($text, basename($path)),
+            'corrections' => $this->extractCorrections($text),
+        ];
     }
 
     /**
