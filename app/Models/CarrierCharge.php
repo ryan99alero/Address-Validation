@@ -11,6 +11,7 @@ class CarrierCharge extends Model
         'carrier_invoice_id',
         'carrier_id',
         'invoice_date',
+        'ship_date',
         'account_number',
         'tracking_number',
         'raw_charge_code',
@@ -29,6 +30,7 @@ class CarrierCharge extends Model
     {
         return [
             'invoice_date' => 'date',
+            'ship_date' => 'date',
             'amount' => 'decimal:2',
             'weight' => 'decimal:2',
         ];
