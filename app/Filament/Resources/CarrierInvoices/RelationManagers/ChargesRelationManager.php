@@ -34,10 +34,16 @@ class ChargesRelationManager extends RelationManager
                     ->badge()
                     ->color(fn ($state): string => $state ? 'primary' : 'gray')
                     ->placeholder('Uncategorized'),
-                TextColumn::make('invoice_date')
-                    ->label('Date')
+                TextColumn::make('ship_date')
+                    ->label('Ship Date')
                     ->date('M j, Y')
                     ->sortable()
+                    ->placeholder('—'),
+                TextColumn::make('invoice_date')
+                    ->label('Invoice Date')
+                    ->date('M j, Y')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true)
                     ->placeholder('—'),
                 TextColumn::make('amount')
                     ->label('Amount')
