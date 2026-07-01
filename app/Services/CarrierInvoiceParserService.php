@@ -2,11 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\Carrier;
 use App\Models\CarrierCharge;
 use App\Models\CarrierInvoice;
 use App\Models\CarrierInvoiceLine;
 use App\Services\Invoices\ChargeCategoryResolver;
 use App\Services\Invoices\FedExInvoiceParser;
+use App\Services\Invoices\InvoiceIdentity;
 use App\Services\Invoices\PdfTextExtractor;
 use App\Services\Invoices\UpsPdfInvoiceParser;
 use Illuminate\Support\Carbon;
@@ -813,6 +815,7 @@ class CarrierInvoiceParserService
             'carrier_invoice_id' => $invoice->id,
             'carrier_id' => $invoice->carrier_id,
             'invoice_date' => $invoice->invoice_date ?? ($data['date'] ?? null),
+            'ship_date' => $data['ship_date'] ?? ($data['date'] ?? null),
             'account_number' => $invoice->account_number,
             'tracking_number' => $data['tracking_number'] ?? null,
             'raw_charge_code' => $code,
@@ -863,6 +866,169 @@ class CarrierInvoiceParserService
                 'weight' => $weight,
             ]);
         }
+    }
+
+    /**
+     * Import a FedEx invoice CSV as one CarrierInvoice per real invoice number
+     * (batch files hold several). Charges dedup by (tracking, category, amount)
+     * against what's already on each invoice, so re-importing or later importing
+     * the PDF never double-counts. Each charge keeps its own shipment date.
+     *
+     * @return array<int, int> invoice ids touched
+     */
+    public function importFedExCsv(int $carrierId, string $path): array
+    {
+        $handle = fopen($path, 'r');
+        if ($handle === false) {
+            throw new \RuntimeException("Cannot open file: {$path}");
+        }
+
+        $header = fgetcsv($handle, 0, ',', '"', '');
+        if (! $header) {
+            throw new \RuntimeException('Empty or invalid CSV: '.$path);
+        }
+        $col = array_flip(array_map('trim', $header));
+
+        $pairStart = 107;
+        foreach ($header as $idx => $name) {
+            if (trim((string) $name) === 'Tracking ID Charge Description') {
+                $pairStart = (int) $idx;
+                break;
+            }
+        }
+
+        $this->chargeCategoryResolver ??= new ChargeCategoryResolver;
+
+        /** @var array<string, CarrierInvoice> $invoices */
+        $invoices = [];
+        /** @var array<int, array<string, int>> $seen */
+        $seen = [];
+
+        while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
+            $number = InvoiceIdentity::number($row[$col['Invoice Number'] ?? 3] ?? null);
+            if ($number === null) {
+                continue;
+            }
+
+            $invoice = $invoices[$number] ??= $this->getOrCreateInvoice(
+                $carrierId,
+                $number,
+                $this->parseDate($row[$col['Invoice Date'] ?? 2] ?? ''),
+                InvoiceIdentity::account($row[$col['Bill to Account Number'] ?? 1] ?? null),
+            );
+            $seen[$invoice->id] ??= $this->loadChargeMultiset($invoice);
+
+            $tracking = $this->parseTrackingNumber($row[$col['Express or Ground Tracking ID'] ?? 9] ?? '') ?: null;
+            $shipDate = $this->parseDate($row[$col['Shipment Date'] ?? 14] ?? '');
+            $weight = $this->parseWeight($row[21] ?? '');
+
+            $items = [];
+            $base = $this->parseAmount($row[10] ?? '0');
+            if ($base !== 0.0) {
+                $items[] = ['Transportation', $base];
+            }
+            for ($i = $pairStart; $i < $pairStart + 100; $i += 2) {
+                $desc = trim((string) ($row[$i] ?? ''));
+                if ($desc !== '') {
+                    $items[] = [$desc, $this->parseAmount($row[$i + 1] ?? '0')];
+                }
+            }
+
+            foreach ($items as [$desc, $amount]) {
+                $this->mergeCharge($invoice, $seen[$invoice->id], $carrierId, $tracking, $desc, (float) $amount, $shipDate, $weight);
+            }
+        }
+        fclose($handle);
+
+        foreach ($invoices as $invoice) {
+            $this->refreshInvoiceTotals($invoice);
+        }
+
+        return array_values(array_map(static fn (CarrierInvoice $i): int => $i->id, $invoices));
+    }
+
+    /**
+     * Add a charge unless an identical one (same tracking + category + amount) is
+     * already on the invoice — the multiset-difference that keeps CSV/PDF merges
+     * cost-safe. $seen is the running multiset for this invoice.
+     *
+     * @param  array<string, int>  $seen
+     */
+    protected function mergeCharge(CarrierInvoice $invoice, array &$seen, int $carrierId, ?string $tracking, string $description, float $amount, ?string $shipDate, ?float $weight): void
+    {
+        if ($amount === 0.0) {
+            return;
+        }
+        $categoryId = $this->chargeCategoryResolver->resolve($carrierId, null, $description);
+        $key = ($tracking ?? '').'|'.($categoryId ?? 'n').'|'.number_format($amount, 2);
+
+        if (($seen[$key] ?? 0) > 0) {
+            $seen[$key]--;
+
+            return;
+        }
+
+        $this->recordCharge($invoice, [
+            'charge_description' => $description,
+            'amount' => $amount,
+            'tracking_number' => $tracking,
+            'ship_date' => $shipDate,
+            'weight' => $weight,
+        ]);
+    }
+
+    /**
+     * Get or create the CarrierInvoice for a normalized invoice number, backfilling
+     * date/account when first learned.
+     */
+    protected function getOrCreateInvoice(int $carrierId, string $invoiceNumber, ?string $invoiceDate, ?string $account): CarrierInvoice
+    {
+        $invoice = CarrierInvoice::firstOrCreate(
+            ['carrier_id' => $carrierId, 'invoice_number' => $invoiceNumber],
+            ['invoice_date' => $invoiceDate, 'account_number' => $account, 'source' => 'import', 'status' => 'completed'],
+        );
+
+        $fill = [];
+        if ($invoiceDate !== null && empty($invoice->invoice_date)) {
+            $fill['invoice_date'] = $invoiceDate;
+        }
+        if ($account !== null && empty($invoice->account_number)) {
+            $fill['account_number'] = $account;
+        }
+        if ($fill !== []) {
+            $invoice->update($fill);
+        }
+
+        return $invoice;
+    }
+
+    /**
+     * Build the (tracking|category|amount => count) multiset of the charges already
+     * on an invoice, used to dedup incoming charges.
+     *
+     * @return array<string, int>
+     */
+    protected function loadChargeMultiset(CarrierInvoice $invoice): array
+    {
+        $seen = [];
+        foreach ($invoice->charges()->get(['tracking_number', 'charge_category_id', 'amount']) as $charge) {
+            $key = ((string) $charge->tracking_number).'|'.($charge->charge_category_id ?? 'n').'|'.number_format((float) $charge->amount, 2);
+            $seen[$key] = ($seen[$key] ?? 0) + 1;
+        }
+
+        return $seen;
+    }
+
+    /**
+     * Recompute stored counters on an invoice from its charges.
+     */
+    protected function refreshInvoiceTotals(CarrierInvoice $invoice): void
+    {
+        $invoice->update([
+            'total_records' => $invoice->charges()->distinct('tracking_number')->count('tracking_number'),
+            'processed_at' => $invoice->processed_at ?? now(),
+            'status' => 'completed',
+        ]);
     }
 
     /**
