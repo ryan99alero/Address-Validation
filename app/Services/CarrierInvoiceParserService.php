@@ -884,6 +884,10 @@ class CarrierInvoiceParserService
             return $isPdf ? $this->importFedExPdf($carrierId, $path) : $this->importFedExCsv($carrierId, $path);
         }
 
+        if ($slug === 'ups') {
+            return $isPdf ? $this->importUpsPdf($carrierId, $path) : $this->importUpsCsv($carrierId, $path);
+        }
+
         $invoice = CarrierInvoice::create(['carrier_id' => $carrierId, 'source' => 'import', 'status' => 'pending']);
         $this->parse($invoice, $path);
 
@@ -1165,6 +1169,162 @@ class CarrierInvoiceParserService
         }
 
         return $survived;
+    }
+
+    /**
+     * Import a UPS invoice CSV (UPS Billing Data, one invoice per file) — get-or-create
+     * the invoice by number (col 5), record every charge line with its own ship date,
+     * and build address-correction lines from the ADC rows. Charges dedup by
+     * (tracking, category, amount).
+     *
+     * @return array<int, int> invoice ids touched
+     */
+    public function importUpsCsv(int $carrierId, string $path): array
+    {
+        $handle = fopen($path, 'r');
+        if ($handle === false) {
+            throw new \RuntimeException("Cannot open file: {$path}");
+        }
+
+        $this->chargeCategoryResolver ??= new ChargeCategoryResolver;
+
+        /** @var array<string, CarrierInvoice> $invoices */
+        $invoices = [];
+        $seen = [];
+        $corr = [];
+
+        while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
+            $number = InvoiceIdentity::number($row[5] ?? null);
+            if ($number === null) {
+                continue;
+            }
+
+            $invoice = $invoices[$number] ??= $this->getOrCreateInvoice(
+                $carrierId,
+                $number,
+                $this->parseDate($row[4] ?? ''),
+                InvoiceIdentity::account($row[1] ?? null),
+            );
+            $seen[$invoice->id] ??= $this->loadChargeMultiset($invoice);
+            $corr[$invoice->id] ??= $this->loadCorrectionTrackings($invoice);
+
+            $tracking = trim((string) ($row[13] ?? '')) ?: null;
+            $shipDate = $this->parseDate($row[11] ?? '');
+            $code = trim((string) ($row[35] ?? ''));
+
+            $this->mergeChargeRow($invoice, $seen[$invoice->id], $carrierId, [
+                'charge_code' => $code,
+                'charge_description' => trim((string) ($row[45] ?? '')),
+                'amount' => $this->parseAmount($row[52] ?? '0'),
+                'tracking_number' => $tracking,
+                'ship_date' => $shipDate,
+                'zone' => trim((string) ($row[33] ?? '')) ?: null,
+                'weight' => $this->parseWeight($row[28] ?? ''),
+            ]);
+
+            if ($code === 'ADC' && $tracking !== null && ! isset($corr[$invoice->id][$tracking])) {
+                $origAddr1 = trim((string) ($row[68] ?? ''));
+                $corrAddr1 = trim((string) ($row[76] ?? ''));
+                if ($origAddr1 !== '' || $corrAddr1 !== '') {
+                    $this->createInvoiceLine($invoice, [
+                        'tracking_number' => $tracking,
+                        'ship_date' => $shipDate,
+                        'original_name' => trim((string) ($row[66] ?? '')),
+                        'original_company' => trim((string) ($row[67] ?? '')),
+                        'original_address_1' => $origAddr1,
+                        'original_address_2' => trim((string) ($row[69] ?? '')),
+                        'original_city' => trim((string) ($row[70] ?? '')),
+                        'original_state' => trim((string) ($row[71] ?? '')),
+                        'original_postal' => trim((string) ($row[72] ?? '')),
+                        'original_country' => trim((string) ($row[73] ?? '')) ?: 'US',
+                        'corrected_address_1' => $corrAddr1,
+                        'corrected_address_2' => trim((string) ($row[77] ?? '')),
+                        'corrected_city' => trim((string) ($row[78] ?? '')),
+                        'corrected_state' => trim((string) ($row[79] ?? '')),
+                        'corrected_postal' => trim((string) ($row[80] ?? '')),
+                        'corrected_country' => trim((string) ($row[81] ?? '')) ?: 'US',
+                        'charge_code' => 'ADC',
+                        'charge_description' => 'Address Correction',
+                        'charge_amount' => $this->parseAmount($row[52] ?? '0'),
+                    ]);
+                    $corr[$invoice->id][$tracking] = true;
+                }
+            }
+        }
+        fclose($handle);
+
+        $survived = [];
+        foreach ($invoices as $invoice) {
+            if ($invoice->charges()->count() === 0) {
+                $invoice->delete();
+
+                continue;
+            }
+            $this->linkCorrectionsToCache($invoice);
+            $this->refreshInvoiceTotals($invoice);
+            $survived[] = $invoice->id;
+        }
+
+        return $survived;
+    }
+
+    /**
+     * Import a UPS invoice PDF. The CSV is the charge data source, so we don't extract
+     * charges from the PDF — we get-or-create the invoice by number (so a PDF-only
+     * invoice isn't lost) and let it link as a source file for download. Paired PDFs
+     * simply attach to the invoice the CSV already created.
+     *
+     * @return array<int, int>
+     */
+    public function importUpsPdf(int $carrierId, string $path): array
+    {
+        $text = (new PdfTextExtractor)->extractFile($path);
+        if (! preg_match('/Invoice Number\s*([0-9A-Za-z]+)/', $text, $numM)) {
+            return [];
+        }
+        $number = InvoiceIdentity::number($numM[1]);
+        if ($number === null) {
+            return [];
+        }
+
+        $date = null;
+        if (preg_match('/Invoice Date\s*([A-Z][a-z]+ \d{1,2}, \d{4})/', $text, $dateM)) {
+            try {
+                $date = Carbon::parse($dateM[1])->toDateString();
+            } catch (\Exception $e) {
+                // leave null
+            }
+        }
+
+        $invoice = $this->getOrCreateInvoice($carrierId, $number, $date, null);
+        $invoice->update(['status' => 'completed', 'processed_at' => $invoice->processed_at ?? now()]);
+
+        return [$invoice->id];
+    }
+
+    /**
+     * Add a charge (with full column data: code/zone/weight) unless an identical one
+     * (same tracking + category + amount) is already on the invoice.
+     *
+     * @param  array<string, int>  $seen
+     * @param  array<string, mixed>  $data
+     */
+    protected function mergeChargeRow(CarrierInvoice $invoice, array &$seen, int $carrierId, array $data): void
+    {
+        $amount = (float) ($data['amount'] ?? 0);
+        if ($amount === 0.0) {
+            return;
+        }
+        $categoryId = $this->chargeCategoryResolver->resolve($carrierId, $data['charge_code'] ?? null, $data['charge_description'] ?? null);
+        $key = ((string) ($data['tracking_number'] ?? '')).'|'.($categoryId ?? 'n').'|'.number_format($amount, 2);
+
+        if (($seen[$key] ?? 0) > 0) {
+            $seen[$key]--;
+
+            return;
+        }
+
+        $this->recordCharge($invoice, $data);
     }
 
     /**
