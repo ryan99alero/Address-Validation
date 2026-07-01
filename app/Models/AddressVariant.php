@@ -17,6 +17,8 @@ class AddressVariant extends Model
         'input_postal',
         'input_country',
         'input_hash',
+        'is_active',
+        'inactive_reason',
         'times_seen',
         'first_seen_at',
         'last_seen_at',
@@ -28,6 +30,7 @@ class AddressVariant extends Model
     protected function casts(): array
     {
         return [
+            'is_active' => 'boolean',
             'times_seen' => 'integer',
             'first_seen_at' => 'datetime',
             'last_seen_at' => 'datetime',
@@ -80,6 +83,7 @@ class AddressVariant extends Model
         $variant = self::query()
             ->where('input_postal', $normalizedPostal)
             ->where('input_hash', $hash)
+            ->where('is_active', true)
             ->with('correctedAddress')
             ->first();
 
@@ -137,6 +141,7 @@ class AddressVariant extends Model
         $matches = self::query()
             ->whereIn('input_postal', array_unique($postals))
             ->whereIn('input_hash', array_unique($hashes))
+            ->where('is_active', true)
             ->with('correctedAddress')
             ->get()
             ->keyBy('input_hash');
