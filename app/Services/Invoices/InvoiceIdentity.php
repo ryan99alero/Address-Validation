@@ -12,13 +12,17 @@ class InvoiceIdentity
 {
     public static function number(?string $value): ?string
     {
-        $normalized = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) $value) ?? '');
+        // Strip leading zeros too — UPS zero-pads the invoice number differently in
+        // the CSV (000000691317025) vs the PDF (0000691317025); both are 691317025.
+        $normalized = ltrim(strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) $value) ?? ''), '0');
 
         return $normalized === '' ? null : $normalized;
     }
 
     public static function account(?string $value): ?string
     {
-        return self::number($value);
+        $normalized = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) $value) ?? '');
+
+        return $normalized === '' ? null : $normalized;
     }
 }
