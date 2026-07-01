@@ -869,6 +869,28 @@ class CarrierInvoiceParserService
     }
 
     /**
+     * Import a batch file into real invoices (one CarrierInvoice per invoice number)
+     * with charge-level dedup. Returns the surviving invoice ids. FedEx uses the
+     * split/dedup importers; other carriers fall back to the legacy per-file path.
+     *
+     * @return array<int, int>
+     */
+    public function importFile(int $carrierId, string $path): array
+    {
+        $slug = strtolower(Carrier::find($carrierId)?->slug ?? '');
+        $isPdf = strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf';
+
+        if ($slug === 'fedex') {
+            return $isPdf ? $this->importFedExPdf($carrierId, $path) : $this->importFedExCsv($carrierId, $path);
+        }
+
+        $invoice = CarrierInvoice::create(['carrier_id' => $carrierId, 'source' => 'import', 'status' => 'pending']);
+        $this->parse($invoice, $path);
+
+        return [$invoice->id];
+    }
+
+    /**
      * Import a FedEx invoice CSV as one CarrierInvoice per real invoice number
      * (batch files hold several). Charges dedup by (tracking, category, amount)
      * against what's already on each invoice, so re-importing or later importing
