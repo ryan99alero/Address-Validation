@@ -897,6 +897,9 @@ class CarrierInvoiceParserService
             }
         }
 
+        // Per-shipment date column varies by FedEx export vintage.
+        $shipDateCol = $col['Shipment Date'] ?? $col['Ship Date'] ?? $col['Tendered Date'] ?? $col['Pickup Date'] ?? null;
+
         $this->chargeCategoryResolver ??= new ChargeCategoryResolver;
 
         /** @var array<string, CarrierInvoice> $invoices */
@@ -919,7 +922,7 @@ class CarrierInvoiceParserService
             $seen[$invoice->id] ??= $this->loadChargeMultiset($invoice);
 
             $tracking = $this->parseTrackingNumber($row[$col['Express or Ground Tracking ID'] ?? 9] ?? '') ?: null;
-            $shipDate = $this->parseDate($row[$col['Shipment Date'] ?? 14] ?? '');
+            $shipDate = $shipDateCol !== null ? $this->parseDate($row[$shipDateCol] ?? '') : null;
             $weight = $this->parseWeight($row[21] ?? '');
 
             $items = [];
