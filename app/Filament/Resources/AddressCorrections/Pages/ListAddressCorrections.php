@@ -9,6 +9,7 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
+use Illuminate\Support\Facades\Auth;
 
 class ListAddressCorrections extends ListRecords
 {
@@ -24,6 +25,7 @@ class ListAddressCorrections extends ListRecords
                 ->label('Purge Cache')
                 ->icon('heroicon-o-trash')
                 ->color('danger')
+                ->visible(fn (): bool => Auth::user()?->isAdmin() ?? false)
                 ->requiresConfirmation()
                 ->modalHeading("Purge a carrier's correction cache")
                 ->modalDescription('Deletes cached address corrections that originated from the chosen carrier (keeping any still used by another carrier). Use this after deleting a carrier\'s invoices for a clean re-import — the cache rebuilds automatically as invoices are imported.')
@@ -35,6 +37,8 @@ class ListAddressCorrections extends ListRecords
                         ->required(),
                 ])
                 ->action(function (array $data): void {
+                    abort_unless(Auth::user()?->isAdmin() ?? false, 403);
+
                     $result = app(CorrectionCachePurger::class)->purgeCarrier((int) $data['carrier_id']);
 
                     Notification::make()
