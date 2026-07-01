@@ -30,6 +30,8 @@ class CarrierInvoicesTable
                 TextColumn::make('invoice_number')
                     ->label('Invoice #')
                     ->weight('bold')
+                    ->color('primary')
+                    ->url(fn (CarrierInvoice $record): string => CarrierInvoiceResource::getUrl('view', ['record' => $record]))
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('invoice_date')

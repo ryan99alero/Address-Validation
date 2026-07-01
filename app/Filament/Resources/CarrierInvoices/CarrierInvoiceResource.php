@@ -6,6 +6,7 @@ use App\Filament\Resources\CarrierInvoices\Pages\ListCarrierInvoices;
 use App\Filament\Resources\CarrierInvoices\Pages\ViewCarrierInvoice;
 use App\Filament\Resources\CarrierInvoices\RelationManagers\ChargesRelationManager;
 use App\Filament\Resources\CarrierInvoices\RelationManagers\CorrectionLinesRelationManager;
+use App\Filament\Resources\CarrierInvoices\RelationManagers\SourceFilesRelationManager;
 use App\Filament\Resources\CarrierInvoices\Schemas\CarrierInvoiceForm;
 use App\Filament\Resources\CarrierInvoices\Tables\CarrierInvoicesTable;
 use App\Models\CarrierInvoice;
@@ -43,6 +44,7 @@ class CarrierInvoiceResource extends Resource
         return [
             ChargesRelationManager::class,
             CorrectionLinesRelationManager::class,
+            SourceFilesRelationManager::class,
         ];
     }
 

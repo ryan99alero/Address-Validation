@@ -6,6 +6,7 @@ use App\Observers\CarrierInvoiceObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[ObservedBy([CarrierInvoiceObserver::class])]
@@ -77,6 +78,11 @@ class CarrierInvoice extends Model
     public function charges(): HasMany
     {
         return $this->hasMany(CarrierCharge::class);
+    }
+
+    public function sourceFiles(): BelongsToMany
+    {
+        return $this->belongsToMany(CarrierImportFile::class, 'carrier_import_file_invoice');
     }
 
     // Static Methods

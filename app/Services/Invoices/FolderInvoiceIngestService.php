@@ -58,7 +58,7 @@ class FolderInvoiceIngestService
 
             try {
                 $ids = $this->parser->importFile($folder->carrier_id, $filePath);
-                $this->recordImport($folder, $hash, basename($filePath), $filePath, count($ids));
+                $this->recordImport($folder, $hash, basename($filePath), $filePath, $ids);
                 $stats['processed']++;
             } catch (Throwable $e) {
                 $stats['failed']++;
@@ -118,7 +118,7 @@ class FolderInvoiceIngestService
                 }
 
                 $ids = $this->parser->importFile($folder->carrier_id, $temp);
-                $this->recordImport($folder, $hash, basename($remotePath), $unc.$remotePath, count($ids));
+                $this->recordImport($folder, $hash, basename($remotePath), $unc.$remotePath, $ids);
                 $stats['processed']++;
             } catch (Throwable $e) {
                 $stats['failed']++;
@@ -138,16 +138,24 @@ class FolderInvoiceIngestService
         return CarrierImportFile::where('file_hash', $hash)->exists();
     }
 
-    protected function recordImport(FolderIntegration $folder, string $hash, string $filename, string $reference, int $invoiceCount): void
+    /**
+     * @param  array<int, int>  $invoiceIds
+     */
+    protected function recordImport(FolderIntegration $folder, string $hash, string $filename, string $reference, array $invoiceIds): void
     {
-        CarrierImportFile::create([
+        $file = CarrierImportFile::create([
             'carrier_id' => $folder->carrier_id,
+            'folder_integration_id' => $folder->id,
             'file_hash' => $hash,
             'filename' => $filename,
             'source_reference' => $reference,
-            'invoice_count' => $invoiceCount,
+            'invoice_count' => count($invoiceIds),
             'imported_at' => now(),
         ]);
+
+        if ($invoiceIds !== []) {
+            $file->invoices()->syncWithoutDetaching($invoiceIds);
+        }
     }
 
     /**
