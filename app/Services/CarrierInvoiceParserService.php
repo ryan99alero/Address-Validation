@@ -943,11 +943,18 @@ class CarrierInvoiceParserService
         }
         fclose($handle);
 
+        $survived = [];
         foreach ($invoices as $invoice) {
+            if ($invoice->charges()->count() === 0) {
+                $invoice->delete();
+
+                continue;
+            }
             $this->refreshInvoiceTotals($invoice);
+            $survived[] = $invoice->id;
         }
 
-        return array_values(array_map(static fn (CarrierInvoice $i): int => $i->id, $invoices));
+        return $survived;
     }
 
     /**
@@ -1002,11 +1009,18 @@ class CarrierInvoiceParserService
             $touched[$invoice->id] = $invoice;
         }
 
+        $survived = [];
         foreach ($touched as $invoice) {
+            if ($invoice->charges()->count() === 0) {
+                $invoice->delete();
+
+                continue;
+            }
             $this->refreshInvoiceTotals($invoice);
+            $survived[] = $invoice->id;
         }
 
-        return array_keys($touched);
+        return $survived;
     }
 
     /**
