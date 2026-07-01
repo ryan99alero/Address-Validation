@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Concerns\HasRebuildReportsAction;
 use App\Models\Carrier;
 use App\Models\CarrierChargeRollup;
 use App\Models\CarrierShipRollup;
@@ -22,6 +23,7 @@ use UnitEnum;
 
 class CarrierCorrectionAudit extends Page implements HasTable
 {
+    use HasRebuildReportsAction;
     use InteractsWithTable;
 
     /**

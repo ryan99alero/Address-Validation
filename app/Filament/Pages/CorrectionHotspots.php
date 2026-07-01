@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Concerns\HasRebuildReportsAction;
 use App\Models\Carrier;
 use BackedEnum;
 use Filament\Forms\Components\TextInput;
@@ -20,6 +21,7 @@ use UnitEnum;
 
 class CorrectionHotspots extends Page implements HasTable
 {
+    use HasRebuildReportsAction;
     use InteractsWithTable;
 
     /**
