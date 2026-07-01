@@ -951,6 +951,65 @@ class CarrierInvoiceParserService
     }
 
     /**
+     * Import a FedEx invoice PDF: split the batch into real invoices, dedup charges
+     * by (tracking, category, amount). Blocks without a valid tracking number
+     * (summary / multiweight totals) are skipped so nothing is double-counted.
+     *
+     * @return array<int, int> invoice ids touched
+     */
+    public function importFedExPdf(int $carrierId, string $path): array
+    {
+        $this->chargeCategoryResolver ??= new ChargeCategoryResolver;
+        $parsed = (new FedExInvoiceParser)->parseStructured($path);
+
+        /** @var array<int, CarrierInvoice> $touched */
+        $touched = [];
+        foreach ($parsed as $section) {
+            $number = InvoiceIdentity::number($section['number']);
+            if ($number === null) {
+                continue;
+            }
+
+            $invoiceDate = null;
+            if (! empty($section['invoice_date'])) {
+                try {
+                    $invoiceDate = Carbon::parse($section['invoice_date'])->toDateString();
+                } catch (\Exception $e) {
+                    // leave null
+                }
+            }
+
+            $invoice = $this->getOrCreateInvoice($carrierId, $number, $invoiceDate, InvoiceIdentity::account($section['account'] ?? null));
+            $seen = $this->loadChargeMultiset($invoice);
+
+            foreach ($section['shipments'] as $shipment) {
+                $tracking = (string) ($shipment['tracking_id'] ?? '');
+                if (! preg_match('/^\d{12,22}$/', $tracking)) {
+                    continue;
+                }
+                $shipDate = null;
+                if (! empty($shipment['ship_date'])) {
+                    try {
+                        $shipDate = Carbon::parse($shipment['ship_date'])->toDateString();
+                    } catch (\Exception $e) {
+                        // leave null
+                    }
+                }
+                foreach ($shipment['charge_ledger'] as $charge) {
+                    $this->mergeCharge($invoice, $seen, $carrierId, $tracking, (string) $charge['description'], (float) $charge['amount'], $shipDate, null);
+                }
+            }
+            $touched[$invoice->id] = $invoice;
+        }
+
+        foreach ($touched as $invoice) {
+            $this->refreshInvoiceTotals($invoice);
+        }
+
+        return array_keys($touched);
+    }
+
+    /**
      * Add a charge unless an identical one (same tracking + category + amount) is
      * already on the invoice — the multiset-difference that keeps CSV/PDF merges
      * cost-safe. $seen is the running multiset for this invoice.

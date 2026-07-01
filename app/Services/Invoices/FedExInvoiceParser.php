@@ -106,6 +106,80 @@ class FedExInvoiceParser
     }
 
     /**
+     * Parse a batch PDF into its constituent invoices — a file holds several,
+     * each delimited by "Invoice Number X-XXX-XXXXX". Each invoice carries its own
+     * number/date/account and its shipments (each with its own ship date).
+     *
+     * @return array<int, array{number: string, invoice_date: ?string, account: ?string, shipments: array<int, array<string, mixed>>}>
+     */
+    public function parseStructured(string $path): array
+    {
+        return $this->splitBySection((new Parser)->parseFile($path)->getText(), basename($path));
+    }
+
+    /**
+     * @return array<int, array{number: string, invoice_date: ?string, account: ?string, shipments: array<int, array<string, mixed>>}>
+     */
+    protected function splitBySection(string $text, string $source): array
+    {
+        $parts = preg_split('/Invoice Number\s+([0-9]-[0-9]{3}-[0-9]{5})/', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+
+        // No per-invoice sections detected — treat the whole document as one invoice.
+        if (! is_array($parts) || count($parts) < 3) {
+            $meta = $this->extractMeta($text);
+
+            return [[
+                'number' => (string) ($meta['invoice_number'] ?? ''),
+                'invoice_date' => $meta['invoice_date'] ?? null,
+                'account' => $meta['account_number'] ?? null,
+                'shipments' => $this->extractShipments($text, $source),
+            ]];
+        }
+
+        $invoices = [];
+        for ($i = 1; $i + 1 < count($parts); $i += 2) {
+            $section = (string) $parts[$i + 1];
+            preg_match('/Invoice Date\s+([A-Z][a-z]{2} \d{1,2}, \d{4})/', $section, $d);
+            preg_match('/Account Number\s+([0-9-]+)/', $section, $a);
+            $invoices[] = [
+                'number' => (string) $parts[$i],
+                'invoice_date' => $d[1] ?? null,
+                'account' => $a[1] ?? null,
+                'shipments' => $this->extractShipments($section, $source),
+            ];
+        }
+
+        return $invoices;
+    }
+
+    /**
+     * Split a chunk of invoice text into shipment blocks and parse each.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function extractShipments(string $text, string $source): array
+    {
+        $ship = substr_count($text, 'Ship Date:');
+        $pickup = substr_count($text, 'Pickup Date:');
+        if ($ship > 0 || $pickup > 0) {
+            $blocks = explode($pickup > $ship ? 'Pickup Date:' : 'Ship Date:', $text);
+            array_shift($blocks);
+        } else {
+            $blocks = $this->splitByTotalMarker($text);
+        }
+
+        $shipments = [];
+        foreach ($blocks as $block) {
+            $shipment = $this->parseBlock($block, $source);
+            if ($shipment !== null) {
+                $shipments[] = $shipment;
+            }
+        }
+
+        return $shipments;
+    }
+
+    /**
      * @return array{tracking_id: ?string, type: string, service_type: ?string, recipient: array<int, string>, charge_ledger: array<int, array{description: string, amount: float}>, total_charge: float}|null
      */
     protected function parseBlock(string $block, string $source): ?array
