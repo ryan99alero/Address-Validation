@@ -34,6 +34,7 @@ class AddressCorrectionsTable
                         $corrected = [
                             'address1' => $record->address_1,
                             'address2' => $record->address_2,
+                            'address3' => $record->address_3,
                             'city' => $record->city,
                             'state' => $record->state,
                             'zip' => $record->postal,

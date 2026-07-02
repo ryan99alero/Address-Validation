@@ -82,6 +82,7 @@ class Address extends Model
             'input_company' => 'Company Name',
             'input_address_1' => 'Address Line 1',
             'input_address_2' => 'Address Line 2',
+            'input_address_3' => 'Address Line 3',
             'input_city' => 'City',
             'input_state' => 'State/Province',
             'input_postal' => 'Postal/ZIP Code',
@@ -104,6 +105,7 @@ class Address extends Model
             'company' => 'input_company',
             'address_line_1' => 'input_address_1',
             'address_line_2' => 'input_address_2',
+            'address_line_3' => 'input_address_3',
             'city' => 'input_city',
             'state' => 'input_state',
             'postal_code' => 'input_postal',
@@ -119,6 +121,7 @@ class Address extends Model
         $parts = array_filter([
             $this->input_address_1,
             $this->input_address_2,
+            $this->input_address_3,
             $this->input_city,
             $this->input_state,
             $this->input_postal,
@@ -136,6 +139,7 @@ class Address extends Model
         $parts = array_filter([
             $this->output_address_1,
             $this->output_address_2,
+            $this->output_address_3,
             $this->output_city,
             $this->output_state,
             $this->output_postal,
@@ -252,6 +256,7 @@ class Address extends Model
         $this->update([
             'output_address_1' => $result['corrected_address_line_1'] ?? $this->input_address_1,
             'output_address_2' => $result['corrected_address_line_2'] ?? $this->input_address_2,
+            'output_address_3' => $this->input_address_3,
             'output_city' => $result['corrected_city'] ?? $this->input_city,
             'output_state' => $result['corrected_state'] ?? $this->input_state,
             'output_postal' => $result['corrected_postal_code'] ?? $this->input_postal,

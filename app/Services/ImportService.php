@@ -393,7 +393,8 @@ class ImportService
      * - "5095 Blue Diamond Rd Ste A-7" -> addr1: "5095 Blue Diamond Rd", addr2: "STE A-7"
      * - "10722 BEVERLY BLVD STE B & C" -> addr1: "10722 BEVERLY BLVD", addr2: "STE B & C"
      *
-     * If input_address_2 already has content, the extracted unit is appended with a comma.
+     * If input_address_2 already has content, it is shifted down to input_address_3 so
+     * the extracted unit can occupy input_address_2 cleanly.
      *
      * @param  array<string, mixed>  $addressData
      * @return array<string, mixed>
@@ -412,12 +413,14 @@ class ImportService
         if ($extracted) {
             $addressData['input_address_1'] = $extracted['address'];
 
-            // If input_address_2 already has content, append the extracted unit
+            // Make room for the extracted unit in Address 2 by shifting any existing
+            // Address 2 content down to Address 3 (rather than mashing them together).
             if (! empty($addressData['input_address_2'])) {
-                $addressData['input_address_2'] = trim($addressData['input_address_2']).', '.$extracted['unit'];
-            } else {
-                $addressData['input_address_2'] = $extracted['unit'];
+                $existing3 = trim((string) ($addressData['input_address_3'] ?? ''));
+                $existing2 = trim((string) $addressData['input_address_2']);
+                $addressData['input_address_3'] = $existing3 !== '' ? $existing3.', '.$existing2 : $existing2;
             }
+            $addressData['input_address_2'] = $extracted['unit'];
         }
 
         return $addressData;
@@ -708,6 +711,11 @@ class ImportService
                 'exact' => ['address 2', 'address2', 'addr 2', 'addr2', 'add2', 'add 2', 'street 2', 'street2', 'str2', 'apt', 'apartment', 'suite', 'ste', 'unit', 'floor', 'building', 'bldg', 'address line 2', 'addressline2', 'line 2', 'line2'],
                 'contains' => ['address2', 'addr2', 'add2', 'street2', 'line2'],
                 'regex' => ['/^addr(?:ess)?[\s_-]*2$/i'],
+            ],
+            'input_address_3' => [
+                'exact' => ['address 3', 'address3', 'addr 3', 'addr3', 'add3', 'add 3', 'street 3', 'street3', 'str3', 'address line 3', 'addressline3', 'line 3', 'line3'],
+                'contains' => ['address3', 'addr3', 'add3', 'street3', 'line3'],
+                'regex' => ['/^addr(?:ess)?[\s_-]*3$/i'],
             ],
             'input_city' => [
                 'exact' => ['city', 'town', 'municipality', 'locality', 'suburb'],
