@@ -162,8 +162,12 @@ class CarrierInvoiceLine extends Model
         $correctedAddress = $result['address'];
         $isNewVariant = false;
 
-        // Create variant mapping for the original (bad) address
-        if ($this->original_address_1 && $this->original_postal) {
+        // Create variant mapping for the original (bad) address — but NOT when the
+        // "original" is our own address. Carriers sometimes encode the shipper (RAND)
+        // as the original recipient on returns/undeliverables; the invoice line keeps
+        // that factual data, but teaching the validation cache to "correct" our own
+        // address to a customer's would poison every future lookup of our address.
+        if ($this->original_address_1 && $this->original_postal && ! $this->originalIsOwnAddress()) {
             $variantResult = AddressVariant::createOrUpdateVariant(
                 $correctedAddress->id,
                 $this->original_address_1,
@@ -180,6 +184,48 @@ class CarrierInvoiceLine extends Model
         $this->update(['corrected_address_id' => $correctedAddress->id]);
 
         return $isNewVariant;
+    }
+
+    /**
+     * True when this line's ORIGINAL address is our own company origin address — used to
+     * keep our address out of the validation cache as a "bad" variant. Matches on the
+     * street "core" (house number + primary name, with directionals and suffixes stripped)
+     * + 5-digit ZIP, so "2820 South Hoover" and "2820 S. Hoover Rd" resolve to the same
+     * core "2820 HOOVER".
+     */
+    public function originalIsOwnAddress(): bool
+    {
+        $company = CompanySetting::instance();
+        if (empty($company->address_line_1) || empty($company->postal_code)) {
+            return false;
+        }
+
+        $zip5 = fn (?string $s): string => substr((string) preg_replace('/[^0-9]/', '', (string) $s), 0, 5);
+
+        $own = self::streetCore($company->address_line_1);
+        $line = self::streetCore($this->original_address_1);
+        if ($own === '' || $line === '') {
+            return false;
+        }
+
+        return $own === $line && $zip5($this->original_postal) === $zip5($company->postal_code);
+    }
+
+    /**
+     * Reduce a street line to a comparable core: uppercase, drop punctuation, and remove
+     * directional (N/S/E/W/NORTH/…) and street-suffix (RD/ROAD/ST/AVE/…) tokens, leaving
+     * just the house number + primary name (e.g. "2820 S. Hoover Rd" -> "2820HOOVER").
+     */
+    public static function streetCore(?string $street): string
+    {
+        $noise = ['N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW', 'NORTH', 'SOUTH', 'EAST', 'WEST',
+            'RD', 'ROAD', 'ST', 'STREET', 'AVE', 'AVENUE', 'BLVD', 'BOULEVARD', 'DR', 'DRIVE',
+            'LN', 'LANE', 'CT', 'COURT', 'PL', 'PLACE', 'CIR', 'CIRCLE', 'HWY', 'HIGHWAY',
+            'PKWY', 'PARKWAY', 'WAY', 'TER', 'TERRACE', 'PLZ', 'PLAZA', 'SQ', 'LOOP', 'TRL', 'TRAIL'];
+
+        $tokens = preg_split('/\s+/', trim(strtoupper((string) preg_replace('/[^A-Za-z0-9\s]/', ' ', (string) $street))));
+
+        return implode('', array_filter($tokens, fn (string $t): bool => $t !== '' && ! in_array($t, $noise, true)));
     }
 
     // Accessors

@@ -60,11 +60,12 @@ class AddressCorrectionsTable
                             ->orWhere('input_state', 'like', "%{$search}%")
                             ->orWhere('input_postal', 'like', "%{$search}%")
                     )),
-                TextColumn::make('usage_count')
+                TextColumn::make('variants_sum_times_seen')
                     ->label('Times Corrected')
                     ->numeric()
                     ->sortable()
-                    ->alignEnd(),
+                    ->alignEnd()
+                    ->placeholder('0'),
                 TextColumn::make('firstCarrier.name')
                     ->label('First Carrier')
                     ->badge()
@@ -76,11 +77,13 @@ class AddressCorrectionsTable
                     ->placeholder('—')
                     ->sortable(),
             ])
-            ->defaultSort('usage_count', 'desc')
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with([
-                'firstCarrier',
-                'variants' => fn ($q) => $q->orderByDesc('times_seen')->limit(1),
-            ]))
+            ->defaultSort('variants_sum_times_seen', 'desc')
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                ->withSum('variants as variants_sum_times_seen', 'times_seen')
+                ->with([
+                    'firstCarrier',
+                    'variants' => fn ($q) => $q->orderByDesc('times_seen')->limit(1),
+                ]))
             ->filters([
                 SelectFilter::make('first_carrier_id')
                     ->label('First Carrier')

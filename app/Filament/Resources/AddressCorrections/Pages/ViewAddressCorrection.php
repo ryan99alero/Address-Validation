@@ -48,8 +48,9 @@ class ViewAddressCorrection extends ViewRecord
                                     ->label('Bad Variations')
                                     ->badge()
                                     ->color('warning'),
-                                TextEntry::make('usage_count')
-                                    ->label('Times Corrected'),
+                                TextEntry::make('times_corrected')
+                                    ->label('Times Corrected')
+                                    ->state(fn ($record): int => (int) $record->variants()->sum('times_seen')),
                                 TextEntry::make('is_residential')
                                     ->label('Type')
                                     ->badge()
