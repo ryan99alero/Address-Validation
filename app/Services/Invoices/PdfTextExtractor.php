@@ -40,7 +40,14 @@ class PdfTextExtractor
             }
         }
 
-        return trim(preg_replace('/\s+/', ' ', $out));
+        $out = trim(preg_replace('/\s+/', ' ', $out));
+
+        // Old Ricoh AFP2PDF invoices can decode embedded binary (images/fonts) into the
+        // text stream, producing invalid UTF-8. Drop those bytes so downstream utf8mb4
+        // inserts never fail on garbage — valid text is unaffected.
+        $clean = @iconv('UTF-8', 'UTF-8//IGNORE', $out);
+
+        return $clean !== false ? $clean : mb_convert_encoding($out, 'UTF-8', 'UTF-8');
     }
 
     /**

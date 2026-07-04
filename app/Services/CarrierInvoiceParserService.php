@@ -1382,9 +1382,11 @@ class CarrierInvoiceParserService
                 'audited_dims' => $s['audited_dims'],
                 'customer_weight' => $s['customer_weight'],
                 'message_codes' => $s['message_codes'] !== [] ? $s['message_codes'] : null,
-                'sender' => $s['sender'],
-                'receiver' => $s['receiver'],
-                'third_party' => $s['third_party'],
+                // Cap free-text address fields — a mis-parsed legacy PDF can dump a huge
+                // blob here; the real values are short.
+                'sender' => $this->capText($s['sender'], 500),
+                'receiver' => $this->capText($s['receiver'], 500),
+                'third_party' => $this->capText($s['third_party'], 500),
                 'is_third_party' => $s['is_third_party'],
                 'printed_total' => $s['printed_total'],
                 'source_type' => 'pdf',
@@ -1456,6 +1458,18 @@ class CarrierInvoiceParserService
         }
 
         return null;
+    }
+
+    /**
+     * Truncate a free-text value to a sane column width (null stays null).
+     */
+    protected function capText(?string $value, int $max): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return mb_substr($value, 0, $max);
     }
 
     /**
