@@ -1325,13 +1325,14 @@ class CarrierInvoiceParserService
         }
 
         // Legacy UPS PDFs (pre-~2016 Ricoh layout — "Shipper Number" instead of "Account
-        // Number", no "Charges this period" summary) don't match the current-format parser:
-        // they yield a garbage number like "PAYMENTS" and no charges. The CSV is the
-        // authoritative source for those years, so skip rather than create a junk invoice.
+        // Number") don't match the current-format parser: they yield a garbage number like
+        // "PAYMENTS" and, at most, tiny mis-parse artifact charges. Every current-format UPS
+        // PDF prints a "Charges this period $X" summary; the legacy layout never does, so its
+        // absence is the reliable discriminator. Without it we also can't reconcile. The CSV
+        // is authoritative for those years, so skip rather than create a junk invoice.
         $grandTotal = $this->extractPdfGrandTotal($text);
-        $parsedTotal = (float) $parsed['reconciliation']['parsed_total'];
-        if ($grandTotal === null && $parsedTotal === 0.0) {
-            Log::info('Skipped legacy-format UPS PDF (unparseable, CSV is authoritative)', [
+        if ($grandTotal === null) {
+            Log::info('Skipped legacy-format UPS PDF (no charges-this-period summary, CSV is authoritative)', [
                 'file' => basename($path),
                 'parsed_number' => $parsed['invoice_number'],
             ]);
