@@ -65,6 +65,16 @@ if [ -z "${DB_PASSWORD}" ]; then
     exit 1
 fi
 
+# Capture the full run (stdout + stderr) to a timestamped deploy log so every step —
+# including any SQL Server driver install warnings — is reviewable afterward.
+DEPLOY_LOG="${DEPLOY_LOG:-/var/log/address-validation/deploy-$(date +%Y%m%d-%H%M%S).log}"
+if ! sudo mkdir -p "$(dirname "${DEPLOY_LOG}")" 2>/dev/null || ! sudo touch "${DEPLOY_LOG}" 2>/dev/null; then
+    DEPLOY_LOG="${SCRIPT_DIR}/deploy-$(date +%Y%m%d-%H%M%S).log"
+fi
+sudo chmod 664 "${DEPLOY_LOG}" 2>/dev/null || true
+exec > >(tee -a "${DEPLOY_LOG}") 2>&1
+echo "===== Deploy run started $(date) -> ${DEPLOY_LOG} ====="
+
 log() {
     echo ""
     echo "=== $1 ==="
@@ -426,6 +436,14 @@ sudo supervisorctl status || true
 echo ""
 echo "Storage symlink:"
 ls -l "${APP_DIR}/public/storage" || true
+
+echo ""
+echo "Deploy log: ${DEPLOY_LOG}"
+if grep -q "WARNING" "${DEPLOY_LOG}" 2>/dev/null; then
+    echo ""
+    echo "!! Warnings were logged during this deploy — review these:"
+    grep -n "WARNING" "${DEPLOY_LOG}" || true
+fi
 
 echo ""
 echo "Done."
