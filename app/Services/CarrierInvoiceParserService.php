@@ -6,16 +6,26 @@ use App\Models\Carrier;
 use App\Models\CarrierCharge;
 use App\Models\CarrierInvoice;
 use App\Models\CarrierInvoiceLine;
+use App\Models\CarrierShipment;
 use App\Services\Invoices\ChargeCategoryResolver;
 use App\Services\Invoices\FedExInvoiceParser;
 use App\Services\Invoices\InvoiceIdentity;
 use App\Services\Invoices\PdfTextExtractor;
+use App\Services\Invoices\UpsPdfChargeParser;
 use App\Services\Invoices\UpsPdfInvoiceParser;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
 class CarrierInvoiceParserService
 {
+    /**
+     * The source format of the file currently being imported ('csv' | 'pdf'), stamped
+     * onto each charge. Charge rows stay append-only + first-writer-wins on dedup;
+     * source_type lets description precedence (CSV > PDF) be resolved at read time
+     * instead of by mutating charges on write.
+     */
+    protected ?string $importSourceType = null;
+
     public function __construct(
         protected ?ShippingDatabaseService $shippingDb = null
     ) {
@@ -813,6 +823,7 @@ class CarrierInvoiceParserService
 
         CarrierCharge::create([
             'carrier_invoice_id' => $invoice->id,
+            'carrier_shipment_id' => $data['carrier_shipment_id'] ?? null,
             'carrier_id' => $invoice->carrier_id,
             'invoice_date' => $invoice->invoice_date ?? ($data['date'] ?? null),
             'ship_date' => $data['ship_date'] ?? ($data['date'] ?? null),
@@ -825,6 +836,7 @@ class CarrierInvoiceParserService
             'service' => $data['service'] ?? null,
             'zone' => $data['zone'] ?? null,
             'weight' => $data['weight'] ?? null,
+            'source_type' => $data['source_type'] ?? $this->importSourceType,
         ]);
     }
 
@@ -904,6 +916,8 @@ class CarrierInvoiceParserService
      */
     public function importFedExCsv(int $carrierId, string $path): array
     {
+        $this->importSourceType = 'csv';
+
         $handle = fopen($path, 'r');
         if ($handle === false) {
             throw new \RuntimeException("Cannot open file: {$path}");
@@ -942,10 +956,11 @@ class CarrierInvoiceParserService
                 continue;
             }
 
-            $invoice = $invoices[$number] ??= $this->getOrCreateInvoice(
+            $date = $this->parseDate($row[$col['Invoice Date'] ?? 2] ?? '');
+            $invoice = $invoices[$number.'|'.$date] ??= $this->getOrCreateInvoice(
                 $carrierId,
                 $number,
-                $this->parseDate($row[$col['Invoice Date'] ?? 2] ?? ''),
+                $date,
                 InvoiceIdentity::account($row[$col['Bill to Account Number'] ?? 1] ?? null),
             );
             $seen[$invoice->id] ??= $this->loadChargeMultiset($invoice);
@@ -1066,6 +1081,8 @@ class CarrierInvoiceParserService
      */
     public function importFedExPdf(int $carrierId, string $path): array
     {
+        $this->importSourceType = 'pdf';
+
         $this->chargeCategoryResolver ??= new ChargeCategoryResolver;
         $parsed = (new FedExInvoiceParser)->parseStructured($path);
 
@@ -1181,6 +1198,7 @@ class CarrierInvoiceParserService
      */
     public function importUpsCsv(int $carrierId, string $path): array
     {
+        $this->importSourceType = 'csv';
         $handle = fopen($path, 'r');
         if ($handle === false) {
             throw new \RuntimeException("Cannot open file: {$path}");
@@ -1199,13 +1217,20 @@ class CarrierInvoiceParserService
                 continue;
             }
 
-            $invoice = $invoices[$number] ??= $this->getOrCreateInvoice(
+            $date = $this->parseDate($row[4] ?? '');
+            $invoice = $invoices[$number.'|'.$date] ??= $this->getOrCreateInvoice(
                 $carrierId,
                 $number,
-                $this->parseDate($row[4] ?? ''),
+                $date,
                 InvoiceIdentity::account($row[1] ?? null),
             );
-            $seen[$invoice->id] ??= $this->loadChargeMultiset($invoice);
+            if (! isset($seen[$invoice->id])) {
+                // CSV is authoritative: on first touch, evict any PDF-sourced charges for
+                // this invoice (a PDF may have imported first) so CSV owns the charges.
+                // Shipment/audit rows from the PDF are kept.
+                CarrierCharge::where('carrier_invoice_id', $invoice->id)->where('source_type', 'pdf')->delete();
+                $seen[$invoice->id] = $this->loadChargeMultiset($invoice);
+            }
             $corr[$invoice->id] ??= $this->loadCorrectionTrackings($invoice);
 
             $tracking = trim((string) ($row[13] ?? '')) ?: null;
@@ -1278,28 +1303,147 @@ class CarrierInvoiceParserService
      */
     public function importUpsPdf(int $carrierId, string $path): array
     {
+        $this->importSourceType = 'pdf';
         $text = (new PdfTextExtractor)->extractFile($path);
-        if (! preg_match('/Invoice Number\s*([0-9A-Za-z]+)/', $text, $numM)) {
+
+        $parsed = (new UpsPdfChargeParser)->parse($text);
+        if ($parsed['invoice_number'] === null) {
             return [];
         }
-        $number = InvoiceIdentity::number($numM[1]);
+        $number = InvoiceIdentity::number($parsed['invoice_number']);
         if ($number === null) {
             return [];
         }
 
-        $date = null;
-        if (preg_match('/Invoice Date\s*([A-Z][a-z]+ \d{1,2}, \d{4})/', $text, $dateM)) {
-            try {
-                $date = Carbon::parse($dateM[1])->toDateString();
-            } catch (\Exception $e) {
-                // leave null
+        $invoice = $this->getOrCreateInvoice(
+            $carrierId,
+            $number,
+            $parsed['invoice_date'],
+            InvoiceIdentity::account($parsed['account_number']),
+        );
+
+        $this->persistUpsPdf($invoice, $parsed, $this->extractPdfGrandTotal($text));
+
+        // Feed the address-correction cache from the same PDF (reuses the tested parser).
+        $corrections = (new UpsPdfInvoiceParser)->parse($text)['corrections'];
+        if ($corrections !== []) {
+            $this->buildCorrectionLines($invoice, $corrections);
+        }
+
+        return [$invoice->id];
+    }
+
+    /**
+     * Persist parsed UPS-PDF shipments + charges, idempotently (a re-import replaces the
+     * prior PDF-sourced rows for this invoice), then stamp the reconciliation result.
+     *
+     * @param  array<string, mixed>  $parsed
+     */
+    protected function persistUpsPdf(CarrierInvoice $invoice, array $parsed, ?float $expected): void
+    {
+        // Idempotent re-import: clear prior PDF rows for this invoice before re-inserting.
+        CarrierCharge::where('carrier_invoice_id', $invoice->id)->where('source_type', 'pdf')->delete();
+        CarrierShipment::where('carrier_invoice_id', $invoice->id)->delete();
+
+        // CSV is the authoritative charge source (matched by invoice NUMBER, not filename).
+        // If this invoice already carries CSV charges, we keep the PDF's shipment/audit
+        // detail but do NOT add its charges — avoiding a double-count when the same invoice
+        // arrives as both a .csv and a .pdf.
+        $hasCsvCharges = CarrierCharge::where('carrier_invoice_id', $invoice->id)
+            ->where('source_type', 'csv')->exists();
+
+        $this->chargeCategoryResolver ??= new ChargeCategoryResolver;
+
+        foreach ($parsed['shipments'] as $s) {
+            $shipment = CarrierShipment::create([
+                'carrier_invoice_id' => $invoice->id,
+                'carrier_id' => $invoice->carrier_id,
+                'tracking_number' => $s['tracking_number'],
+                'section' => $s['section'],
+                'service' => $s['service'],
+                'zip' => $s['zip'],
+                'zone' => $s['zone'],
+                'weight' => $s['weight'],
+                'billed_weight' => $s['billed_weight'],
+                'ship_date' => $s['ship_date'],
+                'customer_dims' => $s['customer_dims'],
+                'audited_dims' => $s['audited_dims'],
+                'customer_weight' => $s['customer_weight'],
+                'message_codes' => $s['message_codes'] !== [] ? $s['message_codes'] : null,
+                'sender' => $s['sender'],
+                'receiver' => $s['receiver'],
+                'third_party' => $s['third_party'],
+                'is_third_party' => $s['is_third_party'],
+                'printed_total' => $s['printed_total'],
+                'source_type' => 'pdf',
+            ]);
+
+            // Zero-amount shipments (e.g. third-party billed) get a shipment row for the
+            // ref/address data, but no charge rows — no cost to attribute. And when CSV
+            // already owns this invoice's charges, skip PDF charges entirely.
+            if ($hasCsvCharges) {
+                continue;
+            }
+            foreach ($s['charges'] as $c) {
+                if ((float) $c['amount'] === 0.0) {
+                    continue;
+                }
+                $this->recordCharge($invoice, [
+                    'carrier_shipment_id' => $shipment->id,
+                    'charge_description' => $c['description'],
+                    'amount' => $c['amount'],
+                    'tracking_number' => $s['tracking_number'],
+                    'ship_date' => $s['ship_date'],
+                    'service' => $s['service'],
+                    'zone' => $s['zone'],
+                    'weight' => $s['weight'],
+                    'source_type' => 'pdf',
+                ]);
             }
         }
 
-        $invoice = $this->getOrCreateInvoice($carrierId, $number, $date, null);
-        $invoice->update(['status' => 'completed', 'processed_at' => $invoice->processed_at ?? now()]);
+        foreach ($hasCsvCharges ? [] : $parsed['account_charges'] as $c) {
+            if ((float) $c['amount'] === 0.0) {
+                continue;
+            }
+            $this->recordCharge($invoice, [
+                'charge_description' => $c['description'],
+                'amount' => $c['amount'],
+                'source_type' => 'pdf',
+            ]);
+        }
 
-        return [$invoice->id];
+        $parsedTotal = (float) $parsed['reconciliation']['parsed_total'];
+        $reconciled = $expected !== null && abs($parsedTotal - $expected) < 0.01;
+
+        $invoice->update([
+            'charges_parsed_total' => $parsedTotal,
+            'charges_expected_total' => $expected,
+            'charges_reconciled' => $reconciled,
+            'status' => 'completed',
+            'processed_at' => $invoice->processed_at ?? now(),
+        ]);
+
+        if ($expected !== null && ! $reconciled) {
+            Log::warning('UPS PDF charges did not reconcile', [
+                'invoice' => $invoice->invoice_number,
+                'parsed' => $parsedTotal,
+                'expected' => $expected,
+            ]);
+        }
+    }
+
+    /**
+     * The invoice grand total UPS prints in the "Summary of Charges" ("Charges this period
+     * $ 4,411.77"), used to reconcile our parsed sum.
+     */
+    protected function extractPdfGrandTotal(string $text): ?float
+    {
+        if (preg_match('/Charges this period\s*\$?\s*([\d,]+\.\d{2})/', $text, $m)) {
+            return (float) str_replace(',', '', $m[1]);
+        }
+
+        return null;
     }
 
     /**
@@ -1316,7 +1460,7 @@ class CarrierInvoiceParserService
             return;
         }
         $categoryId = $this->chargeCategoryResolver->resolve($carrierId, $data['charge_code'] ?? null, $data['charge_description'] ?? null);
-        $key = ((string) ($data['tracking_number'] ?? '')).'|'.($categoryId ?? 'n').'|'.number_format($amount, 2);
+        $key = $this->chargeKey($data['tracking_number'] ?? null, $categoryId, $amount, $data['ship_date'] ?? null);
 
         if (($seen[$key] ?? 0) > 0) {
             $seen[$key]--;
@@ -1328,9 +1472,21 @@ class CarrierInvoiceParserService
     }
 
     /**
-     * Add a charge unless an identical one (same tracking + category + amount) is
-     * already on the invoice — the multiset-difference that keeps CSV/PDF merges
-     * cost-safe. $seen is the running multiset for this invoice.
+     * Dedup key for a charge: tracking + category + amount + ship date. Ship date is
+     * included because carriers recycle tracking numbers over time — without it, a
+     * recycled tracking with the same category+amount in a later period would be
+     * dropped as a false duplicate.
+     */
+    private function chargeKey(?string $tracking, ?int $categoryId, float $amount, ?string $shipDate): string
+    {
+        return ((string) $tracking).'|'.($categoryId ?? 'n').'|'.number_format($amount, 2).'|'
+            .($shipDate !== null && $shipDate !== '' ? substr($shipDate, 0, 10) : '');
+    }
+
+    /**
+     * Add a charge unless an identical one (same tracking + category + amount +
+     * ship date) is already on the invoice — the multiset-difference that keeps
+     * CSV/PDF merges cost-safe. $seen is the running multiset for this invoice.
      *
      * @param  array<string, int>  $seen
      */
@@ -1340,7 +1496,7 @@ class CarrierInvoiceParserService
             return;
         }
         $categoryId = $this->chargeCategoryResolver->resolve($carrierId, null, $description);
-        $key = ($tracking ?? '').'|'.($categoryId ?? 'n').'|'.number_format($amount, 2);
+        $key = $this->chargeKey($tracking, $categoryId, $amount, $shipDate);
 
         if (($seen[$key] ?? 0) > 0) {
             $seen[$key]--;
@@ -1363,20 +1519,21 @@ class CarrierInvoiceParserService
      */
     protected function getOrCreateInvoice(int $carrierId, string $invoiceNumber, ?string $invoiceDate, ?string $account): CarrierInvoice
     {
-        $invoice = CarrierInvoice::firstOrCreate(
-            ['carrier_id' => $carrierId, 'invoice_number' => $invoiceNumber],
-            ['invoice_date' => $invoiceDate, 'account_number' => $account, 'source' => 'import', 'status' => 'completed'],
+        // Invoice identity is (carrier, number, date). UPS recycles the invoice-number
+        // series roughly every ~10 years, so number alone merged e.g. the 2009 and 2019
+        // "E540W079" into one record. Including the billing date keeps recycled numbers
+        // separate while still merging same-period duplicates (weekly file + year file),
+        // and a matching unique index makes the regression impossible.
+        // createOrFirst (not firstOrCreate) so concurrent per-file import jobs racing on
+        // the same new invoice don't spuriously fail: the loser catches the unique-index
+        // violation and re-selects instead of throwing.
+        $invoice = CarrierInvoice::createOrFirst(
+            ['carrier_id' => $carrierId, 'invoice_number' => $invoiceNumber, 'invoice_date' => $invoiceDate],
+            ['account_number' => $account, 'source' => 'import', 'status' => 'completed'],
         );
 
-        $fill = [];
-        if ($invoiceDate !== null && empty($invoice->invoice_date)) {
-            $fill['invoice_date'] = $invoiceDate;
-        }
         if ($account !== null && empty($invoice->account_number)) {
-            $fill['account_number'] = $account;
-        }
-        if ($fill !== []) {
-            $invoice->update($fill);
+            $invoice->update(['account_number' => $account]);
         }
 
         return $invoice;
@@ -1391,8 +1548,13 @@ class CarrierInvoiceParserService
     protected function loadChargeMultiset(CarrierInvoice $invoice): array
     {
         $seen = [];
-        foreach ($invoice->charges()->get(['tracking_number', 'charge_category_id', 'amount']) as $charge) {
-            $key = ((string) $charge->tracking_number).'|'.($charge->charge_category_id ?? 'n').'|'.number_format((float) $charge->amount, 2);
+        foreach ($invoice->charges()->get(['tracking_number', 'charge_category_id', 'amount', 'ship_date']) as $charge) {
+            $key = $this->chargeKey(
+                $charge->tracking_number,
+                $charge->charge_category_id,
+                (float) $charge->amount,
+                $charge->ship_date?->format('Y-m-d'),
+            );
             $seen[$key] = ($seen[$key] ?? 0) + 1;
         }
 

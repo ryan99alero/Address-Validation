@@ -9,6 +9,7 @@ class CarrierCharge extends Model
 {
     protected $fillable = [
         'carrier_invoice_id',
+        'carrier_shipment_id',
         'carrier_id',
         'invoice_date',
         'ship_date',
@@ -21,6 +22,7 @@ class CarrierCharge extends Model
         'service',
         'zone',
         'weight',
+        'source_type',
     ];
 
     /**
@@ -49,5 +51,10 @@ class CarrierCharge extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(ChargeCategory::class, 'charge_category_id');
+    }
+
+    public function shipment(): BelongsTo
+    {
+        return $this->belongsTo(CarrierShipment::class, 'carrier_shipment_id');
     }
 }

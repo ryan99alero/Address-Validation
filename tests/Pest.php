@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /*
@@ -14,7 +15,7 @@ use Tests\TestCase;
 */
 
 pest()->extend(TestCase::class)
-    ->use(Illuminate\Foundation\Testing\RefreshDatabase::class)
+    ->use(RefreshDatabase::class)
     ->in('Feature');
 
 /*
@@ -46,4 +47,42 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+/**
+ * Build one UPS Billing Data CSV row (fixed 250-column layout) with only the columns the
+ * importer reads populated.
+ *
+ * @return array<int, string>
+ */
+function upsRow(string $invNumber, string $invDate, string $tracking, string $amount, string $shipDate, string $code = 'ISS'): array
+{
+    $row = array_fill(0, 82, '');
+    $row[1] = '0000691317';   // account
+    $row[4] = $invDate;       // invoice date
+    $row[5] = $invNumber;     // invoice number
+    $row[11] = $shipDate;     // ship date
+    $row[13] = $tracking;     // tracking
+    $row[28] = '1.0';         // weight
+    $row[33] = '005';         // zone
+    $row[35] = $code;         // charge category detail code
+    $row[45] = 'Ground Commercial'; // description
+    $row[52] = $amount;       // net amount
+
+    return $row;
+}
+
+/**
+ * @param  array<int, array<int, string>>  $rows
+ */
+function writeUpsCsv(array $rows): string
+{
+    $path = tempnam(sys_get_temp_dir(), 'upscsv_').'.csv';
+    $h = fopen($path, 'w');
+    foreach ($rows as $row) {
+        fputcsv($h, $row, ',', '"', '');
+    }
+    fclose($h);
+
+    return $path;
 }

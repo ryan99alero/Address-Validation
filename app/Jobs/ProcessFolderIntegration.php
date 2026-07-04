@@ -20,7 +20,10 @@ class ProcessFolderIntegration implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 7200; // 2 hours for a full multi-year scan
+    public int $timeout = 900; // just enumerates + dispatches chunks; the work runs in ProcessFolderChunk
+
+    /** Files per chunk job — sized so a chunk finishes well under ProcessFolderChunk's timeout. */
+    public const CHUNK_SIZE = 100;
 
     public function __construct(
         public FolderIntegration $integration,
@@ -30,24 +33,30 @@ class ProcessFolderIntegration implements ShouldQueue
 
     public function handle(FolderInvoiceIngestService $service): void
     {
-        // Long-running job: stop Telescope and the query log from holding every
-        // query in memory (thousands of inserts per year folder would OOM).
         if (class_exists(Telescope::class)) {
             Telescope::stopRecording();
         }
         DB::disableQueryLog();
 
-        $stats = $service->ingest($this->integration, $this->limit, $this->scanPath);
+        // Enumerate once, then fan out one retryable ProcessFolderChunk per batch of
+        // files. A single oversized folder can no longer time out the whole ingest.
+        $files = $service->listCandidates($this->integration, $this->scanPath);
+        if ($this->limit > 0) {
+            $files = array_slice($files, 0, $this->limit);
+        }
+
+        $chunks = array_chunk($files, self::CHUNK_SIZE);
+        foreach ($chunks as $chunk) {
+            ProcessFolderChunk::dispatch($this->integration, $chunk);
+        }
+
         $this->integration->markChecked('ok');
 
-        Log::info('ProcessFolderIntegration: completed', [
+        Log::info('ProcessFolderIntegration: enumerated', [
             'integration_id' => $this->integration->id,
             'scan_path' => $this->scanPath ?? $this->integration->base_path,
-            'found' => $stats['found'],
-            'processed' => $stats['processed'],
-            'skipped' => $stats['skipped'],
-            'failed' => $stats['failed'],
-            'errors' => array_slice($stats['errors'], 0, 20),
+            'files' => count($files),
+            'chunks' => count($chunks),
         ]);
     }
 

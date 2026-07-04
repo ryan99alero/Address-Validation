@@ -28,41 +28,82 @@ class FolderInvoiceIngestService
      */
     public function ingest(FolderIntegration $folder, int $limit = 0, ?string $scanPath = null): array
     {
-        if ($folder->connection_type === FolderIntegration::TYPE_SMB) {
-            return $this->ingestSmb($folder, $limit);
+        $files = $this->listCandidates($folder, $scanPath);
+        if ($limit > 0) {
+            $files = array_slice($files, 0, $limit);
         }
 
-        $stats = ['found' => 0, 'processed' => 0, 'skipped' => 0, 'failed' => 0, 'errors' => []];
+        return $this->ingestFiles($folder, $files);
+    }
+
+    /**
+     * Enumerate the candidate files to import, CSV-first, as opaque identifiers the
+     * matching ingestFiles() understands (remote paths for SMB, absolute paths for
+     * local). Done once so a chunked dispatch doesn't re-list per job.
+     *
+     * @return array<int, string>
+     */
+    public function listCandidates(FolderIntegration $folder, ?string $scanPath = null): array
+    {
+        $extensions = $folder->extensions() ?: ['csv', 'pdf'];
+
+        if ($folder->connection_type === FolderIntegration::TYPE_SMB) {
+            return $this->orderCsvFirst($this->smb->listFiles($folder, $extensions, $folder->recursive));
+        }
 
         // A specific sub-path (e.g. a single year) keeps each run small & fast.
         $path = $scanPath !== null ? rtrim($scanPath, '/') : $this->resolvePath($folder);
         if (! is_dir($path)) {
             throw new RuntimeException("Folder not found or not accessible: {$path}");
         }
-        $extensions = $folder->extensions() ?: ['csv', 'pdf'];
 
-        $files = $this->collectAllFiles($path, $extensions, $folder->recursive);
-        $stats['found'] = count($files);
+        return $this->collectAllFiles($path, $extensions, $folder->recursive);
+    }
 
-        foreach ($files as $filePath) {
-            if ($limit > 0 && $stats['processed'] >= $limit) {
-                break;
-            }
+    /**
+     * Import a specific list of files (a chunk). Each file is content-hash deduped, so
+     * a retried chunk only redoes the files it hadn't finished. Order across chunks
+     * doesn't affect correctness — charges carry source_type for read-time precedence.
+     *
+     * @param  array<int, string>  $files
+     * @return array{found: int, processed: int, skipped: int, failed: int, errors: array<int, string>}
+     */
+    public function ingestFiles(FolderIntegration $folder, array $files): array
+    {
+        $stats = ['found' => count($files), 'processed' => 0, 'skipped' => 0, 'failed' => 0, 'errors' => []];
+        $isSmb = $folder->connection_type === FolderIntegration::TYPE_SMB;
+        $unc = $isSmb ? '//'.$folder->smb_host.'/'.$folder->smb_share.'/' : '';
 
-            $hash = hash_file('sha256', $filePath);
-            if ($this->alreadyImported($hash)) {
-                $stats['skipped']++;
-
-                continue;
-            }
-
+        foreach ($files as $file) {
+            $temp = null;
             try {
-                $ids = $this->parser->importFile($folder->carrier_id, $filePath);
-                $this->recordImport($folder, $hash, basename($filePath), $filePath, $ids);
+                if ($isSmb) {
+                    $temp = $this->toTemp($file);
+                    $this->smb->download($folder, $file, $temp);
+                    $localPath = $temp;
+                    $reference = $unc.$file;
+                } else {
+                    $localPath = $file;
+                    $reference = $file;
+                }
+
+                $hash = hash_file('sha256', $localPath);
+                if ($this->alreadyImported($hash)) {
+                    $stats['skipped']++;
+
+                    continue;
+                }
+
+                $ids = $this->parser->importFile($folder->carrier_id, $localPath);
+                $this->recordImport($folder, $hash, basename($file), $reference, $ids);
                 $stats['processed']++;
             } catch (Throwable $e) {
                 $stats['failed']++;
-                $stats['errors'][] = basename($filePath).': '.$e->getMessage();
+                $stats['errors'][] = basename($file).': '.$e->getMessage();
+            } finally {
+                if ($temp !== null) {
+                    @unlink($temp);
+                }
             }
         }
 
@@ -82,55 +123,6 @@ class FolderInvoiceIngestService
         }
 
         return $path;
-    }
-
-    /**
-     * Ingest from a direct SMB share: list remote files, stream each to a temp file,
-     * dedup by content hash, and split each batch into real invoices.
-     *
-     * @return array{found: int, processed: int, skipped: int, failed: int, errors: array<int, string>}
-     */
-    protected function ingestSmb(FolderIntegration $folder, int $limit): array
-    {
-        $stats = ['found' => 0, 'processed' => 0, 'skipped' => 0, 'failed' => 0, 'errors' => []];
-        $extensions = $folder->extensions() ?: ['csv', 'pdf'];
-
-        $files = $this->orderCsvFirst($this->smb->listFiles($folder, $extensions, $folder->recursive));
-        $stats['found'] = count($files);
-
-        $unc = '//'.$folder->smb_host.'/'.$folder->smb_share.'/';
-
-        foreach ($files as $remotePath) {
-            if ($limit > 0 && $stats['processed'] >= $limit) {
-                break;
-            }
-
-            $temp = $this->toTemp($remotePath);
-
-            try {
-                $this->smb->download($folder, $remotePath, $temp);
-                $hash = hash_file('sha256', $temp);
-
-                if ($this->alreadyImported($hash)) {
-                    $stats['skipped']++;
-
-                    continue;
-                }
-
-                $ids = $this->parser->importFile($folder->carrier_id, $temp);
-                $this->recordImport($folder, $hash, basename($remotePath), $unc.$remotePath, $ids);
-                $stats['processed']++;
-            } catch (Throwable $e) {
-                $stats['failed']++;
-                $stats['errors'][] = basename($remotePath).': '.$e->getMessage();
-            } finally {
-                @unlink($temp);
-            }
-        }
-
-        $folder->update(['last_processed_at' => now()]);
-
-        return $stats;
     }
 
     protected function alreadyImported(string $hash): bool

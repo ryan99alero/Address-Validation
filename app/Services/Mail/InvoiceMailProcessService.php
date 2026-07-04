@@ -3,6 +3,7 @@
 namespace App\Services\Mail;
 
 use App\Models\Carrier;
+use App\Models\CarrierImportFile;
 use App\Models\CarrierInvoice;
 use App\Models\MailIntegration;
 use App\Services\CarrierInvoiceParserService;
@@ -203,8 +204,10 @@ class InvoiceMailProcessService
     {
         $hash = hash_file('sha256', $pdfPath);
 
-        // File-level dedupe: same invoice file already processed.
-        if (CarrierInvoice::where('file_hash', $hash)->exists()) {
+        // File-level dedupe: same invoice file already processed (legacy pre-split records
+        // set CarrierInvoice.file_hash; the split model tracks it on carrier_import_files).
+        if (CarrierInvoice::where('file_hash', $hash)->exists()
+            || CarrierImportFile::where('file_hash', $hash)->exists()) {
             $stats['skipped']++;
 
             return;
@@ -217,18 +220,32 @@ class InvoiceMailProcessService
             return;
         }
 
-        $invoice = CarrierInvoice::create([
+        // Split-model ingest: one file may yield several real invoices (by number+date).
+        // importFile() routes UPS/FedEx CSV vs PDF to the format-specific parsers that
+        // extract charges + shipments + DIM audit, not just address corrections.
+        $invoiceIds = $this->parser->importFile($carrier->id, $pdfPath);
+
+        if ($invoiceIds === []) {
+            $stats['errors'][] = 'No invoice parsed from '.basename($pdfPath);
+
+            return;
+        }
+
+        $file = CarrierImportFile::create([
             'carrier_id' => $carrier->id,
-            'filename' => basename($pdfPath),
             'file_hash' => $hash,
-            'status' => 'pending',
+            'filename' => basename($pdfPath),
+            'source_reference' => 'mail:'.$integration->id,
+            'invoice_count' => count($invoiceIds),
+            'imported_at' => now(),
         ]);
+        $file->invoices()->syncWithoutDetaching($invoiceIds);
 
-        $result = $this->parser->parse($invoice, $pdfPath);
-        $stats['invoices']++;
-        $stats['corrections'] += $result['corrections'];
-
-        $this->archive($integration, $carrier, $invoice, $pdfPath);
+        foreach (CarrierInvoice::whereIn('id', $invoiceIds)->get() as $invoice) {
+            $stats['invoices']++;
+            $stats['corrections'] += $invoice->correctionLines()->count();
+            $this->archive($integration, $carrier, $invoice, $pdfPath);
+        }
     }
 
     /**

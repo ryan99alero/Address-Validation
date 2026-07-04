@@ -39,6 +39,9 @@ class CarrierInvoice extends Model
         'status',
         'error_message',
         'processed_at',
+        'charges_parsed_total',
+        'charges_expected_total',
+        'charges_reconciled',
     ];
 
     /**
@@ -47,7 +50,14 @@ class CarrierInvoice extends Model
     protected function casts(): array
     {
         return [
-            'invoice_date' => 'date',
+            // Date-only (NOT plain 'date', which serializes 'Y-m-d 00:00:00'):
+            // invoice_date is part of the (carrier, number, date) get-or-create key, and
+            // createOrFirst only stays race-safe if the value round-trips byte-identically
+            // on both the compare and store paths. Do not "simplify" this back to 'date'.
+            'invoice_date' => 'date:Y-m-d',
+            'charges_parsed_total' => 'decimal:2',
+            'charges_expected_total' => 'decimal:2',
+            'charges_reconciled' => 'boolean',
             'total_records' => 'integer',
             'correction_records' => 'integer',
             'new_corrections' => 'integer',
