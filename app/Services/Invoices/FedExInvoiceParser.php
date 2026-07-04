@@ -132,12 +132,14 @@ class FedExInvoiceParser
         // No per-invoice sections detected — treat the whole document as one invoice.
         if (! is_array($parts) || count($parts) < 3) {
             $meta = $this->extractMeta($text);
+            $shipments = $this->extractShipments($text, $source);
 
             return [[
                 'number' => (string) ($meta['invoice_number'] ?? ''),
                 'invoice_date' => $meta['invoice_date'] ?? null,
                 'account' => $meta['account_number'] ?? null,
-                'shipments' => $this->extractShipments($text, $source),
+                'shipments' => $shipments,
+                'expected_total' => $this->sumShipmentTotals($shipments),
             ]];
         }
 
@@ -146,15 +148,28 @@ class FedExInvoiceParser
             $section = (string) $parts[$i + 1];
             preg_match('/Invoice Date\s+([A-Z][a-z]{2} \d{1,2}, \d{4})/', $section, $d);
             preg_match('/Account Number\s+([0-9-]+)/', $section, $a);
+            $shipments = $this->extractShipments($section, $source);
             $invoices[] = [
                 'number' => (string) $parts[$i],
                 'invoice_date' => $d[1] ?? null,
                 'account' => $a[1] ?? null,
-                'shipments' => $this->extractShipments($section, $source),
+                'shipments' => $shipments,
+                'expected_total' => $this->sumShipmentTotals($shipments),
             ];
         }
 
         return $invoices;
+    }
+
+    /**
+     * The invoice's printed grand total = the sum of its shipments' reconciled
+     * "Total Charge" markers (used for invoice-level reconciliation).
+     *
+     * @param  array<int, array<string, mixed>>  $shipments
+     */
+    protected function sumShipmentTotals(array $shipments): float
+    {
+        return round(array_sum(array_map(fn (array $s): float => (float) ($s['total_charge'] ?? 0), $shipments)), 2);
     }
 
     /**

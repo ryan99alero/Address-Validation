@@ -1000,19 +1000,8 @@ class CarrierInvoiceParserService
         }
         fclose($handle);
 
-        $survived = [];
-        foreach ($invoices as $invoice) {
-            if ($invoice->charges()->count() === 0) {
-                $invoice->delete();
-
-                continue;
-            }
-            $newCorrections = $this->linkCorrectionsToCache($invoice);
-            $this->refreshInvoiceTotals($invoice, $newCorrections);
-            $survived[] = $invoice->id;
-        }
-
-        return $survived;
+        // CSV has no printed grand total to reconcile against — it is the source of truth.
+        return $this->finalizeInvoices($invoices);
     }
 
     /**
@@ -1097,6 +1086,8 @@ class CarrierInvoiceParserService
 
         /** @var array<int, CarrierInvoice> $touched */
         $touched = [];
+        /** @var array<int, float> $expectedTotals */
+        $expectedTotals = [];
         /** @var array<string, CarrierInvoice> $trackingToInvoice */
         $trackingToInvoice = [];
         /** @var array<string, ?string> $trackingShipDate */
@@ -1118,6 +1109,7 @@ class CarrierInvoiceParserService
             }
 
             $invoice = $this->getOrCreateInvoice($carrierId, $number, $invoiceDate, InvoiceIdentity::account($section['account'] ?? null));
+            $expectedTotals[$invoice->id] = ($expectedTotals[$invoice->id] ?? 0.0) + (float) ($section['expected_total'] ?? 0);
             $seen = $this->loadChargeMultiset($invoice);
 
             foreach ($section['shipments'] as $shipment) {
@@ -1182,19 +1174,9 @@ class CarrierInvoiceParserService
             $corrSeen[$invoice->id][$tracking] = true;
         }
 
-        $survived = [];
-        foreach ($touched as $invoice) {
-            if ($invoice->charges()->count() === 0) {
-                $invoice->delete();
-
-                continue;
-            }
-            $newCorrections = $this->linkCorrectionsToCache($invoice);
-            $this->refreshInvoiceTotals($invoice, $newCorrections);
-            $survived[] = $invoice->id;
-        }
-
-        return $survived;
+        // PDF prints a per-invoice grand total (sum of shipment "Total Charge" markers) —
+        // reconcile against it, and back-fill FedEx original addresses along the way.
+        return $this->finalizeInvoices($touched, $expectedTotals);
     }
 
     /**
@@ -1287,19 +1269,8 @@ class CarrierInvoiceParserService
         }
         fclose($handle);
 
-        $survived = [];
-        foreach ($invoices as $invoice) {
-            if ($invoice->charges()->count() === 0) {
-                $invoice->delete();
-
-                continue;
-            }
-            $newCorrections = $this->linkCorrectionsToCache($invoice);
-            $this->refreshInvoiceTotals($invoice, $newCorrections);
-            $survived[] = $invoice->id;
-        }
-
-        return $survived;
+        // CSV has no printed grand total to reconcile against — it is the source of truth.
+        return $this->finalizeInvoices($invoices);
     }
 
     /**
@@ -1445,24 +1416,71 @@ class CarrierInvoiceParserService
             ]);
         }
 
-        $parsedTotal = (float) $parsed['reconciliation']['parsed_total'];
-        $reconciled = $expected !== null && abs($parsedTotal - $expected) < 0.01;
+        $invoice->update(['status' => 'completed', 'processed_at' => $invoice->processed_at ?? now()]);
+        $this->reconcileInvoice($invoice, (float) $parsed['reconciliation']['parsed_total'], $expected);
+    }
+
+    /**
+     * Stamp the invoice-level reconciliation result: does our parsed charge sum match the
+     * grand total the carrier PRINTED on the invoice? Carrier-agnostic — the caller supplies
+     * the printed expected total (null for CSV, which has no printed total to check against).
+     */
+    protected function reconcileInvoice(CarrierInvoice $invoice, float $parsedTotal, ?float $expected): void
+    {
+        $reconciled = $expected !== null ? abs($parsedTotal - $expected) < 0.01 : null;
 
         $invoice->update([
-            'charges_parsed_total' => $parsedTotal,
+            'charges_parsed_total' => round($parsedTotal, 2),
             'charges_expected_total' => $expected,
             'charges_reconciled' => $reconciled,
-            'status' => 'completed',
-            'processed_at' => $invoice->processed_at ?? now(),
         ]);
 
-        if ($expected !== null && ! $reconciled) {
-            Log::warning('UPS PDF charges did not reconcile', [
+        if ($expected !== null && $reconciled === false) {
+            Log::warning('Invoice charges did not reconcile', [
+                'carrier_invoice_id' => $invoice->id,
                 'invoice' => $invoice->invoice_number,
-                'parsed' => $parsedTotal,
+                'parsed' => round($parsedTotal, 2),
                 'expected' => $expected,
             ]);
         }
+    }
+
+    /**
+     * Shared finalize step for the split-model importers: drop zero-charge invoices,
+     * back-fill FedEx original addresses from the shipping DB, link corrections to the
+     * cache, refresh summary counters, and (for PDFs, which print a grand total) reconcile.
+     *
+     * @param  array<int|string, CarrierInvoice>  $invoices
+     * @param  array<int, float>  $expectedTotals  invoice id => printed grand total (PDF only)
+     * @return array<int, int>
+     */
+    protected function finalizeInvoices(array $invoices, array $expectedTotals = []): array
+    {
+        $survived = [];
+        foreach ($invoices as $invoice) {
+            if ($invoice->charges()->count() === 0) {
+                $invoice->delete();
+
+                continue;
+            }
+
+            // Back-fill missing original addresses (FedEx returns/undeliverables often ship
+            // without one) BEFORE linking, so cache variants use the real customer address.
+            if (strtolower((string) $invoice->carrier?->slug) === 'fedex' && $this->shippingDb->isAvailable()) {
+                $this->backfillFedExOriginalAddresses($invoice);
+            }
+
+            $newCorrections = $this->linkCorrectionsToCache($invoice);
+            $this->refreshInvoiceTotals($invoice, $newCorrections);
+
+            if (array_key_exists($invoice->id, $expectedTotals)) {
+                $this->reconcileInvoice($invoice, (float) $invoice->charges()->sum('amount'), $expectedTotals[$invoice->id]);
+            }
+
+            $survived[] = $invoice->id;
+        }
+
+        return $survived;
     }
 
     /**
