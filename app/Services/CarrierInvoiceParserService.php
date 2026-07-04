@@ -958,6 +958,8 @@ class CarrierInvoiceParserService
         $seen = [];
         /** @var array<int, array<string, bool>> $corr */
         $corr = [];
+        /** @var array<int, float> $fileTotals sum of the file's charge rows, per invoice */
+        $fileTotals = [];
 
         while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
             $number = InvoiceIdentity::number($row[$col['Invoice Number'] ?? 3] ?? null);
@@ -993,6 +995,9 @@ class CarrierInvoiceParserService
             }
 
             foreach ($items as [$desc, $amount]) {
+                if ((float) $amount !== 0.0) {
+                    $fileTotals[$invoice->id] = ($fileTotals[$invoice->id] ?? 0.0) + (float) $amount;
+                }
                 $this->mergeCharge($invoice, $seen[$invoice->id], $carrierId, $tracking, $desc, (float) $amount, $shipDate, $weight);
             }
 
@@ -1000,8 +1005,9 @@ class CarrierInvoiceParserService
         }
         fclose($handle);
 
-        // CSV has no printed grand total to reconcile against — it is the source of truth.
-        return $this->finalizeInvoices($invoices);
+        // CSV prints no single grand total, so reconcile against the file's own charge rows:
+        // confirms we stored every charge line we read (an import-completeness check).
+        return $this->finalizeInvoices($invoices, $fileTotals);
     }
 
     /**
@@ -1201,6 +1207,8 @@ class CarrierInvoiceParserService
         $invoices = [];
         $seen = [];
         $corr = [];
+        /** @var array<int, float> $fileTotals sum of the file's charge rows, per invoice */
+        $fileTotals = [];
 
         while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
             $number = InvoiceIdentity::number($row[5] ?? null);
@@ -1227,11 +1235,15 @@ class CarrierInvoiceParserService
             $tracking = trim((string) ($row[13] ?? '')) ?: null;
             $shipDate = $this->parseDate($row[11] ?? '');
             $code = trim((string) ($row[35] ?? ''));
+            $amount = $this->parseAmount($row[52] ?? '0');
+            if ($amount !== 0.0) {
+                $fileTotals[$invoice->id] = ($fileTotals[$invoice->id] ?? 0.0) + $amount;
+            }
 
             $this->mergeChargeRow($invoice, $seen[$invoice->id], $carrierId, [
                 'charge_code' => $code,
                 'charge_description' => trim((string) ($row[45] ?? '')),
-                'amount' => $this->parseAmount($row[52] ?? '0'),
+                'amount' => $amount,
                 'tracking_number' => $tracking,
                 'ship_date' => $shipDate,
                 'zone' => trim((string) ($row[33] ?? '')) ?: null,
@@ -1269,8 +1281,9 @@ class CarrierInvoiceParserService
         }
         fclose($handle);
 
-        // CSV has no printed grand total to reconcile against — it is the source of truth.
-        return $this->finalizeInvoices($invoices);
+        // CSV prints no single grand total, so reconcile against the file's own charge rows:
+        // confirms we stored every charge line we read (an import-completeness check).
+        return $this->finalizeInvoices($invoices, $fileTotals);
     }
 
     /**

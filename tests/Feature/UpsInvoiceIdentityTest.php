@@ -6,6 +6,23 @@ use App\Services\CarrierInvoiceParserService;
 
 // upsRow() and writeUpsCsv() are shared helpers defined in tests/Pest.php.
 
+test('UPS CSV import reconciles against the file total (import-completeness check)', function () {
+    $carrier = Carrier::factory()->create(['slug' => 'ups']);
+
+    // Two charges, $8.97 + $2.50 = $11.47 on the same invoice.
+    $path = writeUpsCsv([
+        upsRow('000000691317344', '2024-08-24', '1Z6913170394945492', '8.97', '2024-08-14'),
+        upsRow('000000691317344', '2024-08-24', '1Z6913170394945493', '2.50', '2024-08-14'),
+    ]);
+    app(CarrierInvoiceParserService::class)->importUpsCsv($carrier->id, $path);
+    @unlink($path);
+
+    $invoice = CarrierInvoice::where('invoice_number', '691317344')->sole();
+    expect($invoice->charges_reconciled)->toBeTrue()
+        ->and((float) $invoice->charges_expected_total)->toBe(11.47)
+        ->and((float) $invoice->charges_parsed_total)->toBe(11.47);
+});
+
 test('same UPS invoice number with different dates stays separate (recycled number)', function () {
     $carrier = Carrier::factory()->create(['slug' => 'ups']);
     $service = app(CarrierInvoiceParserService::class);
