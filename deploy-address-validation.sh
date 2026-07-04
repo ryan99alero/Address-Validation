@@ -40,6 +40,11 @@ DB_USERNAME="address_validation"
 DB_PASSWORD=""
 QUEUE_CONNECTION="database"
 
+# Install the Microsoft SQL Server PHP driver (pdo_sqlsrv) needed for the optional
+# shipping-database integration (FedEx original-address back-fill). Set to "false" in
+# deploy.conf to skip. The install is idempotent (skipped if already present).
+INSTALL_MSSQL_DRIVER="true"
+
 # Load local config (overrides defaults above)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "${SCRIPT_DIR}/deploy.conf" ]; then
@@ -103,6 +108,57 @@ set_env_quoted_value() {
     fi
 }
 
+# Install the Microsoft SQL Server driver + PHP pdo_sqlsrv extension so the shipping-database
+# integration can connect. Best-effort and idempotent: skips when pdo_sqlsrv is already
+# loaded, and a failure here only warns (never aborts the deploy). Ubuntu / Ondrej PHP.
+install_mssql_driver() {
+    if "${PHP_BIN}" -m 2>/dev/null | grep -qi '^pdo_sqlsrv$'; then
+        echo "pdo_sqlsrv already installed - skipping."
+        return 0
+    fi
+
+    log "Install Microsoft SQL Server driver (pdo_sqlsrv) for the shipping database"
+
+    if ! command -v curl >/dev/null 2>&1; then
+        sudo apt-get install -y curl || { echo "WARNING: could not install curl; skipping MSSQL driver."; return 0; }
+    fi
+
+    local php_ver ubuntu_ver
+    php_ver="$("${PHP_BIN}" -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo '8.4')"
+    ubuntu_ver="$(. /etc/os-release 2>/dev/null && echo "${VERSION_ID:-22.04}")"
+
+    # Microsoft package repo + ODBC driver 18 (idempotent).
+    if [ ! -f /etc/apt/sources.list.d/mssql-release.list ]; then
+        curl -sSL https://packages.microsoft.com/keys/microsoft.asc \
+            | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc >/dev/null || { echo "WARNING: MS key fetch failed; skipping."; return 0; }
+        curl -sSL "https://packages.microsoft.com/config/ubuntu/${ubuntu_ver}/prod.list" \
+            | sudo tee /etc/apt/sources.list.d/mssql-release.list >/dev/null || { echo "WARNING: MS repo fetch failed; skipping."; return 0; }
+    fi
+
+    sudo apt-get update -y || { echo "WARNING: apt update failed; skipping MSSQL driver."; return 0; }
+    sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev || { echo "WARNING: msodbcsql18 install failed; skipping."; return 0; }
+
+    # Build toolchain + PECL extensions (sqlsrv is not packaged in the Ondrej PPA).
+    sudo apt-get install -y "php${php_ver}-dev" php-pear autoconf build-essential \
+        || { echo "WARNING: PHP build deps failed; skipping."; return 0; }
+
+    sudo pecl channel-update pecl.php.net || true
+    printf "\n" | sudo pecl install -f sqlsrv || echo "WARNING: pecl sqlsrv install reported an error."
+    printf "\n" | sudo pecl install -f pdo_sqlsrv || echo "WARNING: pecl pdo_sqlsrv install reported an error."
+
+    echo "extension=sqlsrv.so" | sudo tee "/etc/php/${php_ver}/mods-available/sqlsrv.ini" >/dev/null || true
+    echo "extension=pdo_sqlsrv.so" | sudo tee "/etc/php/${php_ver}/mods-available/pdo_sqlsrv.ini" >/dev/null || true
+    sudo phpenmod -v "${php_ver}" sqlsrv pdo_sqlsrv || true
+
+    sudo systemctl restart "php${php_ver}-fpm" 2>/dev/null || sudo systemctl restart php-fpm 2>/dev/null || true
+
+    if "${PHP_BIN}" -m 2>/dev/null | grep -qi '^pdo_sqlsrv$'; then
+        echo "pdo_sqlsrv installed successfully."
+    else
+        echo "WARNING: pdo_sqlsrv did not register. Review the PECL output above; the shipping-database integration stays unavailable until resolved."
+    fi
+}
+
 log "Pre-flight checks"
 
 ensure_command git
@@ -118,6 +174,10 @@ fi
 
 if [ ! -S "${PHP_FPM_SOCK}" ]; then
     fail "PHP-FPM socket not found at ${PHP_FPM_SOCK}"
+fi
+
+if [ "${INSTALL_MSSQL_DRIVER}" = "true" ]; then
+    install_mssql_driver
 fi
 
 log "Create application directory"

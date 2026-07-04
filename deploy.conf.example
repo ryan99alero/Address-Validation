@@ -21,6 +21,12 @@ DB_PASSWORD="YourStrongPasswordHere"
 # Queue
 QUEUE_CONNECTION="database"
 
+# Shipping database (SQL Server) driver
+# Installs the Microsoft ODBC driver + PHP pdo_sqlsrv extension needed for the optional
+# shipping-database integration (FedEx original-address back-fill). Idempotent; set to
+# "false" to skip. Configure the actual connection in the app: Settings > Shipping Database.
+INSTALL_MSSQL_DRIVER="true"
+
 # Paths (usually don't need to change)
 # APP_DIR="/var/www/address-validation"
 # PHP_BIN="/usr/bin/php"
