@@ -26,6 +26,12 @@ class CarrierInvoiceParserService
      */
     protected ?string $importSourceType = null;
 
+    /**
+     * Why the most recent importFile() produced no invoices (e.g. 'legacy_format'), for the
+     * ingest layer to record on the import-file row. Null when a file imported normally.
+     */
+    public ?string $lastSkipReason = null;
+
     public function __construct(
         protected ?ShippingDatabaseService $shippingDb = null
     ) {
@@ -889,6 +895,7 @@ class CarrierInvoiceParserService
      */
     public function importFile(int $carrierId, string $path, ?string $displayName = null): array
     {
+        $this->lastSkipReason = null;
         $slug = strtolower(Carrier::find($carrierId)?->slug ?? '');
         $isPdf = strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf';
 
@@ -1301,10 +1308,14 @@ class CarrierInvoiceParserService
 
         $parsed = (new UpsPdfChargeParser)->parse($text);
         if ($parsed['invoice_number'] === null) {
+            $this->lastSkipReason = 'unparseable';
+
             return [];
         }
         $number = InvoiceIdentity::number($parsed['invoice_number']);
         if ($number === null) {
+            $this->lastSkipReason = 'unparseable';
+
             return [];
         }
 
@@ -1316,6 +1327,7 @@ class CarrierInvoiceParserService
         // is authoritative for those years, so skip rather than create a junk invoice.
         $grandTotal = $this->extractPdfGrandTotal($text);
         if ($grandTotal === null) {
+            $this->lastSkipReason = 'legacy_format';
             Log::info('Skipped legacy-format UPS PDF (no charges-this-period summary, CSV is authoritative)', [
                 'file' => basename($path),
                 'parsed_number' => $parsed['invoice_number'],

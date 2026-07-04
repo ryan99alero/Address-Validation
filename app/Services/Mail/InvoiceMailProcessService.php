@@ -225,7 +225,12 @@ class InvoiceMailProcessService
         // extract charges + shipments + DIM audit, not just address corrections.
         $invoiceIds = $this->parser->importFile($carrier->id, $pdfPath, basename($pdfPath));
 
-        if ($invoiceIds === []) {
+        $skipReason = $this->parser->lastSkipReason;
+
+        // Empty with no skip reason = a genuine parse failure. Empty WITH a skip reason
+        // (e.g. legacy-format PDF) is an intentional skip — still record the file so it
+        // isn't reprocessed every mail run.
+        if ($invoiceIds === [] && $skipReason === null) {
             $stats['errors'][] = 'No invoice parsed from '.basename($pdfPath);
 
             return;
@@ -237,14 +242,18 @@ class InvoiceMailProcessService
             'filename' => basename($pdfPath),
             'source_reference' => 'mail:'.$integration->id,
             'invoice_count' => count($invoiceIds),
+            'skip_reason' => $skipReason,
             'imported_at' => now(),
         ]);
-        $file->invoices()->syncWithoutDetaching($invoiceIds);
 
-        foreach (CarrierInvoice::whereIn('id', $invoiceIds)->get() as $invoice) {
-            $stats['invoices']++;
-            $stats['corrections'] += $invoice->correctionLines()->count();
-            $this->archive($integration, $carrier, $invoice, $pdfPath);
+        if ($invoiceIds !== []) {
+            $file->invoices()->syncWithoutDetaching($invoiceIds);
+
+            foreach (CarrierInvoice::whereIn('id', $invoiceIds)->get() as $invoice) {
+                $stats['invoices']++;
+                $stats['corrections'] += $invoice->correctionLines()->count();
+                $this->archive($integration, $carrier, $invoice, $pdfPath);
+            }
         }
     }
 

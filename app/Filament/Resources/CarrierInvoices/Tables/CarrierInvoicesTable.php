@@ -50,6 +50,16 @@ class CarrierInvoicesTable
                     ->label('Charges')
                     ->money('USD')
                     ->getStateUsing(fn (CarrierInvoice $record): float => (float) $record->charges()->sum('amount')),
+                TextColumn::make('charges_reconciled')
+                    ->label('Reconciled')
+                    ->badge()
+                    ->formatStateUsing(fn (?bool $state): string => $state === null ? '—' : ($state ? 'Reconciled' : 'Mismatch'))
+                    ->color(fn (?bool $state): string => $state === null ? 'gray' : ($state ? 'success' : 'danger'))
+                    ->icon(fn (?bool $state): ?string => $state === null ? null : ($state ? 'heroicon-o-check-circle' : 'heroicon-o-exclamation-triangle'))
+                    ->tooltip(fn (CarrierInvoice $record): ?string => $record->charges_expected_total === null
+                        ? null
+                        : 'Parsed $'.number_format((float) $record->charges_parsed_total, 2).' vs file $'.number_format((float) $record->charges_expected_total, 2))
+                    ->sortable(),
                 TextColumn::make('status')
                     ->badge()
                     ->color(fn ($state) => match ($state) {
@@ -76,6 +86,19 @@ class CarrierInvoicesTable
                         CarrierInvoice::STATUS_COMPLETED => 'Completed',
                         CarrierInvoice::STATUS_FAILED => 'Failed',
                     ]),
+                SelectFilter::make('reconciliation')
+                    ->label('Reconciliation')
+                    ->options([
+                        'reconciled' => 'Reconciled',
+                        'mismatch' => 'Mismatch',
+                        'na' => 'Not checked',
+                    ])
+                    ->query(fn ($query, array $data) => match ($data['value'] ?? null) {
+                        'reconciled' => $query->where('charges_reconciled', true),
+                        'mismatch' => $query->where('charges_reconciled', false),
+                        'na' => $query->whereNull('charges_reconciled'),
+                        default => $query,
+                    }),
             ])
             ->recordActions([
                 ViewAction::make()

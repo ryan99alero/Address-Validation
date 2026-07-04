@@ -76,6 +76,27 @@ class ViewCarrierInvoice extends ViewRecord
                                     ->money('USD'),
                             ]),
                     ]),
+                Section::make('Reconciliation')
+                    ->description('Whether the imported charges match the invoice. PDF: vs the carrier\'s printed total. CSV: vs the file\'s own charge rows (import completeness).')
+                    ->schema([
+                        Grid::make(3)
+                            ->schema([
+                                TextEntry::make('charges_reconciled')
+                                    ->label('Status')
+                                    ->badge()
+                                    ->formatStateUsing(fn (?bool $state): string => $state === null ? 'Not checked' : ($state ? 'Reconciled' : 'Mismatch'))
+                                    ->color(fn (?bool $state): string => $state === null ? 'gray' : ($state ? 'success' : 'danger'))
+                                    ->icon(fn (?bool $state): ?string => $state === null ? null : ($state ? 'heroicon-o-check-circle' : 'heroicon-o-exclamation-triangle')),
+                                TextEntry::make('charges_parsed_total')
+                                    ->label('Imported Total')
+                                    ->money('USD')
+                                    ->placeholder('—'),
+                                TextEntry::make('charges_expected_total')
+                                    ->label('Expected (file)')
+                                    ->money('USD')
+                                    ->placeholder('—'),
+                            ]),
+                    ]),
                 Section::make('Processing Info')
                     ->schema([
                         Grid::make(3)

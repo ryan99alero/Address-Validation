@@ -20,6 +20,7 @@ class CarrierImportFile extends Model
         'filename',
         'source_reference',
         'invoice_count',
+        'skip_reason',
         'imported_at',
     ];
 

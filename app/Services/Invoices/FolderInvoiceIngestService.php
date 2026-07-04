@@ -95,7 +95,7 @@ class FolderInvoiceIngestService
                 }
 
                 $ids = $this->parser->importFile($folder->carrier_id, $localPath, basename($file));
-                $this->recordImport($folder, $hash, basename($file), $reference, $ids);
+                $this->recordImport($folder, $hash, basename($file), $reference, $ids, $this->parser->lastSkipReason);
                 $stats['processed']++;
             } catch (Throwable $e) {
                 $stats['failed']++;
@@ -133,7 +133,7 @@ class FolderInvoiceIngestService
     /**
      * @param  array<int, int>  $invoiceIds
      */
-    protected function recordImport(FolderIntegration $folder, string $hash, string $filename, string $reference, array $invoiceIds): void
+    protected function recordImport(FolderIntegration $folder, string $hash, string $filename, string $reference, array $invoiceIds, ?string $skipReason = null): void
     {
         $file = CarrierImportFile::create([
             'carrier_id' => $folder->carrier_id,
@@ -142,6 +142,7 @@ class FolderInvoiceIngestService
             'filename' => $filename,
             'source_reference' => $reference,
             'invoice_count' => count($invoiceIds),
+            'skip_reason' => $skipReason,
             'imported_at' => now(),
         ]);
 

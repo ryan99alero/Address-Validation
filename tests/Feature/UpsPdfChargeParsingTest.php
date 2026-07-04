@@ -155,11 +155,14 @@ test('legacy-format UPS PDF (no charges-this-period summary) is skipped, not jun
     $legacy = tempnam(sys_get_temp_dir(), 'legacy_').'.pdf';
     file_put_contents($legacy, "%PDF-1.3\nstream\nInvoice Number PAYMENTS Shipper Number 00000E540W\nendstream");
 
-    $ids = app(CarrierInvoiceParserService::class)->importFile($carrier->id, $legacy, 'A0000000E540W052-20120204.pdf');
+    $service = app(CarrierInvoiceParserService::class);
+    $ids = $service->importFile($carrier->id, $legacy, 'A0000000E540W052-20120204.pdf');
     @unlink($legacy);
 
     expect($ids)->toBe([]);
     expect(CarrierInvoice::where('carrier_id', $carrier->id)->count())->toBe(0);
+    // A no-invoice UPS PDF is recorded distinctly (skip reason) so it's findable/re-runnable.
+    expect($service->lastSkipReason)->not->toBeNull();
 });
 
 test('importUpsPdf reconciles the real UPS invoice end to end', function () {
