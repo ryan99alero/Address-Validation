@@ -30,8 +30,19 @@ class ViewCarrierInvoice extends ViewRecord
                                         'FedEx' => 'info',
                                         default => 'gray',
                                     }),
+                                TextEntry::make('invoice_number')
+                                    ->label('Invoice Number')
+                                    ->placeholder('—'),
+                                TextEntry::make('invoice_date')
+                                    ->label('Invoice Date')
+                                    ->date('M j, Y')
+                                    ->placeholder('—'),
+                                TextEntry::make('account_number')
+                                    ->label('Account')
+                                    ->placeholder('—'),
                                 TextEntry::make('filename')
-                                    ->label('Filename'),
+                                    ->label('Filename')
+                                    ->placeholder('—'),
                                 TextEntry::make('status')
                                     ->badge()
                                     ->color(fn ($state) => match ($state) {
@@ -47,20 +58,20 @@ class ViewCarrierInvoice extends ViewRecord
                         Grid::make(5)
                             ->schema([
                                 TextEntry::make('total_records')
-                                    ->label('Total Records')
+                                    ->label('Shipments')
                                     ->numeric(),
-                                TextEntry::make('corrections_count')
+                                TextEntry::make('correction_records')
                                     ->label('Corrections')
                                     ->numeric(),
                                 TextEntry::make('new_corrections')
                                     ->label('New Mappings')
                                     ->numeric()
                                     ->color('success'),
-                                TextEntry::make('duplicates')
+                                TextEntry::make('duplicate_corrections')
                                     ->label('Duplicates')
                                     ->numeric()
                                     ->color('gray'),
-                                TextEntry::make('total_charges')
+                                TextEntry::make('total_correction_charges')
                                     ->label('Total Charges')
                                     ->money('USD'),
                             ]),

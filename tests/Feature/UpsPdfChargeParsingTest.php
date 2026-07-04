@@ -155,7 +155,8 @@ test('importUpsPdf reconciles the real UPS invoice end to end', function () {
     }
 
     $carrier = Carrier::factory()->create(['slug' => 'ups']);
-    $ids = app(CarrierInvoiceParserService::class)->importUpsPdf($carrier->id, $pdf);
+    // Exercise the real entry point (routes UPS+pdf → importUpsPdf, backfills filename).
+    $ids = app(CarrierInvoiceParserService::class)->importFile($carrier->id, $pdf);
 
     expect($ids)->toHaveCount(1);
     $invoice = CarrierInvoice::find($ids[0]);
@@ -169,4 +170,11 @@ test('importUpsPdf reconciles the real UPS invoice end to end', function () {
     expect(CarrierShipment::where('carrier_invoice_id', $invoice->id)->count())->toBe(6934);
     expect(CarrierShipment::where('carrier_invoice_id', $invoice->id)->whereNotNull('audited_dims')->count())->toBeGreaterThan(0);
     expect($invoice->correctionLines()->count())->toBe(8);
+
+    // Summary counters shown on the invoice view are populated (not 0/empty).
+    expect($invoice->total_records)->toBe(6934);          // "Shipments"
+    expect($invoice->correction_records)->toBe(8);        // "Corrections"
+    expect($invoice->new_corrections)->toBeGreaterThan(0); // "New Mappings"
+    expect((float) $invoice->total_correction_charges)->toBe(4411.77); // "Total Charges"
+    expect($invoice->filename)->not->toBeNull();
 })->group('slow');

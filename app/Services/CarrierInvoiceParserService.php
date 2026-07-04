@@ -892,18 +892,25 @@ class CarrierInvoiceParserService
         $slug = strtolower(Carrier::find($carrierId)?->slug ?? '');
         $isPdf = strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf';
 
-        if ($slug === 'fedex') {
-            return $isPdf ? $this->importFedExPdf($carrierId, $path) : $this->importFedExCsv($carrierId, $path);
-        }
+        $ids = match ($slug) {
+            'fedex' => $isPdf ? $this->importFedExPdf($carrierId, $path) : $this->importFedExCsv($carrierId, $path),
+            'ups' => $isPdf ? $this->importUpsPdf($carrierId, $path) : $this->importUpsCsv($carrierId, $path),
+            default => (function () use ($carrierId, $path): array {
+                $invoice = CarrierInvoice::create(['carrier_id' => $carrierId, 'source' => 'import', 'status' => 'pending']);
+                $this->parse($invoice, $path);
 
-        if ($slug === 'ups') {
-            return $isPdf ? $this->importUpsPdf($carrierId, $path) : $this->importUpsCsv($carrierId, $path);
-        }
+                return [$invoice->id];
+            })(),
+        };
 
-        $invoice = CarrierInvoice::create(['carrier_id' => $carrierId, 'source' => 'import', 'status' => 'pending']);
-        $this->parse($invoice, $path);
+        // Backfill the source filename on any invoice that doesn't have one yet (the split
+        // model creates invoices by number, so the batch filename isn't set at creation).
+        $filename = basename($path);
+        CarrierInvoice::whereIn('id', $ids)
+            ->where(fn ($q) => $q->whereNull('filename')->orWhere('filename', ''))
+            ->update(['filename' => $filename]);
 
-        return [$invoice->id];
+        return $ids;
     }
 
     /**
@@ -998,8 +1005,8 @@ class CarrierInvoiceParserService
 
                 continue;
             }
-            $this->linkCorrectionsToCache($invoice);
-            $this->refreshInvoiceTotals($invoice);
+            $newCorrections = $this->linkCorrectionsToCache($invoice);
+            $this->refreshInvoiceTotals($invoice, $newCorrections);
             $survived[] = $invoice->id;
         }
 
@@ -1180,8 +1187,8 @@ class CarrierInvoiceParserService
 
                 continue;
             }
-            $this->linkCorrectionsToCache($invoice);
-            $this->refreshInvoiceTotals($invoice);
+            $newCorrections = $this->linkCorrectionsToCache($invoice);
+            $this->refreshInvoiceTotals($invoice, $newCorrections);
             $survived[] = $invoice->id;
         }
 
@@ -1285,8 +1292,8 @@ class CarrierInvoiceParserService
 
                 continue;
             }
-            $this->linkCorrectionsToCache($invoice);
-            $this->refreshInvoiceTotals($invoice);
+            $newCorrections = $this->linkCorrectionsToCache($invoice);
+            $this->refreshInvoiceTotals($invoice, $newCorrections);
             $survived[] = $invoice->id;
         }
 
@@ -1329,6 +1336,11 @@ class CarrierInvoiceParserService
         if ($corrections !== []) {
             $this->buildCorrectionLines($invoice, $corrections);
         }
+
+        // Link corrections into the shared cache and stamp the summary counters shown on
+        // the invoice (shipments, corrections, new mappings, total charges).
+        $newCorrections = $this->linkCorrectionsToCache($invoice);
+        $this->refreshInvoiceTotals($invoice, $newCorrections);
 
         return [$invoice->id];
     }
@@ -1564,10 +1576,24 @@ class CarrierInvoiceParserService
     /**
      * Recompute stored counters on an invoice from its charges.
      */
-    protected function refreshInvoiceTotals(CarrierInvoice $invoice): void
+    /**
+     * Recompute the stored summary counters shown on the invoice from its charges,
+     * shipments and correction lines. `total_records` = shipment count when we have
+     * shipment rows (UPS PDF), else the distinct tracking count on charges.
+     */
+    protected function refreshInvoiceTotals(CarrierInvoice $invoice, int $newCorrections = 0): void
     {
+        $shipmentCount = $invoice->shipments()->count();
+        $correctionRecords = $invoice->correctionLines()->count();
+
         $invoice->update([
-            'total_records' => $invoice->charges()->distinct('tracking_number')->count('tracking_number'),
+            'total_records' => $shipmentCount > 0
+                ? $shipmentCount
+                : $invoice->charges()->distinct('tracking_number')->count('tracking_number'),
+            'correction_records' => $correctionRecords,
+            'new_corrections' => $newCorrections,
+            'duplicate_corrections' => max(0, $correctionRecords - $newCorrections),
+            'total_correction_charges' => (float) $invoice->charges()->sum('amount'),
             'processed_at' => $invoice->processed_at ?? now(),
             'status' => 'completed',
         ]);

@@ -90,6 +90,11 @@ class CarrierInvoice extends Model
         return $this->hasMany(CarrierCharge::class);
     }
 
+    public function shipments(): HasMany
+    {
+        return $this->hasMany(CarrierShipment::class);
+    }
+
     public function sourceFiles(): BelongsToMany
     {
         return $this->belongsToMany(CarrierImportFile::class, 'carrier_import_file_invoice');
