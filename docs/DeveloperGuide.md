@@ -17,6 +17,8 @@ This document provides comprehensive guidance for developers and AI agents worki
 9. [Common Patterns](#common-patterns)
 10. [Troubleshooting](#troubleshooting)
 
+**Related guides:** [Invoice Ingestion](InvoiceIngestionGuide.md) · [Carrier Fee Analytics](carrier-fee-analytics-guide.md) · [Worker Engine](WorkerEngineGuide.md) · [Import/Export](ImportingLogic.md)
+
 ---
 
 ## Architecture Overview
@@ -197,6 +199,26 @@ $url = $carrier->active_url;
 - FedEx Sandbox: `https://apis-sandbox.fedex.com`
 - FedEx Production: `https://apis.fedex.com`
 
+### Carrier Invoice Models
+
+The invoice-ingestion subsystem (carrier billing files → charges → analytics). See the
+full **[Invoice Ingestion Guide](InvoiceIngestionGuide.md)** for the pipeline.
+
+- **`CarrierInvoice`** — one real invoice. Identity is
+  `(carrier_id, invoice_number, invoice_date)` (UNIQUE) — UPS recycles invoice numbers
+  ~every 10 years, so number-alone would merge different-decade invoices. Cast
+  `invoice_date => 'date:Y-m-d'` (do not change — keeps `createOrFirst` race-safe). Has
+  `charges_reconciled` / `charges_parsed_total` / `charges_expected_total`.
+- **`CarrierCharge`** — one charge line (base or surcharge). `amount` = Billed (payable);
+  `source_type` ('csv'|'pdf'); `carrier_shipment_id` FK; dedup key
+  `(tracking, category, amount, ship_date)`.
+- **`CarrierShipment`** — one tracking per invoice (UPS PDF). Dimensions,
+  `audited_dims`, `billed_weight`, `message_codes`, `is_third_party`. Enables DIM-audit
+  dispute + third-party chargeback reporting.
+- **`CarrierImportFile`** — content-hash file tracking (dedup); `belongsToMany`
+  `CarrierInvoice`.
+- **`CarrierInvoiceLine`** — address-correction detail feeding the correction cache.
+
 ---
 
 ## Services
@@ -256,6 +278,24 @@ return $service->export($addresses, $template);
 // Get field value for an address
 $value = $service->getFieldValue($address, 'corrected_address_line_1');
 ```
+
+### Carrier Invoice Services
+
+The billing-invoice pipeline — see the **[Invoice Ingestion Guide](InvoiceIngestionGuide.md)**.
+
+- **`CarrierInvoiceParserService`** — the hub. `importFile($carrierId, $path)` routes by
+  carrier + extension to `importUpsCsv` / `importUpsPdf` / `importFedExCsv` /
+  `importFedExPdf`, splits batch files into real invoices, dedups charges, records
+  correction lines. (`parse()` is the legacy corrections-only path.)
+- **`Invoices\UpsPdfChargeParser`** — extracts charges + shipments + DIM audit + message
+  codes from UPS PDF text; reconciles to the printed total.
+- **`Invoices\InvoiceIdentity`** — normalizes invoice number (strip non-alnum, uppercase,
+  strip leading zeros) + account.
+- **`Invoices\FolderInvoiceIngestService`** — SMB/local folder scan (`listCandidates` +
+  chunked `ingestFiles`).
+- **`Mail\InvoiceMailProcessService`** — email attachment ingest (webklex IMAP).
+- **`Invoices\ChargeCategoryResolver`** — raw code/description → canonical
+  `charge_categories`.
 
 ---
 
@@ -452,6 +492,18 @@ ProcessImportBatchValidation::dispatch($batch, 100);
 
 **Progress Tracking:**
 The job updates `validated_rows` on the ImportBatch model after each successful validation. The BatchImport page polls this value to show progress.
+
+### Invoice ingestion jobs
+
+- **`ProcessFolderIntegration`** — enumerates an SMB/local folder once, then fans out one
+  **`ProcessFolderChunk`** per 100 files (`CHUNK_SIZE`). Chunks are individually retryable
+  and parallel, so one oversized year-folder can't time out the whole ingest.
+- **`ProcessMailIntegration`** — polls an IMAP mailbox and runs
+  `InvoiceMailProcessService` (unzip, detect carrier, `importFile`, archive).
+
+Both call `CarrierInvoiceParserService::importFile()`. See the
+[Invoice Ingestion Guide](InvoiceIngestionGuide.md). **Restart queue workers after any
+parser or job change** — they cache code at startup.
 
 ### Queue Worker
 

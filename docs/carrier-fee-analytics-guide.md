@@ -28,6 +28,14 @@ etc. So when UPS calls something "ADC" and FedEx calls it "ADDCOR," they both ro
 **Address Correction**. *That mapping is the whole game* — without it you're comparing two
 carriers' marketing vocabularies, not their fees.
 
+> Where the charges come from: the ingestion pipeline
+> ([Invoice Ingestion Guide](InvoiceIngestionGuide.md)). Every `CarrierCharge` carries its
+> canonical category (`ChargeCategoryResolver`), `amount` (Billed = payable), and
+> `source_type`. **UPS PDFs now also produce `CarrierShipment` rows** (per tracking) with
+> customer vs UPS-audited dimensions/weights — enabling two analytics lenses beyond fee
+> categories: **DIM re-rate disputes** (effective divisor ≠ the account norm of 200) and
+> **third-party chargebacks** (`is_third_party`).
+
 ## The five lenses — pick the metric to match the question
 
 There is no single "who's cheaper" number. Each metric answers a different question, and

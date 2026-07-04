@@ -57,6 +57,13 @@ This is a comprehensive **Address Validation Solution** built with Laravel 12 an
 - `ImportFieldTemplate` - Saved field mapping templates
 - `ExportTemplate` - Export format configurations
 
+**Carrier invoice ingestion** (billing files → charges → analytics; see `docs/InvoiceIngestionGuide.md`):
+- `CarrierInvoice` - one real invoice. Identity `(carrier_id, invoice_number, invoice_date)` UNIQUE (UPS recycles invoice numbers ~every 10 years). `invoice_date` cast `date:Y-m-d` (keeps `createOrFirst` race-safe — do not change). Has `charges_reconciled`.
+- `CarrierCharge` - one charge line; `amount`=Billed; `source_type` ('csv'|'pdf'); dedup `(tracking, category, amount, ship_date)`.
+- `CarrierShipment` - one tracking/invoice (UPS PDF); dims, `audited_dims`, `is_third_party` (DIM-audit + third-party reporting).
+- `CarrierImportFile` - content-hash file dedup; `CarrierInvoiceLine` - address-correction detail.
+- `AddressVariant` / `CorrectedAddress` - the shared correction cache (`is_active` = "Do Not Use" flag, per-variant).
+
 ### Important Technical Notes
 
 1. **Filament 5 Namespaces**:
@@ -176,6 +183,8 @@ return $table
 - Carrier configuration with environment URLs working
 - Validation results display with corrections highlighting
 - Copy button for validated addresses
+- **Carrier invoice ingestion (UPS + FedEx, CSV + PDF) — LIVE on prod.** One `CarrierInvoice` per real invoice; recycling-safe identity; charge/shipment/DIM-audit extraction from UPS PDFs (reconciles to the cent); correction cache; SMB + email ingest; fee analytics reports. See `docs/InvoiceIngestionGuide.md`.
+- **Pace Connect** real-time ERP address cleanup — LIVE on prod.
 
 ### Services
 
@@ -184,10 +193,16 @@ return $table
 - `App\Services\FedExAddressValidationService` - FedEx API integration
 - `App\Services\ImportService` - Excel/CSV parsing and field mapping
 - `App\Services\ExportService` - Export addresses using templates
+- `App\Services\CarrierInvoiceParserService` - invoice ingestion hub (`importFile` → UPS/FedEx CSV/PDF parsers); see `docs/InvoiceIngestionGuide.md`
+- `App\Services\Invoices\UpsPdfChargeParser` - UPS PDF → charges + shipments + DIM audit + message codes
+- `App\Services\Invoices\{InvoiceIdentity, FolderInvoiceIngestService, ChargeCategoryResolver}` + `App\Services\Mail\InvoiceMailProcessService`
 
 ### Jobs
 
 - `App\Jobs\ProcessImportBatchValidation` - Background validation of imported addresses (chunks of 50)
+- `App\Jobs\ProcessFolderIntegration` - enumerates an SMB/local invoice folder, fans out `ProcessFolderChunk` (100 files each, retryable)
+- `App\Jobs\ProcessMailIntegration` - polls IMAP for invoice-attachment emails
+- `App\Jobs\{RebuildReportRollups, RebuildCarrierRollup}` - rebuild the report rollup tables (`reports:rebuild`)
 
 ---
 
