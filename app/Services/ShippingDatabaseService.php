@@ -2,84 +2,109 @@
 
 namespace App\Services;
 
-use App\Models\ShippingDatabaseSetting;
+use App\Models\SqlConnection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use PDO;
 
+/**
+ * Looks up shipment addresses in the external SQL database configured as the active
+ * "shipping address lookup" SQL connection (Integrations > SQL Connections). The source
+ * table and column names come from that connection's field map, so the query adapts
+ * without code changes.
+ */
 class ShippingDatabaseService
 {
-    protected string $connection = 'shipping';
+    protected string $connectionName = 'shipping';
 
-    protected string $table = 'xCarrierShipping';
+    protected ?SqlConnection $connection;
 
-    protected string $trackingColumn = 'trackingno';
+    /** @var array<string, string> logical field => source column */
+    protected array $fieldMap;
+
+    protected string $table;
 
     public function __construct()
     {
-        $this->applyStoredSettings();
+        $this->connection = SqlConnection::active(SqlConnection::PURPOSE_SHIPPING_LOOKUP);
+        $this->fieldMap = $this->connection ? $this->connection->effectiveFieldMap() : SqlConnection::shippingFieldMapDefaults();
+        $this->table = $this->connection?->table_name ?: 'xCarrierShipping';
+
+        $this->applyRuntimeConfig();
     }
 
     /**
-     * Override the `shipping` connection config from the GUI settings row (if present +
-     * enabled), so the connection is DB-configured rather than .env-only. Falls back to
-     * the config/database.php (env) definition when no settings row exists.
+     * Override the Laravel `shipping` connection from the stored SqlConnection (if any).
      */
-    protected function applyStoredSettings(): void
+    protected function applyRuntimeConfig(): void
     {
-        $setting = ShippingDatabaseSetting::current();
-        if (! $setting) {
+        if (! $this->connection) {
             return;
         }
 
-        $this->table = $setting->table_name ?: $this->table;
-        $this->trackingColumn = $setting->tracking_column ?: $this->trackingColumn;
-
-        config(['database.connections.'.$this->connection => [
-            'driver' => $setting->driver ?: 'sqlsrv',
-            'host' => $setting->host,
-            'port' => $setting->port ?: '1433',
-            'database' => $setting->database,
-            'username' => (string) $setting->username,
-            'password' => (string) $setting->password,
+        config(['database.connections.'.$this->connectionName => [
+            'driver' => $this->connection->driver ?: 'sqlsrv',
+            'host' => $this->connection->host,
+            'port' => $this->connection->port ?: '1433',
+            'database' => $this->connection->database,
+            'username' => (string) $this->connection->username,
+            'password' => (string) $this->connection->password,
             'charset' => 'utf8',
             'prefix' => '',
             'prefix_indexes' => true,
-            'encrypt' => $setting->encrypt ? 'yes' : 'no',
-            'trust_server_certificate' => $setting->trust_server_certificate ? 'true' : 'false',
+            'encrypt' => $this->connection->encrypt ? 'yes' : 'no',
+            'trust_server_certificate' => $this->connection->trust_server_certificate ? 'true' : 'false',
         ]]);
 
-        DB::purge($this->connection);
+        DB::purge($this->connectionName);
     }
 
     /**
-     * Look up a single shipment by tracking number.
+     * The output columns (everything in the map except the tracking key), as
+     * "sourceColumn as logicalKey" so results are keyed by the logical names the
+     * back-fill consumer expects (company, contact, add1, …).
      *
+     * @return array<int, string>
+     */
+    protected function selectColumns(): array
+    {
+        $cols = [];
+        foreach ($this->fieldMap as $logical => $source) {
+            if ($logical === 'tracking') {
+                continue;
+            }
+            $cols[] = "{$source} as {$logical}";
+        }
+
+        return $cols;
+    }
+
+    protected function trackingColumn(): string
+    {
+        return $this->fieldMap['tracking'] ?? 'trackingno';
+    }
+
+    /**
      * @return array{company: ?string, contact: ?string, add1: ?string, add2: ?string, city: ?string, state: ?string, zipcode: ?string, country: ?string}|null
      */
     public function lookupByTrackingNumber(string $trackingNumber): ?array
     {
         try {
-            $result = DB::connection($this->connection)
+            $result = DB::connection($this->connectionName)
                 ->table($this->table)
-                ->select(['company', 'contact', 'add1', 'add2', 'city', 'state', 'zipcode', 'country'])
-                ->where($this->trackingColumn, $trackingNumber)
+                ->selectRaw(implode(', ', $this->selectColumns()))
+                ->where($this->trackingColumn(), $trackingNumber)
                 ->first();
 
             return $result ? (array) $result : null;
         } catch (\Exception $e) {
-            Log::warning('Shipping DB lookup failed', [
-                'tracking_number' => $trackingNumber,
-                'error' => $e->getMessage(),
-            ]);
+            Log::warning('Shipping DB lookup failed', ['tracking_number' => $trackingNumber, 'error' => $e->getMessage()]);
 
             return null;
         }
     }
 
     /**
-     * Batch lookup multiple shipments by tracking numbers. Returns array keyed by tracking.
-     *
      * @param  array<string>  $trackingNumbers
      * @return array<string, array{company: ?string, contact: ?string, add1: ?string, add2: ?string, city: ?string, state: ?string, zipcode: ?string, country: ?string}>
      */
@@ -90,86 +115,95 @@ class ShippingDatabaseService
         }
 
         try {
-            $results = DB::connection($this->connection)
+            $trackingCol = $this->trackingColumn();
+            $select = array_merge(["{$trackingCol} as trackingno"], $this->selectColumns());
+
+            $results = DB::connection($this->connectionName)
                 ->table($this->table)
-                ->select([$this->trackingColumn.' as trackingno', 'company', 'contact', 'add1', 'add2', 'city', 'state', 'zipcode', 'country'])
-                ->whereIn($this->trackingColumn, $trackingNumbers)
+                ->selectRaw(implode(', ', $select))
+                ->whereIn($trackingCol, $trackingNumbers)
                 ->get();
 
             $mapped = [];
             foreach ($results as $row) {
-                $mapped[$row->trackingno] = [
-                    'company' => $row->company,
-                    'contact' => $row->contact,
-                    'add1' => $row->add1,
-                    'add2' => $row->add2,
-                    'city' => $row->city,
-                    'state' => $row->state,
-                    'zipcode' => $row->zipcode,
-                    'country' => $row->country,
-                ];
+                $row = (array) $row;
+                $key = $row['trackingno'];
+                unset($row['trackingno']);
+                $mapped[$key] = $row;
             }
 
             return $mapped;
         } catch (\Exception $e) {
-            Log::error('Shipping DB batch lookup failed', [
-                'count' => count($trackingNumbers),
-                'error' => $e->getMessage(),
-            ]);
+            Log::error('Shipping DB batch lookup failed', ['count' => count($trackingNumbers), 'error' => $e->getMessage()]);
 
             return [];
         }
     }
 
     /**
-     * Test the connection, returning a human-readable result for the settings UI. Detects
-     * the common "PHP sqlsrv driver not installed" case distinctly from a connect failure.
+     * Test a connection, returning a readable result. Optionally tests a specific
+     * SqlConnection (used by the "Test" action before it's the active one).
      *
      * @return array{ok: bool, message: string}
      */
-    public function testConnectionDetailed(): array
+    public function testConnectionDetailed(?SqlConnection $connection = null): array
     {
-        $driver = config('database.connections.'.$this->connection.'.driver', 'sqlsrv');
+        $connection ??= $this->connection;
+        if (! $connection) {
+            return ['ok' => false, 'message' => 'No SQL connection configured for shipping lookup.'];
+        }
+
+        $driver = $connection->driver ?: 'sqlsrv';
         if (! in_array($driver, PDO::getAvailableDrivers(), true)) {
             return ['ok' => false, 'message' => "PHP driver '{$driver}' is not installed on this server (install php-sqlsrv / pdo_sqlsrv)."];
         }
 
-        try {
-            DB::connection($this->connection)->getPdo();
-            $count = DB::connection($this->connection)->table($this->table)->limit(1)->count();
+        $name = 'sql_test_'.$connection->id;
+        config(['database.connections.'.$name => [
+            'driver' => $driver,
+            'host' => $connection->host,
+            'port' => $connection->port ?: '1433',
+            'database' => $connection->database,
+            'username' => (string) $connection->username,
+            'password' => (string) $connection->password,
+            'charset' => 'utf8',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'encrypt' => $connection->encrypt ? 'yes' : 'no',
+            'trust_server_certificate' => $connection->trust_server_certificate ? 'true' : 'false',
+        ]]);
 
-            return ['ok' => true, 'message' => "Connected. Table '{$this->table}' is reachable."];
+        try {
+            DB::connection($name)->getPdo();
+            $table = $connection->table_name ?: $this->table;
+            DB::connection($name)->table($table)->limit(1)->count();
+
+            return ['ok' => true, 'message' => "Connected. Table '{$table}' is reachable."];
         } catch (\Throwable $e) {
             return ['ok' => false, 'message' => 'Connection failed: '.$e->getMessage()];
+        } finally {
+            DB::purge($name);
         }
     }
 
-    /**
-     * Simple boolean test (kept for the shipping:test command).
-     */
     public function testConnection(): bool
     {
         return $this->testConnectionDetailed()['ok'];
     }
 
     /**
-     * Whether the shipping database is configured, enabled, and the PHP driver is present.
+     * Whether an active shipping-lookup connection is configured and its PHP driver present.
      */
     public function isAvailable(): bool
     {
-        $driver = config('database.connections.'.$this->connection.'.driver', 'sqlsrv');
-        if (! in_array($driver, PDO::getAvailableDrivers(), true)) {
+        if (! $this->connection) {
             return false;
         }
 
-        $setting = ShippingDatabaseSetting::current();
-        if ($setting) {
-            return $setting->enabled && ! empty($setting->host);
-        }
+        $driver = $this->connection->driver ?: 'sqlsrv';
 
-        // No settings row — fall back to the env-based config.
-        $host = config('database.connections.'.$this->connection.'.host');
-
-        return ! empty($host) && $host !== 'localhost';
+        return $this->connection->is_active
+            && ! empty($this->connection->host)
+            && in_array($driver, PDO::getAvailableDrivers(), true);
     }
 }
