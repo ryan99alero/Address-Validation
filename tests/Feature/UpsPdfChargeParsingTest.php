@@ -148,6 +148,20 @@ test('PDF skips charges but keeps shipments when CSV already owns the invoice', 
     expect(CarrierShipment::where('carrier_invoice_id', $invoice->id)->whereNotNull('audited_dims')->count())->toBe(1);
 });
 
+test('legacy-format UPS PDF (no charges-this-period summary) is skipped, not junk-imported', function () {
+    $carrier = Carrier::factory()->create(['slug' => 'ups']);
+
+    // A legacy Ricoh-layout blob: no "Charges this period", the parser grabs "PAYMENTS".
+    $legacy = tempnam(sys_get_temp_dir(), 'legacy_').'.pdf';
+    file_put_contents($legacy, "%PDF-1.3\nstream\nInvoice Number PAYMENTS Shipper Number 00000E540W\nendstream");
+
+    $ids = app(CarrierInvoiceParserService::class)->importFile($carrier->id, $legacy, 'A0000000E540W052-20120204.pdf');
+    @unlink($legacy);
+
+    expect($ids)->toBe([]);
+    expect(CarrierInvoice::where('carrier_id', $carrier->id)->count())->toBe(0);
+});
+
 test('importUpsPdf reconciles the real UPS invoice end to end', function () {
     $pdf = base_path('docs/UPS Invoice/Invoice_000000691317266_062726.PDF');
     if (! is_file($pdf)) {

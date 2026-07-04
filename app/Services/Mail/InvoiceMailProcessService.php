@@ -223,7 +223,7 @@ class InvoiceMailProcessService
         // Split-model ingest: one file may yield several real invoices (by number+date).
         // importFile() routes UPS/FedEx CSV vs PDF to the format-specific parsers that
         // extract charges + shipments + DIM audit, not just address corrections.
-        $invoiceIds = $this->parser->importFile($carrier->id, $pdfPath);
+        $invoiceIds = $this->parser->importFile($carrier->id, $pdfPath, basename($pdfPath));
 
         if ($invoiceIds === []) {
             $stats['errors'][] = 'No invoice parsed from '.basename($pdfPath);

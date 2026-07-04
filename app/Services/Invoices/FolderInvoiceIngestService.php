@@ -94,7 +94,7 @@ class FolderInvoiceIngestService
                     continue;
                 }
 
-                $ids = $this->parser->importFile($folder->carrier_id, $localPath);
+                $ids = $this->parser->importFile($folder->carrier_id, $localPath, basename($file));
                 $this->recordImport($folder, $hash, basename($file), $reference, $ids);
                 $stats['processed']++;
             } catch (Throwable $e) {

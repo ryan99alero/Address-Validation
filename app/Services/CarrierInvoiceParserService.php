@@ -887,7 +887,7 @@ class CarrierInvoiceParserService
      *
      * @return array<int, int>
      */
-    public function importFile(int $carrierId, string $path): array
+    public function importFile(int $carrierId, string $path, ?string $displayName = null): array
     {
         $slug = strtolower(Carrier::find($carrierId)?->slug ?? '');
         $isPdf = strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf';
@@ -905,7 +905,9 @@ class CarrierInvoiceParserService
 
         // Backfill the source filename on any invoice that doesn't have one yet (the split
         // model creates invoices by number, so the batch filename isn't set at creation).
-        $filename = basename($path);
+        // Use the caller's real display name — $path is a random temp file for SMB ingest
+        // (e.g. smbinv_XXXX.pdf), which must never surface as the invoice's filename.
+        $filename = $displayName ?? basename($path);
         CarrierInvoice::whereIn('id', $ids)
             ->where(fn ($q) => $q->whereNull('filename')->orWhere('filename', ''))
             ->update(['filename' => $filename]);
@@ -1322,6 +1324,21 @@ class CarrierInvoiceParserService
             return [];
         }
 
+        // Legacy UPS PDFs (pre-~2016 Ricoh layout — "Shipper Number" instead of "Account
+        // Number", no "Charges this period" summary) don't match the current-format parser:
+        // they yield a garbage number like "PAYMENTS" and no charges. The CSV is the
+        // authoritative source for those years, so skip rather than create a junk invoice.
+        $grandTotal = $this->extractPdfGrandTotal($text);
+        $parsedTotal = (float) $parsed['reconciliation']['parsed_total'];
+        if ($grandTotal === null && $parsedTotal === 0.0) {
+            Log::info('Skipped legacy-format UPS PDF (unparseable, CSV is authoritative)', [
+                'file' => basename($path),
+                'parsed_number' => $parsed['invoice_number'],
+            ]);
+
+            return [];
+        }
+
         $invoice = $this->getOrCreateInvoice(
             $carrierId,
             $number,
@@ -1329,7 +1346,7 @@ class CarrierInvoiceParserService
             InvoiceIdentity::account($parsed['account_number']),
         );
 
-        $this->persistUpsPdf($invoice, $parsed, $this->extractPdfGrandTotal($text));
+        $this->persistUpsPdf($invoice, $parsed, $grandTotal);
 
         // Feed the address-correction cache from the same PDF (reuses the tested parser).
         $corrections = (new UpsPdfInvoiceParser)->parse($text)['corrections'];

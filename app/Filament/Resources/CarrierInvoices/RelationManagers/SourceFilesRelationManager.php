@@ -37,9 +37,9 @@ class SourceFilesRelationManager extends RelationManager
                     ->alignEnd(),
                 TextColumn::make('source_reference')
                     ->label('Source path')
-                    ->limit(60)
                     ->wrap()
                     ->copyable()
+                    ->tooltip(fn (CarrierImportFile $record): ?string => $record->source_reference)
                     ->color('gray'),
             ])
             ->recordActions([
