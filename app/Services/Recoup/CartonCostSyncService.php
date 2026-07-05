@@ -156,9 +156,9 @@ class CartonCostSyncService
                 $written += $this->upsert($rows);
             }
         } catch (\Throwable $e) {
-            Log::error('Carton cost sync from Pace failed', ['error' => $e->getMessage()]);
-
-            throw $e;
+            // Carton sync is best-effort — a Pace outage or a misconfigured field xpath must
+            // never fail the import that dispatched this. Log and return what we managed.
+            Log::error('Carton cost sync from Pace failed', ['error' => $e->getMessage(), 'written' => $written]);
         }
 
         return $written;
