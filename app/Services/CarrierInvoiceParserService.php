@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\SyncInvoiceCartonCosts;
 use App\Models\Carrier;
 use App\Models\CarrierCharge;
 use App\Models\CarrierInvoice;
@@ -1525,6 +1526,12 @@ class CarrierInvoiceParserService
             }
 
             $survived[] = $invoice->id;
+        }
+
+        // Read each surviving invoice's Pace carton ship costs into the recoup baseline mirror.
+        // Queued: it makes a live Pace API call and must not block the import.
+        if ($survived !== []) {
+            SyncInvoiceCartonCosts::dispatch($survived);
         }
 
         return $survived;

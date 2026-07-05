@@ -58,3 +58,7 @@ Schedule::command('reports:rebuild')
     ->name('carrier-rollups-rebuild')
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/report-rollups.log'));
+
+// Pace carton ship costs are read at IMPORT time (SyncInvoiceCartonCosts, dispatched from the
+// invoice import), so no nightly pull is needed. `recoup:sync-cartons` remains for manual
+// backfill of invoices imported before this was wired.

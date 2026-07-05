@@ -118,8 +118,22 @@ systems that err in the carrier's favor. Auditors find ~1–3% of parcel spend r
 2. **Refund engine v1** — detect + dispute queue + state machine + export, on what needs no
    external data: **duplicates + DIM over-audits + residential/commercial misclassification**
    (the last is unique to us and likely #2 by $). Show DIM coverage %.
-3. **Customer recoup** — quote-vs-actual via Pace + per-customer policy layer; extend
-   `billed_to_pace` from corrections to accessorials.
+3. **Customer recoup** — quote-vs-actual via Pace + per-customer policy layer.
+   **Foundation built (2026-07-05):** Process Shipper records a single actual ship cost at ship
+   time (no separate estimate), so recoup basis = **carrier-invoiced total per tracking −
+   carton.ship_cost**. `carton_costs` mirrors the Pace **Carton** object (per package/tracking:
+   `ship_cost`, `ship_date`, `pace_job_number`, `pace_customer_id`, `recouped_at`), granular at
+   the carton level so multi-package master trackings don't lump costs. `RecoupService`
+   (candidates / summaryByCustomer / totalRecoupable / unmatchedTrackings) does the delta math;
+   `CartonCostSyncService` populates the mirror from the **Pace REST API**
+   (`PaceApiClient::loadValueObjects('Carton', …)`) — XPaths: `@trackingNumber`, `@cost`,
+   `@actualDateTime`, `/JobShipment/job/@id` (job), `/JobShipment/job/@customer` (customer). **The
+   carton source is the Pace API only — there is no SQL pathway to Pace.** The read is
+   **import-triggered**: `finalizeInvoices()` dispatches the `SyncInvoiceCartonCosts` job for the
+   invoices just imported (at import time the shipment already exists in Pace — ship-then-bill —
+   so the read always hits). `recoup:sync-cartons` remains for manual backfill. **TODO:** build
+   the recoup Filament report/zone, the per-customer policy layer, and the Pace write-back that
+   sets `recouped_at`.
 4. **Re-correction detection** — after Pace write-back is live; event + re-correction-rate KPI.
 5. Deferred: FedEx dims extraction (after v1 proves rate), rate-shopping, surcharge forecast,
    contract-renegotiation report. GSR killed unless contract says otherwise.

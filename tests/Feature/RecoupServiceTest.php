@@ -1,0 +1,189 @@
+<?php
+
+use App\Jobs\SyncInvoiceCartonCosts;
+use App\Models\Carrier;
+use App\Models\CartonCost;
+use App\Services\Integrations\PaceApiClient;
+use App\Services\Recoup\CartonCostSyncService;
+use App\Services\Recoup\RecoupService;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+
+beforeEach(function () {
+    $this->carrier = Carrier::factory()->create(['slug' => 'ups']);
+    $this->invoiceId = DB::table('carrier_invoices')->insertGetId([
+        'carrier_id' => $this->carrier->id,
+        'filename' => 'inv.csv',
+        'file_hash' => 'hash-'.uniqid(),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+});
+
+function charge(int $invoiceId, int $carrierId, string $tracking, float $amount): void
+{
+    DB::table('carrier_charges')->insert([
+        'carrier_invoice_id' => $invoiceId,
+        'carrier_id' => $carrierId,
+        'tracking_number' => $tracking,
+        'amount' => $amount,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+}
+
+function carton(string $tracking, float $shipCost, ?string $customer = 'CUST1', ?string $job = 'JOB1'): CartonCost
+{
+    return CartonCost::create([
+        'tracking_number' => $tracking,
+        'ship_cost' => $shipCost,
+        'ship_date' => '2026-06-01',
+        'pace_job_number' => $job,
+        'pace_customer_id' => $customer,
+    ]);
+}
+
+test('recoup delta is invoiced total minus recorded ship cost', function () {
+    // Carrier billed $10 base + $3 residential + $2 address correction = $15 on this tracking.
+    // Ship Cost recorded at ship time was $10.50 => recoup $4.50.
+    charge($this->invoiceId, $this->carrier->id, '1Z001', 10.00);
+    charge($this->invoiceId, $this->carrier->id, '1Z001', 3.00);
+    charge($this->invoiceId, $this->carrier->id, '1Z001', 2.00);
+    carton('1Z001', 10.50);
+
+    $candidates = app(RecoupService::class)->candidates();
+
+    expect($candidates)->toHaveCount(1);
+    $row = $candidates->first();
+    expect($row->tracking_number)->toBe('1Z001')
+        ->and($row->actual)->toBe(15.00)
+        ->and($row->ship_cost)->toBe(10.50)
+        ->and($row->delta)->toBe(4.50)
+        ->and($row->pace_customer_id)->toBe('CUST1');
+});
+
+test('credits net against the actual so an overcharge that was refunded is not recouped', function () {
+    // $12 billed then a $12 credit nets to $0 actual; ship cost $10 => delta −$10, not a candidate.
+    charge($this->invoiceId, $this->carrier->id, '1Z002', 12.00);
+    charge($this->invoiceId, $this->carrier->id, '1Z002', -12.00);
+    carton('1Z002', 10.00);
+
+    expect(app(RecoupService::class)->candidates())->toHaveCount(0);
+});
+
+test('cartons at or below ship cost are not candidates', function () {
+    charge($this->invoiceId, $this->carrier->id, '1Z003', 9.99);
+    carton('1Z003', 10.00);
+
+    expect(app(RecoupService::class)->candidates())->toHaveCount(0);
+});
+
+test('already recouped cartons are excluded', function () {
+    charge($this->invoiceId, $this->carrier->id, '1Z004', 20.00);
+    carton('1Z004', 10.00)->update(['recouped_at' => now()]);
+
+    expect(app(RecoupService::class)->candidates())->toHaveCount(0);
+});
+
+test('summary by customer sums recoupable and orders largest first', function () {
+    charge($this->invoiceId, $this->carrier->id, '1Z010', 30.00); // +20
+    carton('1Z010', 10.00, 'BIG');
+    charge($this->invoiceId, $this->carrier->id, '1Z011', 15.00); // +5
+    carton('1Z011', 10.00, 'SMALL');
+    charge($this->invoiceId, $this->carrier->id, '1Z012', 13.00); // +3
+    carton('1Z012', 10.00, 'BIG');
+
+    $summary = app(RecoupService::class)->summaryByCustomer();
+
+    expect($summary->first()->pace_customer_id)->toBe('BIG')
+        ->and($summary->first()->cartons)->toBe(2)
+        ->and($summary->first()->recoupable)->toBe(23.00)
+        ->and(app(RecoupService::class)->totalRecoupable())->toBe(28.00);
+});
+
+test('unmatched trackings surface charges with no carton', function () {
+    charge($this->invoiceId, $this->carrier->id, '1Z020', 25.00);
+    charge($this->invoiceId, $this->carrier->id, '1Z021', 40.00);
+    carton('1Z020', 10.00); // only 1Z020 has a carton
+
+    $unmatched = app(RecoupService::class)->unmatchedTrackings();
+
+    expect($unmatched)->toHaveCount(1)
+        ->and($unmatched->first()->tracking_number)->toBe('1Z021')
+        ->and($unmatched->first()->actual)->toBe(40.00);
+});
+
+test('sync upsert writes carton rows and updates on repeat', function () {
+    $sync = app(CartonCostSyncService::class);
+
+    $written = $sync->upsert([
+        ['tracking_number' => '1Z100', 'ship_cost' => 12.34, 'ship_date' => '2026-06-01', 'pace_job_number' => 'J1', 'pace_customer_id' => 'C1'],
+        ['tracking_number' => '', 'ship_cost' => 9], // skipped (blank tracking)
+    ]);
+
+    expect($written)->toBe(1);
+    expect(CartonCost::where('tracking_number', '1Z100')->value('ship_cost'))->toBe('12.34');
+
+    $sync->upsert([['tracking_number' => '1Z100', 'ship_cost' => 20.00]]);
+
+    expect(CartonCost::count())->toBe(1)
+        ->and(CartonCost::where('tracking_number', '1Z100')->value('ship_cost'))->toBe('20.00');
+});
+
+test('pending tracking numbers exclude already-synced cartons', function () {
+    charge($this->invoiceId, $this->carrier->id, '1Z200', 10.00);
+    charge($this->invoiceId, $this->carrier->id, '1Z201', 10.00);
+    carton('1Z200', 8.00);
+
+    expect(app(CartonCostSyncService::class)->pendingTrackingNumbers())->toBe(['1Z201']);
+});
+
+test('mapCartonRow converts a Carbon ship date to a plain date string', function () {
+    $row = app(CartonCostSyncService::class)->mapCartonRow([
+        'tracking_number' => '1Z',
+        'ship_cost' => 5,
+        'ship_date' => Carbon::parse('2026-06-02 13:45:00'),
+    ]);
+
+    expect($row['ship_date'])->toBe('2026-06-02');
+});
+
+test('syncFromPace maps carton value objects from Pace and upserts them', function () {
+    charge($this->invoiceId, $this->carrier->id, '1ZP01', 15.00);
+
+    $client = Mockery::mock(PaceApiClient::class);
+    $client->shouldReceive('loadValueObjects')->once()->andReturn(['valueObjects' => [['stub']]]);
+    $client->shouldReceive('parseValueObjects')->once()->andReturn(collect([
+        ['tracking_number' => '1ZP01', 'ship_cost' => 10.00, 'ship_date' => Carbon::parse('2026-06-01'), 'pace_job_number' => 'J7', 'pace_customer_id' => 'C9'],
+    ]));
+
+    $written = app(CartonCostSyncService::class)->syncFromPace($client);
+
+    expect($written)->toBe(1);
+    $carton = CartonCost::where('tracking_number', '1ZP01')->first();
+    expect($carton->ship_cost)->toBe('10.00')
+        ->and($carton->ship_date->toDateString())->toBe('2026-06-01')
+        ->and($carton->pace_job_number)->toBe('J7')
+        ->and($carton->pace_customer_id)->toBe('C9');
+
+    // And it now becomes a recoup candidate: $15 billed − $10 ship cost = $5.
+    expect(app(RecoupService::class)->totalRecoupable())->toBe(5.00);
+});
+
+test('SyncInvoiceCartonCosts syncs the distinct tracking numbers of the given invoices', function () {
+    charge($this->invoiceId, $this->carrier->id, '1ZA', 10.00);
+    charge($this->invoiceId, $this->carrier->id, '1ZA', 5.00); // duplicate tracking on same invoice
+    charge($this->invoiceId, $this->carrier->id, '1ZB', 8.00);
+
+    $mock = Mockery::mock(CartonCostSyncService::class);
+    $mock->shouldReceive('syncTrackings')
+        ->once()
+        ->withArgs(function (array $trackings): bool {
+            sort($trackings);
+
+            return $trackings === ['1ZA', '1ZB'];
+        })
+        ->andReturn(2);
+
+    (new SyncInvoiceCartonCosts([$this->invoiceId]))->handle($mock);
+});

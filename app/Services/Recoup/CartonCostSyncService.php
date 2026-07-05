@@ -1,0 +1,199 @@
+<?php
+
+namespace App\Services\Recoup;
+
+use App\Models\CarrierCharge;
+use App\Models\CartonCost;
+use App\Models\IntegrationConnection;
+use App\Services\Integrations\PaceApiClient;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
+
+/**
+ * Populates the local carton_costs mirror from the Pace "Carton" object (via the Pace REST API),
+ * so recoup can join costs locally instead of hitting Pace per tracking. Two entry points:
+ *
+ *   upsert(rows)   — the source-agnostic core: give it carton rows, it writes them.
+ *   syncFromPace() — pull cartons from the active Pace integration for the tracking numbers we
+ *                    have charges for, and upsert them.
+ *
+ * The Pace Carton object exposes cost / trackingNumber / actualDateTime / shipment. Job and
+ * customer are mapped through $paceFieldMap so the exact Pace field names stay configurable.
+ */
+class CartonCostSyncService
+{
+    /**
+     * Logical field => Pace xpath selector on the Carton object. Job and customer come through
+     * the carton's shipment → job traversal (PULL-flagged on Live; not in the static swagger).
+     *
+     * @var array<string, string>
+     */
+    protected array $paceFieldMap = [
+        'tracking_number' => '@trackingNumber',
+        'ship_cost' => '@cost',
+        'ship_date' => '@actualDateTime',
+        'pace_job_number' => '/JobShipment/job/@id',
+        'pace_customer_id' => '/JobShipment/job/@customer',
+    ];
+
+    /**
+     * Upsert carton rows into the local mirror, stamping synced_at. Rows are keyed by the
+     * logical carton fields; unknown keys are ignored.
+     *
+     * @param  iterable<int, array{tracking_number:string, ship_cost?:float|string|null, ship_date?:string|null, pace_job_number?:string|null, pace_customer_id?:string|null}>  $rows
+     * @return int number of rows written
+     */
+    public function upsert(iterable $rows): int
+    {
+        $now = now();
+        $payload = [];
+
+        foreach ($rows as $row) {
+            $tracking = trim((string) ($row['tracking_number'] ?? ''));
+            if ($tracking === '') {
+                continue;
+            }
+
+            $payload[] = [
+                'tracking_number' => $tracking,
+                'ship_cost' => round((float) ($row['ship_cost'] ?? 0), 2),
+                'ship_date' => $row['ship_date'] ?? null,
+                'pace_job_number' => $row['pace_job_number'] ?? null,
+                'pace_customer_id' => $row['pace_customer_id'] ?? null,
+                'synced_at' => $now,
+                'updated_at' => $now,
+                'created_at' => $now,
+            ];
+        }
+
+        if ($payload === []) {
+            return 0;
+        }
+
+        foreach (array_chunk($payload, 500) as $chunk) {
+            CartonCost::upsert(
+                $chunk,
+                ['tracking_number'],
+                ['ship_cost', 'ship_date', 'pace_job_number', 'pace_customer_id', 'synced_at', 'updated_at'],
+            );
+        }
+
+        return count($payload);
+    }
+
+    /**
+     * Tracking numbers that carry carrier charges but aren't in the carton mirror yet — the
+     * set worth pulling from Pace.
+     *
+     * @return array<int, string>
+     */
+    public function pendingTrackingNumbers(): array
+    {
+        return CarrierCharge::query()
+            ->whereNotNull('tracking_number')
+            ->whereNotIn('tracking_number', CartonCost::query()->select('tracking_number'))
+            ->distinct()
+            ->pluck('tracking_number')
+            ->all();
+    }
+
+    /**
+     * Pull carton costs for every pending tracking number (has charges, no carton yet) from
+     * the active Pace integration. Returns the number written, or null if no active Pace
+     * connection exists. Used by the manual backfill command.
+     */
+    public function syncFromPace(?PaceApiClient $client = null, int $chunk = 100): ?int
+    {
+        return $this->syncTrackings($this->pendingTrackingNumbers(), $client, $chunk);
+    }
+
+    /**
+     * Pull carton costs for a specific set of tracking numbers from the active Pace integration
+     * and upsert them — the import-time path (read cartons for the invoice just imported).
+     * Returns the number written, 0 if there's nothing to pull, or null if no active Pace
+     * connection exists.
+     *
+     * @param  array<int, string>  $trackingNumbers
+     */
+    public function syncTrackings(array $trackingNumbers, ?PaceApiClient $client = null, int $chunk = 100): ?int
+    {
+        $trackingNumbers = array_values(array_unique(array_filter(
+            $trackingNumbers,
+            fn ($t): bool => trim((string) $t) !== '',
+        )));
+
+        if ($trackingNumbers === []) {
+            return 0;
+        }
+
+        $client ??= $this->resolvePaceClient();
+        if (! $client) {
+            return null;
+        }
+
+        $fields = [];
+        foreach ($this->paceFieldMap as $logical => $xpath) {
+            $fields[] = ['name' => $logical, 'xpath' => $xpath];
+        }
+
+        $written = 0;
+        try {
+            foreach (array_chunk($trackingNumbers, $chunk) as $batch) {
+                $filter = collect($batch)
+                    ->map(fn (string $t): string => "@trackingNumber = '".str_replace("'", "''", $t)."'")
+                    ->implode(' or ');
+
+                $response = $client->loadValueObjects(
+                    objectName: 'Carton',
+                    fields: $fields,
+                    xpathFilter: $filter,
+                    limit: count($batch),
+                );
+
+                $rows = $client->parseValueObjects($response['valueObjects'] ?? [])
+                    ->map(fn (array $vo): array => $this->mapCartonRow($vo));
+
+                $written += $this->upsert($rows);
+            }
+        } catch (\Throwable $e) {
+            Log::error('Carton cost sync from Pace failed', ['error' => $e->getMessage()]);
+
+            throw $e;
+        }
+
+        return $written;
+    }
+
+    /**
+     * Map a parsed Pace Carton value object (keyed by the logical field names in $paceFieldMap)
+     * into a carton_costs row.
+     *
+     * @param  array<string, mixed>  $vo
+     * @return array{tracking_number:?string, ship_cost:mixed, ship_date:?string, pace_job_number:?string, pace_customer_id:?string}
+     */
+    public function mapCartonRow(array $vo): array
+    {
+        $shipDate = $vo['ship_date'] ?? null;
+        if ($shipDate instanceof Carbon) {
+            $shipDate = $shipDate->toDateString();
+        }
+
+        return [
+            'tracking_number' => $vo['tracking_number'] ?? null,
+            'ship_cost' => $vo['ship_cost'] ?? 0,
+            'ship_date' => $shipDate,
+            'pace_job_number' => $vo['pace_job_number'] ?? null,
+            'pace_customer_id' => $vo['pace_customer_id'] ?? null,
+        ];
+    }
+
+    protected function resolvePaceClient(): ?PaceApiClient
+    {
+        $connection = IntegrationConnection::query()
+            ->byDriver(IntegrationConnection::DRIVER_PACE)
+            ->active()
+            ->first();
+
+        return $connection ? new PaceApiClient($connection) : null;
+    }
+}
