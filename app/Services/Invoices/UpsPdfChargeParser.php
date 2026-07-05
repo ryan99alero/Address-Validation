@@ -178,6 +178,15 @@ class UpsPdfChargeParser
      */
     private function parseSection(string $key, int $intCols, string $text, ?int $year): array
     {
+        // Bound the section at its own named "Total X" marker. A section's text runs to the
+        // next KNOWN header, which can swallow trailing account-level sub-sections
+        // (Miscellaneous, Adjustments) into the last shipment block and double-count them
+        // against parseOtherFees. Per-shipment totals are unnamed ("Total 22.78") so they
+        // don't trigger this; only the section total ("Total Inbound …") does.
+        if (preg_match('/\bTotal [A-Z][A-Za-z][A-Za-z &\/-]*?\s+-?[\d,]+\.\d{2}/', $text, $tm, PREG_OFFSET_CAPTURE)) {
+            $text = substr($text, 0, (int) $tm[0][1]);
+        }
+
         if ($key === 'service' || $key === 'adjustments') {
             return [[], $this->parseAccountCharges($key, $text)];
         }
