@@ -115,9 +115,22 @@ class CorrectionHotspots extends Page implements HasTable
         $min = $searching ? 1 : (int) ($filters['min'] ?? 5);
         $limit = $searching ? 1000 : 300;
 
+        // The real correction fee lives in carrier_charges (category "Address Correction"),
+        // NOT on the invoice line (line.charge_amount is 0 for PDF/FedEx-sourced corrections).
+        // Join the per-(carrier, tracking) address-correction fee so the numbers are honest.
+        $adcCategoryId = DB::table('charge_categories')->where('name', 'Address Correction')->value('id');
+        $feeSub = DB::table('carrier_charges')
+            ->select('carrier_id', 'tracking_number', DB::raw('SUM(amount) AS fee'))
+            ->where('charge_category_id', $adcCategoryId)
+            ->whereNotNull('tracking_number')
+            ->groupBy('carrier_id', 'tracking_number');
+
         $rows = DB::table('carrier_invoice_lines as l')
             ->join('carrier_invoices as ci', 'ci.id', '=', 'l.carrier_invoice_id')
             ->join('carriers as c', 'c.id', '=', 'ci.carrier_id')
+            ->leftJoinSub($feeSub, 'f', fn ($join) => $join
+                ->on('f.carrier_id', '=', 'ci.carrier_id')
+                ->on('f.tracking_number', '=', 'l.tracking_number'))
             ->whereNotNull('l.original_address_1')->where('l.original_address_1', '<>', '')
             ->when($carrierId, fn ($q) => $q->where('ci.carrier_id', $carrierId))
             ->selectRaw('
@@ -126,7 +139,7 @@ class CorrectionHotspots extends Page implements HasTable
                 MAX(l.original_city) AS city,
                 MAX(l.original_state) AS state,
                 COUNT(*) AS corrections,
-                ROUND(SUM(l.charge_amount), 2) AS fees,
+                ROUND(SUM(COALESCE(f.fee, l.charge_amount)), 2) AS fees,
                 GROUP_CONCAT(DISTINCT c.slug) AS carriers,
                 GROUP_CONCAT(l.change_type) AS change_types
             ')

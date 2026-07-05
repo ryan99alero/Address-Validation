@@ -172,6 +172,27 @@ test('unrecognized fee sub-sections are captured as labeled line items (Miscella
     expect($r['reconciliation']['parsed_total'])->toBe(59.99);
 });
 
+test('a missed credit (parsed over the printed total) is captured as a negative residual line and reconciles', function () {
+    $carrier = Carrier::factory()->create(['slug' => 'ups']);
+    $service = app(CarrierInvoiceParserService::class);
+    $invoice = CarrierInvoice::create(['carrier_id' => $carrier->id, 'invoice_number' => 'CR1', 'invoice_date' => '2026-06-27', 'status' => 'pending']);
+
+    // Parser captured $105 of charges, but the printed grand total is $100 — i.e. a $5 credit
+    // (e.g. a Residential/Commercial reclassification refund) we didn't recognize.
+    $parsed = [
+        'invoice_number' => 'CR1', 'account_number' => '1', 'invoice_date' => '2026-06-27',
+        'message_codes' => [], 'shipments' => [],
+        'account_charges' => [['section' => 'x', 'description' => 'Fee', 'amount' => 105.00]],
+        'reconciliation' => ['parsed_total' => 105.00, 'sections' => []],
+    ];
+    (new ReflectionMethod($service, 'persistUpsPdf'))->invoke($service, $invoice, $parsed, 100.00);
+
+    $invoice->refresh();
+    expect($invoice->charges_reconciled)->toBeTrue();
+    expect(round((float) $invoice->charges()->sum('amount'), 2))->toBe(100.0);
+    expect($invoice->charges()->where('amount', -5.00)->where('raw_charge_description', 'like', '%credit%')->exists())->toBeTrue();
+});
+
 test('legacy-format UPS PDF (no charges-this-period summary) is skipped, not junk-imported', function () {
     $carrier = Carrier::factory()->create(['slug' => 'ups']);
 

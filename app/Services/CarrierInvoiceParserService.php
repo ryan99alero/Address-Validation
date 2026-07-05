@@ -1448,9 +1448,15 @@ class CarrierInvoiceParserService
         if (! $hasCsvCharges && $expected !== null) {
             $stored = (float) $invoice->charges()->sum('amount');
             $residual = round($expected - $stored, 2);
-            if ($residual > 0.01) {
+            if (abs($residual) > 0.01) {
+                // Positive = a fee we didn't recognize; negative = a credit/adjustment we
+                // missed (e.g. a Residential/Commercial reclassification refund). Either way,
+                // record it as one flagged line so the invoice reconciles and the gap is
+                // visible for review.
                 $this->recordCharge($invoice, [
-                    'charge_description' => 'UPS charge (unclassified — review)',
+                    'charge_description' => $residual > 0
+                        ? 'UPS charge (unclassified — review)'
+                        : 'UPS credit/adjustment (unclassified — review)',
                     'amount' => $residual,
                     'source_type' => 'pdf',
                 ]);
