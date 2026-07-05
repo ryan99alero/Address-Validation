@@ -33,17 +33,21 @@ class CostAnalyticsService
                 year,
                 ROUND(SUM(total_amount), 2) AS total,
                 ROUND(SUM(CASE WHEN charge_category_id = ? THEN total_amount ELSE 0 END), 2) AS base,
+                ROUND(SUM(CASE WHEN charge_category_id = ? THEN total_amount ELSE 0 END), 2) AS credit,
                 ROUND(SUM(CASE WHEN charge_category_id = ? THEN total_amount ELSE 0 END), 2) AS correction,
                 SUM(CASE WHEN charge_category_id = ? THEN distinct_ships ELSE 0 END) AS ships
-            ', [self::CAT_BASE, self::CAT_ADDRESS_CORRECTION, self::CAT_BASE])
+            ', [self::CAT_BASE, self::CAT_CREDIT, self::CAT_ADDRESS_CORRECTION, self::CAT_BASE])
             ->groupBy('year')
             ->orderBy('year')
             ->get()
             ->map(function ($r): object {
                 $r->total = (float) $r->total;
                 $r->base = (float) $r->base;
+                $r->credit = (float) $r->credit;
                 $r->correction = (float) $r->correction;
-                $r->accessorial = round($r->total - $r->base, 2);
+                // Accessorials = everything that isn't base transportation or a discount/credit
+                // (credits are negative, so subtracting them adds their magnitude back out).
+                $r->accessorial = round($r->total - $r->base - $r->credit, 2);
                 $r->ships = (int) $r->ships;
                 $r->load_pct = $r->total > 0 ? round($r->accessorial / $r->total * 100, 1) : 0.0;
                 $r->cost_per_ship = $r->ships > 0 ? round($r->total / $r->ships, 2) : 0.0;

@@ -29,7 +29,7 @@ class CostIntelligenceStats extends StatsOverviewWidget
 
         return [
             Stat::make('Total Spend · '.$latest->year, '$'.number_format($latest->total))
-                ->description('Base $'.number_format($latest->base).' + accessorials $'.number_format($latest->accessorial))
+                ->description('Base $'.number_format($latest->base).' + accessorials $'.number_format($latest->accessorial).' − credits $'.number_format(abs($latest->credit)))
                 ->chart($totalTrend)
                 ->color('primary'),
 

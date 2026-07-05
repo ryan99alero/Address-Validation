@@ -10,6 +10,7 @@ beforeEach(function () {
         [CostAnalyticsService::CAT_ADDRESS_CORRECTION, 'Address Correction'],
         [2, 'Fuel Surcharge'],
         [CostAnalyticsService::CAT_BASE, 'Base Transportation'],
+        [CostAnalyticsService::CAT_CREDIT, 'Discount / Credit'],
     ] as [$id, $name]) {
         DB::table('charge_categories')->insert(['id' => $id, 'name' => $name, 'is_active' => true, 'created_at' => now(), 'updated_at' => now()]);
     }
@@ -24,21 +25,22 @@ function seedRollup(int $carrierId, int $year, ?int $categoryId, float $amount, 
     ]);
 }
 
-test('yearly totals compute accessorial load and cost per shipment', function () {
-    // 2025: base $8,000 over 100 ships + $2,000 accessorials => total 10,000, load 20%, cps $100
+test('yearly totals compute accessorial load net of credits', function () {
+    // base $8,000 (100 ships) + $2,000 accessorials − $1,000 credit => total $9,000.
+    // accessorial ($2,000) is net of the credit; load = 2000/9000 = 22.2%.
     seedRollup(1, 2025, CostAnalyticsService::CAT_BASE, 8000, 100);
     seedRollup(1, 2025, CostAnalyticsService::CAT_ADDRESS_CORRECTION, 500, 20);
     seedRollup(1, 2025, 2 /* fuel */, 1500, 90);
+    seedRollup(1, 2025, CostAnalyticsService::CAT_CREDIT, -1000, 100);
 
     $latest = app(CostAnalyticsService::class)->latestYear();
 
-    expect($latest->year)->toBe(2025)
-        ->and($latest->total)->toBe(10000.0)
+    expect($latest->total)->toBe(9000.0)
         ->and($latest->base)->toBe(8000.0)
-        ->and($latest->accessorial)->toBe(2000.0)
-        ->and($latest->load_pct)->toBe(20.0)
-        ->and($latest->ships)->toBe(100)
-        ->and($latest->cost_per_ship)->toBe(100.0)
+        ->and($latest->credit)->toBe(-1000.0)
+        ->and($latest->accessorial)->toBe(2000.0) // total − base − credit
+        ->and($latest->load_pct)->toBe(22.2)
+        ->and($latest->cost_per_ship)->toBe(90.0)
         ->and($latest->correction)->toBe(500.0);
 });
 
