@@ -1441,8 +1441,24 @@ class CarrierInvoiceParserService
             ]);
         }
 
+        // Residual safety-net: if we still fall short of the printed grand total (a fee type
+        // neither structural parsing nor labeled-fee capture recognized), record the remainder
+        // as ONE flagged line so no money is lost and the invoice reconciles. The line is its
+        // own review queue — a persistent residual means a new fee shape to teach the parser.
+        if (! $hasCsvCharges && $expected !== null) {
+            $stored = (float) $invoice->charges()->sum('amount');
+            $residual = round($expected - $stored, 2);
+            if ($residual > 0.01) {
+                $this->recordCharge($invoice, [
+                    'charge_description' => 'UPS charge (unclassified — review)',
+                    'amount' => $residual,
+                    'source_type' => 'pdf',
+                ]);
+            }
+        }
+
         $invoice->update(['status' => 'completed', 'processed_at' => $invoice->processed_at ?? now()]);
-        $this->reconcileInvoice($invoice, (float) $parsed['reconciliation']['parsed_total'], $expected);
+        $this->reconcileInvoice($invoice, (float) $invoice->charges()->sum('amount'), $expected);
     }
 
     /**

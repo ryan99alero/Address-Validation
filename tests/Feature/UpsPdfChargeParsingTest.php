@@ -148,6 +148,30 @@ test('PDF skips charges but keeps shipments when CSV already owns the invoice', 
     expect(CarrierShipment::where('carrier_invoice_id', $invoice->id)->whereNotNull('audited_dims')->count())->toBe(1);
 });
 
+test('unrecognized fee sub-sections are captured as labeled line items (Miscellaneous, Paper Commercial)', function () {
+    // Real structures: an account-level Miscellaneous fee + a per-tracking Paper Commercial
+    // surcharge — neither parsed structurally. Should come in as labeled charges that reconcile.
+    $text = implode(' ', [
+        'Invoice Date June 27, 2026 Invoice Number 0000000E540W266 Account Number 0E540W',
+        'Summary of Charges Charges this period $ 59.99',
+        'Adjustments & Other Charges Miscellaneous Explanation Published Charge Incentive Credit Billed Charge',
+        'WEEKLY PRINTER SERVICE FEE For 1 PRINTERS AT $9.99 EACH FOR 26-JUN-2026 9.99 9.99 Total Miscellaneous 9.99 9.99',
+        'Adjustments & Other Charges Paper Commercial Invoice Service Surcharge Export Date Tracking Number Description of Charges Published Charge Incentive Credit Billed Charge',
+        '04/30 1Z6913170290730875 Paper Commercial Invoice Surcharge 25.00 25.00',
+        '04/30 1Z6913170291481946 Paper Commercial Invoice Surcharge 25.00 25.00',
+        'Total Paper Commercial Invoice Service Surcharge 50.00 50.00',
+        'Total Adjustments & Other Charges 59.99',
+    ]);
+
+    $r = (new UpsPdfChargeParser)->parse($text);
+
+    $other = collect($r['account_charges'])->where('section', 'other_fees');
+    expect($other->firstWhere('amount', 9.99)['description'])->toContain('WEEKLY PRINTER SERVICE FEE');
+    expect($other->firstWhere('amount', 50.0)['description'])->toContain('Paper Commercial Invoice Service Surcharge');
+    // Both captured, nothing double-counted -> reconciles to the printed grand total.
+    expect($r['reconciliation']['parsed_total'])->toBe(59.99);
+});
+
 test('legacy-format UPS PDF (no charges-this-period summary) is skipped, not junk-imported', function () {
     $carrier = Carrier::factory()->create(['slug' => 'ups']);
 

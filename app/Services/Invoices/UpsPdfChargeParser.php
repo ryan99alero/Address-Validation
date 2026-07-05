@@ -93,6 +93,15 @@ class UpsPdfChargeParser
             $result['reconciliation']['parsed_total'] += $sum;
         }
 
+        // Capture any fee sub-section we don't parse structurally (Miscellaneous, Paper
+        // Commercial Invoice Service Surcharge, and future UPS fee types) as labeled line
+        // items — we don't need to recognize the fee, just faithfully bring in UPS's label.
+        foreach ($this->parseOtherFees($clean) as $fee) {
+            $result['account_charges'][] = $fee;
+            $result['reconciliation']['parsed_total'] += $fee['amount'];
+            $result['reconciliation']['sections']['other_fees'] = round(($result['reconciliation']['sections']['other_fees'] ?? 0) + $fee['amount'], 2);
+        }
+
         $result['reconciliation']['parsed_total'] = round($result['reconciliation']['parsed_total'], 2);
 
         // Resolve the glossary using the codes shipments actually reference — splitting on
@@ -494,6 +503,69 @@ class UpsPdfChargeParser
     private function firstMatch(string $pattern, string $text): ?string
     {
         return preg_match($pattern, $text, $m) ? $m[1] : null;
+    }
+
+    /** Sub-section "Total X" names already captured structurally — never re-capture these. */
+    private const HANDLED_TOTALS = [
+        'Outbound', 'Inbound', 'Address Corrections', 'Packages Delivered but not Previously Billed',
+        'Shipping Charge Corrections', 'Adjustments', 'Service Charges', 'Incentives',
+        'Adjustments & Other Charges', 'Miscellaneous Package', 'Packages',
+    ];
+
+    /**
+     * Capture fee sub-sections we don't parse structurally (Miscellaneous / Weekly Printer
+     * Service Fee, Paper Commercial Invoice Service Surcharge, and any future UPS fee type) as
+     * labeled line items. Uses each sub-section's printed "Total X" as the amount (robust vs.
+     * per-line amount parsing) and pulls its label from the sub-section text, so an unknown fee
+     * still comes in with UPS's own wording instead of being dropped.
+     *
+     * @return array<int, array{section: string, description: string, amount: float}>
+     */
+    private function parseOtherFees(string $clean): array
+    {
+        $amt = self::AMT;
+        if (! preg_match_all('/\bTotal ([A-Z][A-Za-z &\/-]{3,55}?)\s+('.$amt.'(?:\s+'.$amt.'){0,2})(?=\s)/', $clean, $totals, PREG_OFFSET_CAPTURE | PREG_SET_ORDER)) {
+            return [];
+        }
+
+        $charges = [];
+        $prevEnd = 0;
+        foreach ($totals as $t) {
+            $name = trim($t[1][0]);
+            $markerStart = (int) $t[0][1];
+            $blockStart = $prevEnd;
+            $prevEnd = $markerStart + strlen($t[0][0]);
+
+            if (in_array($name, self::HANDLED_TOTALS, true)) {
+                continue;
+            }
+
+            // Billed = last amount token of the "Total <Name> Pub [Inc] Billed" run.
+            $nums = preg_split('/\s+/', trim($t[2][0]));
+            $billed = (float) str_replace(',', '', (string) end($nums));
+            if ($billed === 0.0) {
+                continue;
+            }
+
+            // Label: text after this sub-section's own "…Billed Charge" column header, with
+            // trailing amounts stripped. Per-tracking fee sub-sections repeat the same label
+            // per line, so fall back to the sub-section name there.
+            $block = substr($clean, $blockStart, $markerStart - $blockStart);
+            $hp = strrpos($block, 'Billed Charge');
+            $body = $hp !== false ? substr($block, $hp + strlen('Billed Charge')) : $block;
+
+            if (preg_match('/'.self::TRACK.'/', $body)) {
+                $label = $name;
+            } else {
+                $label = trim((string) preg_replace('/\s+/', ' ', $body));
+                $label = trim((string) preg_replace('/(?:\s+'.$amt.')+\s*$/', '', $label));
+                $label = mb_substr($label !== '' ? $label : $name, 0, 200);
+            }
+
+            $charges[] = ['section' => 'other_fees', 'description' => $label, 'amount' => round($billed, 2)];
+        }
+
+        return $charges;
     }
 
     /** Normalize an address string: collapse whitespace, drop a trailing pickup date + furniture. */
