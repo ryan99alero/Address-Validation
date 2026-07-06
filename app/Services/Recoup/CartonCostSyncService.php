@@ -23,30 +23,39 @@ use Illuminate\Support\Facades\Log;
 class CartonCostSyncService
 {
     /**
-     * Logical field => Pace xpath selector on the Carton object. Job and customer come through
-     * the carton's shipment → job traversal (PULL-flagged on Live; not in the static swagger).
+     * Logical field => Pace xpath selector on the Carton object (loadValueObjects field
+     * descriptors). Job and customer traverse the carton's shipment -> job reference. Pace fields
+     * carry two names (API vs SQL); these are the API xpaths: the ship-date selector is
+     * "actualDate" (the SQL name "actualDateTime" is rejected here), and the shipment/job/customer
+     * traversal is relative with no leading slash.
      *
      * @var array<string, string>
      */
     protected array $paceFieldMap = [
         'tracking_number' => '@trackingNumber',
         'ship_cost' => '@cost',
-        'ship_date' => '@actualDateTime',
-        'pace_job_number' => '/JobShipment/job/@id',
-        'pace_customer_id' => '/JobShipment/job/@customer',
+        'ship_date' => '@actualDate',
+        'pace_job_number' => 'shipment/job/@job',
+        'pace_customer_id' => 'shipment/job/@customer',
     ];
 
     /**
      * Upsert carton rows into the local mirror, stamping synced_at. Rows are keyed by the
      * logical carton fields; unknown keys are ignored.
      *
+     * UPS recycles tracking numbers, so Pace can hold several cartons per number across years.
+     * We keep only the most recent (latest ship_date) per tracking — the current shipment;
+     * older ones are recycle collisions belonging to different jobs/customers.
+     *
      * @param  iterable<int, array{tracking_number:string, ship_cost?:float|string|null, ship_date?:string|null, pace_job_number?:string|null, pace_customer_id?:string|null}>  $rows
-     * @return int number of rows written
+     * @return int number of distinct tracking numbers written
      */
     public function upsert(iterable $rows): int
     {
         $now = now();
-        $payload = [];
+
+        /** @var array<string, array<string, mixed>> $byTracking */
+        $byTracking = [];
 
         foreach ($rows as $row) {
             $tracking = trim((string) ($row['tracking_number'] ?? ''));
@@ -54,10 +63,23 @@ class CartonCostSyncService
                 continue;
             }
 
-            $payload[] = [
+            $shipDate = $row['ship_date'] ?? null;
+            if ($shipDate instanceof \DateTimeInterface) {
+                $shipDate = $shipDate->format('Y-m-d');
+            } elseif ($shipDate !== null) {
+                $shipDate = (string) $shipDate;
+            }
+
+            // Keep the latest ship_date per tracking (null sorts lowest). ISO dates compare
+            // correctly as strings.
+            if (isset($byTracking[$tracking]) && ($byTracking[$tracking]['ship_date'] ?? '') >= ($shipDate ?? '')) {
+                continue;
+            }
+
+            $byTracking[$tracking] = [
                 'tracking_number' => $tracking,
                 'ship_cost' => round((float) ($row['ship_cost'] ?? 0), 2),
-                'ship_date' => $row['ship_date'] ?? null,
+                'ship_date' => $shipDate,
                 'pace_job_number' => $row['pace_job_number'] ?? null,
                 'pace_customer_id' => $row['pace_customer_id'] ?? null,
                 'synced_at' => $now,
@@ -66,11 +88,11 @@ class CartonCostSyncService
             ];
         }
 
-        if ($payload === []) {
+        if ($byTracking === []) {
             return 0;
         }
 
-        foreach (array_chunk($payload, 500) as $chunk) {
+        foreach (array_chunk(array_values($byTracking), 500) as $chunk) {
             CartonCost::upsert(
                 $chunk,
                 ['tracking_number'],
@@ -78,7 +100,7 @@ class CartonCostSyncService
             );
         }
 
-        return count($payload);
+        return count($byTracking);
     }
 
     /**
@@ -146,8 +168,10 @@ class CartonCostSyncService
                 $response = $client->loadValueObjects(
                     objectName: 'Carton',
                     fields: $fields,
+                    // A recycled tracking can return several cartons across years; allow headroom
+                    // so none are truncated (upsert keeps the latest per tracking).
                     xpathFilter: $filter,
-                    limit: count($batch),
+                    limit: count($batch) * 10,
                 );
 
                 $rows = $client->parseValueObjects($response['valueObjects'] ?? [])

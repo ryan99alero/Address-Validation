@@ -170,6 +170,24 @@ test('syncFromPace maps carton value objects from Pace and upserts them', functi
     expect(app(RecoupService::class)->totalRecoupable())->toBe(5.00);
 });
 
+test('upsert keeps the latest carton per recycled tracking number', function () {
+    // UPS recycles tracking numbers — Pace returns several cartons for one number across years.
+    // Only the most recent (the current shipment) should survive.
+    $written = app(CartonCostSyncService::class)->upsert([
+        ['tracking_number' => '1Z9', 'ship_cost' => null, 'ship_date' => '2013-12-04', 'pace_job_number' => 'OLD', 'pace_customer_id' => 'X'],
+        ['tracking_number' => '1Z9', 'ship_cost' => 18.94, 'ship_date' => '2026-07-02', 'pace_job_number' => 'M254402', 'pace_customer_id' => 'WP1200'],
+        ['tracking_number' => '1Z9', 'ship_cost' => 0, 'ship_date' => '2021-11-10', 'pace_job_number' => 'MID', 'pace_customer_id' => 'Y'],
+    ]);
+
+    expect($written)->toBe(1)
+        ->and(CartonCost::count())->toBe(1);
+    $carton = CartonCost::where('tracking_number', '1Z9')->first();
+    expect($carton->ship_cost)->toBe('18.94')
+        ->and($carton->ship_date->toDateString())->toBe('2026-07-02')
+        ->and($carton->pace_job_number)->toBe('M254402')
+        ->and($carton->pace_customer_id)->toBe('WP1200');
+});
+
 test('SyncInvoiceCartonCosts syncs the distinct tracking numbers of the given invoices', function () {
     charge($this->invoiceId, $this->carrier->id, '1ZA', 10.00);
     charge($this->invoiceId, $this->carrier->id, '1ZA', 5.00); // duplicate tracking on same invoice
