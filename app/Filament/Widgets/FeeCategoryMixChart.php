@@ -2,15 +2,20 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Widgets\Concerns\ReadsDashboardPeriod;
 use App\Services\Analytics\CostAnalyticsService;
 use Filament\Widgets\ChartWidget;
+use Filament\Widgets\Concerns\InteractsWithPageFilters;
 
 /**
- * Bleed zone: which accessorial categories cost the most (most recent year), base transport
+ * Bleed zone: which accessorial categories cost the most in the selected period, base transport
  * excluded — so fuel / DAS / residential / additional handling / corrections stand out.
  */
 class FeeCategoryMixChart extends ChartWidget
 {
+    use InteractsWithPageFilters;
+    use ReadsDashboardPeriod;
+
     protected static ?int $sort = 3;
 
     protected ?string $heading = 'Accessorial Spend by Category';
@@ -25,10 +30,10 @@ class FeeCategoryMixChart extends ChartWidget
     protected function getData(): array
     {
         $svc = app(CostAnalyticsService::class);
-        $year = $svc->latestYear()?->year;
-        $mix = $svc->categoryMix($year)->take(12);
+        [$year, $month] = $this->selectedPeriod($svc);
+        $mix = $year !== null ? $svc->periodCategoryMix($year, $month)->take(12) : collect();
 
-        $this->heading = 'Accessorial Spend by Category'.($year ? ' · '.$year : '');
+        $this->heading = 'Accessorial Spend by Category'.($year !== null ? ' · '.$this->periodLabel($year, $month) : '');
 
         return [
             'datasets' => [[
