@@ -17,6 +17,10 @@ class SyncInvoiceCartonCosts implements ShouldQueue
 {
     use Queueable;
 
+    // A batch invoice can carry thousands of tracking numbers (hundreds of invoices), so the
+    // Pace carton pull runs many sequential loadValueObjects calls — well past the default 60s.
+    public int $timeout = 900;
+
     /**
      * @param  array<int, int>  $invoiceIds
      */
