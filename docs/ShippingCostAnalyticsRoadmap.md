@@ -126,14 +126,18 @@ systems that err in the carrier's favor. Auditors find ~1–3% of parcel spend r
    the carton level so multi-package master trackings don't lump costs. `RecoupService`
    (candidates / summaryByCustomer / totalRecoupable / unmatchedTrackings) does the delta math;
    `CartonCostSyncService` populates the mirror from the **Pace REST API**
-   (`PaceApiClient::loadValueObjects('Carton', …)`) — XPaths: `@trackingNumber`, `@cost`,
-   `@actualDateTime`, `/JobShipment/job/@id` (job), `/JobShipment/job/@customer` (customer). **The
-   carton source is the Pace API only — there is no SQL pathway to Pace.** The read is
-   **import-triggered**: `finalizeInvoices()` dispatches the `SyncInvoiceCartonCosts` job for the
-   invoices just imported (at import time the shipment already exists in Pace — ship-then-bill —
-   so the read always hits). `recoup:sync-cartons` remains for manual backfill. **TODO:** build
-   the recoup Filament report/zone, the per-customer policy layer, and the Pace write-back that
-   sets `recouped_at`.
+   (`PaceApiClient::loadValueObjects('Carton', …)`) — validated XPaths: `@trackingNumber`,
+   `@cost`, `@actualDate` (ship date), `shipment/job/@job` (job), `shipment/job/@customer`
+   (customer). **The carton source is the Pace API only — there is no SQL pathway to Pace.** The
+   read is **import-triggered**: `finalizeInvoices()` dispatches the `SyncInvoiceCartonCosts` job
+   for the invoices just imported (at import time the shipment already exists in Pace —
+   ship-then-bill — so the read always hits). `recoup:sync-cartons` remains for manual backfill.
+   UPS recycles tracking numbers → keep the latest carton per tracking; ship_cost=0 (pre-Process
+   Shipper) is excluded. **Dashboard Recoup zone built (2026-07-05):** `RecoupStats` (recoupable $,
+   coverage %, unmatched) + `RecoupByCustomerChart`; coverage() cached 10 min. Vendor inbound
+   **Collect / Third-Party** shipments (billed to us / a 3rd party) are excluded from coverage —
+   they're not customer-recoupable. **TODO:** per-customer policy layer, Pace write-back that sets
+   `recouped_at`, salesperson attribution, and recouped-vs-rejected split.
 4. **Re-correction detection** — after Pace write-back is live; event + re-correction-rate KPI.
 5. Deferred: FedEx dims extraction (after v1 proves rate), rate-shopping, surcharge forecast,
    contract-renegotiation report. GSR killed unless contract says otherwise.
