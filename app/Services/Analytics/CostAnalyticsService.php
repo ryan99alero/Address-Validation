@@ -166,6 +166,34 @@ class CostAnalyticsService
     }
 
     /**
+     * Per-year totals for a single calendar month across all years (e.g. every June), computed live
+     * from carrier_charges — the "is this month improving year over year?" series for the trend
+     * charts when a month is selected. Same row shape as yearlyTotals().
+     *
+     * @return Collection<int, object{year:int, total:float, base:float, credit:float, correction:float, accessorial:float, ships:int, load_pct:float, cost_per_ship:float}>
+     */
+    public function yearlyTotalsForMonth(int $month): Collection
+    {
+        // substr on the ISO date (YYYY-MM-DD) rather than MONTH()/YEAR() — portable across MySQL
+        // (prod) and the SQLite test database, which has no month/year date functions.
+        return DB::table('carrier_charges')
+            ->whereNotNull('invoice_date')
+            ->whereRaw('substr(invoice_date, 6, 2) = ?', [sprintf('%02d', $month)])
+            ->groupByRaw('substr(invoice_date, 1, 4)')
+            ->orderByRaw('substr(invoice_date, 1, 4)')
+            ->selectRaw('
+                substr(invoice_date, 1, 4) AS year,
+                ROUND(SUM(amount), 2) AS total,
+                ROUND(SUM(CASE WHEN charge_category_id = ? THEN amount ELSE 0 END), 2) AS base,
+                ROUND(SUM(CASE WHEN charge_category_id = ? THEN amount ELSE 0 END), 2) AS credit,
+                ROUND(SUM(CASE WHEN charge_category_id = ? THEN amount ELSE 0 END), 2) AS correction,
+                COUNT(DISTINCT CASE WHEN charge_category_id = ? THEN tracking_number END) AS ships
+            ', [self::CAT_BASE, self::CAT_CREDIT, self::CAT_ADDRESS_CORRECTION, self::CAT_BASE])
+            ->get()
+            ->map(fn ($r): object => $this->shapeTotals($r, (int) $r->year, $month));
+    }
+
+    /**
      * Spend by canonical category for a given year (or all years when null), largest first —
      * the fee-mix breakdown. Base transportation is excluded so accessorials stand out.
      *

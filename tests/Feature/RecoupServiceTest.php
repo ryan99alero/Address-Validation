@@ -12,6 +12,12 @@ use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     Cache::flush(); // coverage() is cached; keep tests independent
+    foreach ([
+        [RecoupService::CAT_BASE_TRANSPORT, 'Base Transportation'],
+        [9, 'Weekly / Service Charge'],
+    ] as [$id, $name]) {
+        DB::table('charge_categories')->insert(['id' => $id, 'name' => $name, 'is_active' => true, 'created_at' => now(), 'updated_at' => now()]);
+    }
     $this->carrier = Carrier::factory()->create(['slug' => 'ups']);
     $this->invoiceId = DB::table('carrier_invoices')->insertGetId([
         'carrier_id' => $this->carrier->id,
@@ -23,14 +29,17 @@ beforeEach(function () {
     ]);
 });
 
-function charge(int $invoiceId, int $carrierId, string $tracking, float $amount, ?string $service = null): void
+function charge(int $invoiceId, int $carrierId, string $tracking, float $amount, ?string $service = null, ?int $categoryId = RecoupService::CAT_BASE_TRANSPORT): void
 {
+    // Default to a base-transportation line so the tracking counts as a real shipment; pass a
+    // different category (e.g. 9 Weekly/Service) to model an account-level fee pseudo-tracking.
     DB::table('carrier_charges')->insert([
         'carrier_invoice_id' => $invoiceId,
         'carrier_id' => $carrierId,
         'tracking_number' => $tracking,
         'amount' => $amount,
         'service' => $service,
+        'charge_category_id' => $categoryId,
         'created_at' => now(),
         'updated_at' => now(),
     ]);
@@ -133,6 +142,20 @@ test('unmatchedTrackings excludes vendor Collect and Third-Party shipments', fun
     charge($this->invoiceId, $this->carrier->id, '1ZD', 40.00, 'Ground Commercial Third Party');
 
     expect(app(RecoupService::class)->unmatchedTrackings()->pluck('tracking_number')->all())->toBe(['1ZB']);
+});
+
+test('coverage and unmatched exclude fee-only pseudo-trackings with no base transport', function () {
+    // A real outbound shipment (base-transport charge) with no carton yet.
+    charge($this->invoiceId, $this->carrier->id, '1ZSHIP', 30.00, 'Ground Residential');
+    // FedEx account-level fee (Regularly Scheduled Pickup) on a pseudo tracking — only a
+    // Weekly/Service charge, no base transport, never a carton. Not a shipment.
+    charge($this->invoiceId, $this->carrier->id, '000004598785', 35.50, null, 9);
+
+    $cov = app(RecoupService::class)->coverage();
+
+    expect($cov->total)->toBe(1)
+        ->and($cov->unmatched)->toBe(1)
+        ->and(app(RecoupService::class)->unmatchedTrackings()->pluck('tracking_number')->all())->toBe(['1ZSHIP']);
 });
 
 test('unmatched trackings surface charges with no carton', function () {

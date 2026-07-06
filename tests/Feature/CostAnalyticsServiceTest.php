@@ -113,6 +113,18 @@ test('period category mix is period scoped and excludes base', function () {
     expect($mix->first()->category)->toBe('Fuel Surcharge')->and($mix->first()->total)->toBe(900.0);
 });
 
+test('yearly totals for a month give one point per year for that month only', function () {
+    seedCharge('2024-06-10', 2 /* fuel */, 300, 'A');
+    seedCharge('2024-07-10', 2 /* fuel */, 999, 'A'); // July — excluded
+    seedCharge('2025-06-10', 2 /* fuel */, 500, 'B');
+
+    $rows = app(CostAnalyticsService::class)->yearlyTotalsForMonth(6);
+
+    expect($rows->pluck('year')->all())->toBe([2024, 2025])
+        ->and($rows->pluck('total')->all())->toBe([300.0, 500.0])
+        ->and($rows->first()->month)->toBe(6);
+});
+
 test('available years come from the rollup newest first', function () {
     seedRollup(1, 2023, CostAnalyticsService::CAT_BASE, 1, 1);
     seedRollup(1, 2025, CostAnalyticsService::CAT_BASE, 1, 1);

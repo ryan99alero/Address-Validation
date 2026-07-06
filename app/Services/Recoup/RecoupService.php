@@ -31,6 +31,14 @@ class RecoupService
     private const NON_RECOUPABLE_SERVICE_MARKERS = ['%Collect%', '%Third Party%'];
 
     /**
+     * Charge category that marks a real outbound package: base transportation. Account-level fees
+     * (weekly/scheduled pickup, service charges) ride a pseudo tracking number with NO transport
+     * line — they are not shipments, never get a Pace carton, and aren't recoupable, so a tracking
+     * only counts as a shipment if it carries at least one base-transportation charge.
+     */
+    public const CAT_BASE_TRANSPORT = 13;
+
+    /**
      * Restrict a carrier_charges query to outbound (recoupable) shipments — dropping inbound
      * Collect and Third-Party lines. Service may be null (older/other sources); those are kept.
      */
@@ -43,6 +51,21 @@ class RecoupService
                     $q2->where($column, 'not like', $marker);
                 }
             });
+        });
+    }
+
+    /**
+     * Restrict to tracking numbers that represent an actual shipment — i.e. that carry a
+     * base-transportation charge. Excludes account-level fee pseudo-trackings (pickup / weekly
+     * service charges) that would otherwise inflate the recoup blind spot but can never match a
+     * carton. Assumes the outer query aliases carrier_charges as `cc`.
+     */
+    protected function onlyShipments(Builder $query): Builder
+    {
+        return $query->whereExists(function ($q): void {
+            $q->from('carrier_charges as bt')
+                ->whereColumn('bt.tracking_number', 'cc.tracking_number')
+                ->where('bt.charge_category_id', self::CAT_BASE_TRANSPORT);
         });
     }
 
@@ -125,7 +148,7 @@ class RecoupService
             ->whereNotNull('cc.tracking_number')
             ->whereNull('kc.id');
 
-        return $this->onlyOutbound($query)
+        return $this->onlyShipments($this->onlyOutbound($query))
             ->groupBy('cc.tracking_number')
             ->selectRaw('cc.tracking_number, ROUND(SUM(cc.amount), 2) AS actual')
             ->orderByDesc('actual')
@@ -157,7 +180,7 @@ class RecoupService
                 ->leftJoin('carton_costs as kc', 'kc.tracking_number', '=', 'cc.tracking_number')
                 ->whereNotNull('cc.tracking_number');
 
-            $row = $this->onlyOutbound($query)
+            $row = $this->onlyShipments($this->onlyOutbound($query))
                 ->selectRaw('COUNT(DISTINCT cc.tracking_number) AS total, COUNT(DISTINCT kc.tracking_number) AS matched')
                 ->first();
 
