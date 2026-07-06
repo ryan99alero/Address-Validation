@@ -65,7 +65,10 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            // Must exceed the longest job timeout, else a long job (invoice folder chunks import
+            // huge batch PDFs and can run for minutes) is re-dispatched mid-run -> duplicate run
+            // -> MaxAttemptsExceeded. ProcessFolderChunk's timeout is 2400s, so keep this above it.
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 2700),
             'after_commit' => false,
         ],
 
