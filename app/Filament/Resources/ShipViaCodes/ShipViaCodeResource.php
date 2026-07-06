@@ -28,7 +28,7 @@ class ShipViaCodeResource extends Resource
 
     protected static ?string $navigationLabel = 'Ship Via Codes';
 
-    protected static ?int $navigationSort = 50;
+    protected static ?int $navigationSort = 3;
 
     public static function form(Schema $schema): Schema
     {

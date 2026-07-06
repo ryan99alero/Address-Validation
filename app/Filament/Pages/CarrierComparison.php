@@ -50,6 +50,8 @@ class CarrierComparison extends Page implements HasTable
 
     protected static ?string $navigationLabel = 'Carrier Comparison';
 
+    protected static ?int $navigationSort = 1;
+
     protected static ?string $title = 'Carrier Comparison — Who Costs More';
 
     public function table(Table $table): Table

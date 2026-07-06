@@ -37,7 +37,7 @@ class BatchProcessing extends Page implements HasSchemas
 
     protected static ?string $navigationLabel = 'Batch Processing';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 2;
 
     protected string $view = 'filament.pages.batch-processing';
 

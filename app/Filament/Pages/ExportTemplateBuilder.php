@@ -33,7 +33,7 @@ class ExportTemplateBuilder extends Page implements HasSchemas
 
     protected static string|UnitEnum|null $navigationGroup = 'Templates';
 
-    protected static ?int $navigationSort = 10;
+    protected static ?int $navigationSort = 1;
 
     protected static ?string $title = 'Export Template Builder';
 

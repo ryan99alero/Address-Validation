@@ -32,7 +32,7 @@ class ValidateAddress extends Page implements HasSchemas
 
     protected static ?string $navigationLabel = 'Validate Address';
 
-    protected static ?int $navigationSort = 0;
+    protected static ?int $navigationSort = 5;
 
     protected string $view = 'filament.pages.validate-address';
 

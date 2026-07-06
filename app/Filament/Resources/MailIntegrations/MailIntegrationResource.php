@@ -28,6 +28,8 @@ class MailIntegrationResource extends Resource
 
     protected static ?string $navigationLabel = 'Mail Integrations';
 
+    protected static ?int $navigationSort = 4;
+
     protected static ?string $modelLabel = 'Mail Integration';
 
     public static function form(Schema $schema): Schema

@@ -27,7 +27,7 @@ class CarrierChargeResource extends Resource
 
     protected static ?string $slug = 'adjustments';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 2;
 
     public static function canCreate(): bool
     {

@@ -45,6 +45,8 @@ class CorrectionHotspots extends Page implements HasTable
 
     protected static ?string $navigationLabel = 'Correction Hotspots';
 
+    protected static ?int $navigationSort = 4;
+
     protected static ?string $title = 'Address Correction Hotspots';
 
     public function table(Table $table): Table

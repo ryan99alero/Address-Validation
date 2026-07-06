@@ -29,7 +29,7 @@ class LdapSettings extends Page implements HasSchemas
 
     protected static string|UnitEnum|null $navigationGroup = 'Settings';
 
-    protected static ?int $navigationSort = 50;
+    protected static ?int $navigationSort = 2;
 
     public static function canAccess(): bool
     {

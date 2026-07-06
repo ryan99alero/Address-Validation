@@ -28,6 +28,8 @@ class FolderIntegrationResource extends Resource
 
     protected static ?string $navigationLabel = 'Folder Integrations';
 
+    protected static ?int $navigationSort = 3;
+
     protected static ?string $modelLabel = 'Folder Integration';
 
     public static function form(Schema $schema): Schema

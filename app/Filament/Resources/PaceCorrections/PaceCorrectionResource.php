@@ -17,11 +17,11 @@ class PaceCorrectionResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-map-pin';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Integrations';
+    protected static string|UnitEnum|null $navigationGroup = null;
 
-    protected static ?string $navigationLabel = 'Pace Corrections';
+    protected static ?string $navigationLabel = 'Pace Address Corrections';
 
-    protected static ?string $modelLabel = 'Pace Correction';
+    protected static ?string $modelLabel = 'Pace Address Correction';
 
     protected static ?int $navigationSort = 4;
 

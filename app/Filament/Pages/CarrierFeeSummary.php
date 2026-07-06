@@ -50,6 +50,8 @@ class CarrierFeeSummary extends Page implements HasTable
 
     protected static ?string $navigationLabel = 'Carrier Fee Summary';
 
+    protected static ?int $navigationSort = 3;
+
     protected static ?string $title = 'Carrier Fee Summary';
 
     public function table(Table $table): Table

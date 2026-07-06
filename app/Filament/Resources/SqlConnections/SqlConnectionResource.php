@@ -30,7 +30,7 @@ class SqlConnectionResource extends Resource
 
     protected static ?string $modelLabel = 'SQL Connection';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 5;
 
     public static function form(Schema $schema): Schema
     {

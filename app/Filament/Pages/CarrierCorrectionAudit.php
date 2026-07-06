@@ -48,6 +48,8 @@ class CarrierCorrectionAudit extends Page implements HasTable
 
     protected static ?string $navigationLabel = 'Carrier Correction Audit';
 
+    protected static ?int $navigationSort = 2;
+
     protected static ?string $title = 'Carrier Correction Audit';
 
     public function table(Table $table): Table
