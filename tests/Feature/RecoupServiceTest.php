@@ -78,6 +78,13 @@ test('cartons at or below ship cost are not candidates', function () {
     expect(app(RecoupService::class)->candidates())->toHaveCount(0);
 });
 
+test('cartons with no recorded cost (0) are excluded — no valid baseline', function () {
+    charge($this->invoiceId, $this->carrier->id, '1Z005', 118.27);
+    carton('1Z005', 0.00);
+
+    expect(app(RecoupService::class)->candidates())->toHaveCount(0);
+});
+
 test('already recouped cartons are excluded', function () {
     charge($this->invoiceId, $this->carrier->id, '1Z004', 20.00);
     carton('1Z004', 10.00)->update(['recouped_at' => now()]);

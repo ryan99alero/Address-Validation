@@ -31,6 +31,9 @@ class RecoupService
             ->join('carton_costs as kc', 'kc.tracking_number', '=', 'cc.tracking_number')
             ->whereNotNull('cc.tracking_number')
             ->whereNull('kc.recouped_at')
+            // A carton with no recorded cost (0, e.g. pre-Process-Shipper shipments) has no valid
+            // baseline — actual − 0 would look like a full-amount recoup. Only real costs qualify.
+            ->whereRaw('kc.ship_cost > 0')
             ->groupBy('cc.tracking_number', 'kc.ship_cost', 'kc.pace_job_number', 'kc.pace_customer_id', 'kc.ship_date')
             ->selectRaw('cc.tracking_number,
                 kc.pace_job_number,
