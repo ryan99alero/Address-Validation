@@ -26,7 +26,7 @@ class ProcessFolderChunk implements ShouldQueue
 
     public int $tries = 1;
 
-    public int $timeout = 1800; // 30 min per ~100-file chunk
+    public int $timeout = 2400; // 40 min — headroom for a small chunk of heavy batch PDFs (per-file capped at 900s)
 
     /**
      * @param  array<int, string>  $files

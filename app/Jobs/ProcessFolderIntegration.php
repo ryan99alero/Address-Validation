@@ -22,8 +22,12 @@ class ProcessFolderIntegration implements ShouldQueue
 
     public int $timeout = 900; // just enumerates + dispatches chunks; the work runs in ProcessFolderChunk
 
-    /** Files per chunk job — sized so a chunk finishes well under ProcessFolderChunk's timeout. */
-    public const CHUNK_SIZE = 100;
+    /**
+     * Files per chunk job. Kept small because some FedEx batch PDFs hold 500-800 invoices and
+     * take minutes each; a large chunk of those would blow ProcessFolderChunk's timeout. Small
+     * chunks bound the worst-case chunk time and spread heavy files across many jobs.
+     */
+    public const CHUNK_SIZE = 5;
 
     public function __construct(
         public FolderIntegration $integration,

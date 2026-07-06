@@ -6,6 +6,8 @@ use App\Models\CarrierImportFile;
 use App\Models\FolderIntegration;
 use App\Services\CarrierInvoiceParserService;
 use FilesystemIterator;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RuntimeException;
@@ -13,6 +15,14 @@ use Throwable;
 
 class FolderInvoiceIngestService
 {
+    /**
+     * Hard per-file import ceiling (seconds). A single oversized batch PDF (some FedEx files
+     * hold 500-800 invoices / ~16k charges and take minutes of per-row DB work) must not pin a
+     * worker past the chunk timeout. Interruptible via SIGALRM; the file is then logged as
+     * failed and re-attempted on the next scan (content-hash dedup skips whatever imported).
+     */
+    private const FILE_IMPORT_TIMEOUT = 900;
+
     public function __construct(
         protected CarrierInvoiceParserService $parser,
         protected SmbInvoiceReader $smb,
@@ -94,12 +104,22 @@ class FolderInvoiceIngestService
                     continue;
                 }
 
-                $ids = $this->parser->importFile($folder->carrier_id, $localPath, basename($file));
+                // Log which file we're about to import, so a chunk that dies mid-file names the
+                // culprit (previously chunks only logged on completion — hangs were invisible).
+                Log::info('Ingest: importing file', ['integration_id' => $folder->id, 'file' => basename($file)]);
+
+                $ids = $this->importFileGuarded($folder->carrier_id, $localPath, basename($file));
                 $this->recordImport($folder, $hash, basename($file), $reference, $ids, $this->parser->lastSkipReason);
                 $stats['processed']++;
             } catch (Throwable $e) {
                 $stats['failed']++;
                 $stats['errors'][] = basename($file).': '.$e->getMessage();
+                // A per-file timeout can interrupt an in-flight query; give the next file a
+                // healthy connection.
+                try {
+                    DB::reconnect();
+                } catch (Throwable) {
+                }
             } finally {
                 if ($temp !== null) {
                     @unlink($temp);
@@ -110,6 +130,34 @@ class FolderInvoiceIngestService
         $folder->update(['last_processed_at' => now()]);
 
         return $stats;
+    }
+
+    /**
+     * Import one file under a hard SIGALRM deadline so a pathological/oversized file can't hang
+     * a worker. Falls back to a plain import where pcntl is unavailable (the chunk timeout is
+     * then the only backstop).
+     *
+     * @return array<int, int>
+     */
+    protected function importFileGuarded(int $carrierId, string $path, string $name): array
+    {
+        if (self::FILE_IMPORT_TIMEOUT <= 0 || ! function_exists('pcntl_async_signals')) {
+            return $this->parser->importFile($carrierId, $path, $name);
+        }
+
+        pcntl_async_signals(true);
+        $previous = pcntl_signal_get_handler(SIGALRM);
+        pcntl_signal(SIGALRM, function () use ($name): void {
+            throw new RuntimeException(sprintf('Import exceeded %ds (oversized batch file): %s', self::FILE_IMPORT_TIMEOUT, $name));
+        });
+        pcntl_alarm(self::FILE_IMPORT_TIMEOUT);
+
+        try {
+            return $this->parser->importFile($carrierId, $path, $name);
+        } finally {
+            pcntl_alarm(0);
+            pcntl_signal(SIGALRM, is_callable($previous) || is_int($previous) ? $previous : SIG_DFL);
+        }
     }
 
     /**

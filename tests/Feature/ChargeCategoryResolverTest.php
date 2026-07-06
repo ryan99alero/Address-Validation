@@ -53,3 +53,14 @@ test('unknown charges resolve to null (uncategorized)', function () {
 
     expect($resolver->resolve($this->ups->id, 'XYZ', 'Some Mystery Fee'))->toBeNull();
 });
+
+test('repeated resolves are memoized and stay consistent (incl. cached nulls)', function () {
+    $resolver = new ChargeCategoryResolver;
+
+    // Same inputs called many times (as a huge batch invoice does) must return the same result
+    // every time — both the matched category and the cached-null unmatched case.
+    for ($i = 0; $i < 3; $i++) {
+        expect($resolver->resolve($this->fedex->id, null, 'FUEL SURCHARGE'))->toBe($this->fuel->id)
+            ->and($resolver->resolve($this->ups->id, 'XYZ', 'Some Mystery Fee'))->toBeNull();
+    }
+});

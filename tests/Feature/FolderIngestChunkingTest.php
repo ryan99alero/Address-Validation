@@ -14,8 +14,10 @@ test('folder integration enumerates once and fans out one chunk job per batch', 
 
     $dir = sys_get_temp_dir().'/folderingest_'.uniqid();
     mkdir($dir);
-    // 250 files over CHUNK_SIZE=100 -> 3 chunks (100 + 100 + 50).
-    for ($i = 0; $i < 250; $i++) {
+    // Fan out one chunk per CHUNK_SIZE files (kept small so heavy batch PDFs can't blow the
+    // chunk timeout). Use a multiple of CHUNK_SIZE so the count is exact.
+    $fileCount = ProcessFolderIntegration::CHUNK_SIZE * 4;
+    for ($i = 0; $i < $fileCount; $i++) {
         file_put_contents($dir.'/f'.$i.'.csv', 'x');
     }
 
@@ -31,7 +33,7 @@ test('folder integration enumerates once and fans out one chunk job per batch', 
 
     (new ProcessFolderIntegration($folder))->handle(app(FolderInvoiceIngestService::class));
 
-    Bus::assertDispatchedTimes(ProcessFolderChunk::class, 3);
+    Bus::assertDispatchedTimes(ProcessFolderChunk::class, 4);
 
     array_map('unlink', glob($dir.'/*'));
     rmdir($dir);
