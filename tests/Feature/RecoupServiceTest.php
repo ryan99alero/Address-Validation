@@ -7,9 +7,11 @@ use App\Services\Integrations\PaceApiClient;
 use App\Services\Recoup\CartonCostSyncService;
 use App\Services\Recoup\RecoupService;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
+    Cache::flush(); // coverage() is cached; keep tests independent
     $this->carrier = Carrier::factory()->create(['slug' => 'ups']);
     $this->invoiceId = DB::table('carrier_invoices')->insertGetId([
         'carrier_id' => $this->carrier->id,

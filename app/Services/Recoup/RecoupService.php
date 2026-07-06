@@ -4,6 +4,7 @@ namespace App\Services\Recoup;
 
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -136,30 +137,39 @@ class RecoupService
             });
     }
 
+    /** Cache key for the coverage aggregate (a full scan of carrier_charges — see coverage()). */
+    public const COVERAGE_CACHE_KEY = 'recoup.coverage';
+
     /**
      * Recoup carton coverage across outbound (recoupable) shipments: how many distinct tracking
      * numbers have a Pace carton vs not. Inbound Collect / Third-Party are excluded.
+     *
+     * Cached for 10 minutes: it's a distinct-count over the full carrier_charges table (~seconds)
+     * and only changes when invoices import or cartons sync — CartonCostSyncService busts the key
+     * on write.
      *
      * @return object{total:int, matched:int, unmatched:int, pct:float}
      */
     public function coverage(): object
     {
-        $query = DB::table('carrier_charges as cc')
-            ->leftJoin('carton_costs as kc', 'kc.tracking_number', '=', 'cc.tracking_number')
-            ->whereNotNull('cc.tracking_number');
+        return Cache::remember(self::COVERAGE_CACHE_KEY, now()->addMinutes(10), function (): object {
+            $query = DB::table('carrier_charges as cc')
+                ->leftJoin('carton_costs as kc', 'kc.tracking_number', '=', 'cc.tracking_number')
+                ->whereNotNull('cc.tracking_number');
 
-        $row = $this->onlyOutbound($query)
-            ->selectRaw('COUNT(DISTINCT cc.tracking_number) AS total, COUNT(DISTINCT kc.tracking_number) AS matched')
-            ->first();
+            $row = $this->onlyOutbound($query)
+                ->selectRaw('COUNT(DISTINCT cc.tracking_number) AS total, COUNT(DISTINCT kc.tracking_number) AS matched')
+                ->first();
 
-        $total = (int) ($row->total ?? 0);
-        $matched = (int) ($row->matched ?? 0);
+            $total = (int) ($row->total ?? 0);
+            $matched = (int) ($row->matched ?? 0);
 
-        return (object) [
-            'total' => $total,
-            'matched' => $matched,
-            'unmatched' => $total - $matched,
-            'pct' => $total > 0 ? round($matched / $total * 100, 1) : 0.0,
-        ];
+            return (object) [
+                'total' => $total,
+                'matched' => $matched,
+                'unmatched' => $total - $matched,
+                'pct' => $total > 0 ? round($matched / $total * 100, 1) : 0.0,
+            ];
+        });
     }
 }

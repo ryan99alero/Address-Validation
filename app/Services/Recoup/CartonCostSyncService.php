@@ -7,6 +7,7 @@ use App\Models\CartonCost;
 use App\Models\IntegrationConnection;
 use App\Services\Integrations\PaceApiClient;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -99,6 +100,9 @@ class CartonCostSyncService
                 ['ship_cost', 'ship_date', 'pace_job_number', 'pace_customer_id', 'synced_at', 'updated_at'],
             );
         }
+
+        // New cartons change recoup coverage — drop its cached aggregate.
+        Cache::forget(RecoupService::COVERAGE_CACHE_KEY);
 
         return count($byTracking);
     }
