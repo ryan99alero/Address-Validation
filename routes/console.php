@@ -62,3 +62,10 @@ Schedule::command('reports:rebuild')
 // Pace carton ship costs are read at IMPORT time (SyncInvoiceCartonCosts, dispatched from the
 // invoice import), so no nightly pull is needed. `recoup:sync-cartons` remains for manual
 // backfill of invoices imported before this was wired.
+
+// Prune Telescope debug entries nightly (keep 48h). telescope_entries is otherwise the largest
+// table and grows unbounded; Telescope stays on for now but doesn't need weeks of history.
+Schedule::command('telescope:prune --hours=48')
+    ->dailyAt('02:00')
+    ->name('telescope-prune')
+    ->withoutOverlapping();
