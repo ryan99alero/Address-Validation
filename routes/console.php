@@ -69,3 +69,10 @@ Schedule::command('telescope:prune --hours=48')
     ->dailyAt('02:00')
     ->name('telescope-prune')
     ->withoutOverlapping();
+
+// Auto-purge failed queue jobs older than 7 days so they don't accumulate. Recent ones stay
+// visible in the Failed Jobs admin page (Admin → Failed Jobs) for review/retry.
+Schedule::command('queue:prune-failed --hours=168')
+    ->dailyAt('02:10')
+    ->name('failed-jobs-prune')
+    ->withoutOverlapping();
