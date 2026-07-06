@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\CarrierCharge;
+use App\Models\CarrierInvoice;
 use App\Services\Recoup\CartonCostSyncService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -32,8 +33,20 @@ class SyncInvoiceCartonCosts implements ShouldQueue
             return;
         }
 
+        // Only recent invoices are recoupable — skip carton sync for old bulk/historical imports.
+        // (A years-old FedEx batch carries thousands of trackings that time the sync out and match
+        // nothing current anyway.)
+        $recentInvoiceIds = CarrierInvoice::whereIn('id', $this->invoiceIds)
+            ->where('invoice_date', '>=', CartonCostSyncService::recentInvoiceCutoff())
+            ->pluck('id')
+            ->all();
+
+        if ($recentInvoiceIds === []) {
+            return;
+        }
+
         $trackingNumbers = CarrierCharge::query()
-            ->whereIn('carrier_invoice_id', $this->invoiceIds)
+            ->whereIn('carrier_invoice_id', $recentInvoiceIds)
             ->whereNotNull('tracking_number')
             ->distinct()
             ->pluck('tracking_number')

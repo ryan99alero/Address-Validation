@@ -17,6 +17,7 @@ beforeEach(function () {
         'carrier_id' => $this->carrier->id,
         'filename' => 'inv.csv',
         'file_hash' => 'hash-'.uniqid(),
+        'invoice_date' => now()->toDateString(), // recent — within the carton-sync window
         'created_at' => now(),
         'updated_at' => now(),
     ]);
@@ -169,6 +170,22 @@ test('pending tracking numbers exclude already-synced cartons', function () {
     carton('1Z200', 8.00);
 
     expect(app(CartonCostSyncService::class)->pendingTrackingNumbers())->toBe(['1Z201']);
+});
+
+test('pending tracking numbers exclude invoices older than the recoup window', function () {
+    $oldInvoiceId = DB::table('carrier_invoices')->insertGetId([
+        'carrier_id' => $this->carrier->id,
+        'filename' => 'old.csv',
+        'file_hash' => 'old-'.uniqid(),
+        'invoice_date' => now()->subYears(3)->toDateString(),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    charge($oldInvoiceId, $this->carrier->id, '1ZOLD', 50.00);
+    charge($this->invoiceId, $this->carrier->id, '1ZNEW', 30.00); // recent (beforeEach invoice)
+
+    $pending = app(CartonCostSyncService::class)->pendingTrackingNumbers();
+    expect($pending)->toContain('1ZNEW')->not->toContain('1ZOLD');
 });
 
 test('mapCartonRow converts a Carbon ship date to a plain date string', function () {

@@ -53,7 +53,10 @@ class FolderIntegrationForm
                             ->helperText('Type the path EXACTLY as it appears in Finder — plain spaces, NO backslash escapes. Year sub-folders are scanned recursively.')
                             ->rule(static function ($get) {
                                 return static function (string $attribute, $value, \Closure $fail) use ($get): void {
-                                    if ($get('connection_type') === 'local' && ! is_dir(rtrim((string) $value, '/'))) {
+                                    // Only enforce reachability for an ACTIVE local integration — you must
+                                    // always be able to save/deactivate a broken one (stale path, moved
+                                    // share) without the path resolving on this host.
+                                    if ($get('is_active') && $get('connection_type') === 'local' && ! is_dir(rtrim((string) $value, '/'))) {
                                         $fail('That folder was not found or is not accessible. Type it exactly as in Finder — plain spaces, no backslashes.');
                                     }
                                 };

@@ -6,6 +6,7 @@ use App\Models\CarrierCharge;
 use App\Models\CartonCost;
 use App\Models\IntegrationConnection;
 use App\Services\Integrations\PaceApiClient;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -108,8 +109,21 @@ class CartonCostSyncService
     }
 
     /**
-     * Tracking numbers that carry carrier charges but aren't in the carton mirror yet — the
-     * set worth pulling from Pace.
+     * Recoup only applies to recent shipments (you can't bill a customer for a years-old
+     * invoice), so carton sync is limited to invoices billed within this window. This also keeps
+     * bulk historical imports (huge FedEx batch PDFs spanning 2018+) from dispatching enormous
+     * carton syncs that time out and match nothing current.
+     */
+    public const RECENT_INVOICE_MONTHS = 6;
+
+    public static function recentInvoiceCutoff(): CarbonInterface
+    {
+        return now()->subMonths(self::RECENT_INVOICE_MONTHS)->startOfDay();
+    }
+
+    /**
+     * Tracking numbers on RECENT invoices that carry carrier charges but aren't in the carton
+     * mirror yet — the set worth pulling from Pace.
      *
      * @return array<int, string>
      */
@@ -118,6 +132,9 @@ class CartonCostSyncService
         return CarrierCharge::query()
             ->whereNotNull('tracking_number')
             ->whereNotIn('tracking_number', CartonCost::query()->select('tracking_number'))
+            ->whereExists(fn ($q) => $q->from('carrier_invoices')
+                ->whereColumn('carrier_invoices.id', 'carrier_charges.carrier_invoice_id')
+                ->where('carrier_invoices.invoice_date', '>=', self::recentInvoiceCutoff()))
             ->distinct()
             ->pluck('tracking_number')
             ->all();
