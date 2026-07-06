@@ -145,6 +145,13 @@ class CarrierInvoiceLine extends Model
             return false;
         }
 
+        // findOrCreateFromCorrection needs a complete corrected address (non-null city/state/
+        // postal). Some carrier corrections parse without those; skip caching them — the line
+        // keeps its raw data — rather than throwing and failing the whole invoice file's import.
+        if ($this->corrected_city === null || $this->corrected_state === null || $this->corrected_postal === null) {
+            return false;
+        }
+
         // Find or create the corrected address
         $result = CorrectedAddress::findOrCreateFromCorrection(
             $this->corrected_address_1,

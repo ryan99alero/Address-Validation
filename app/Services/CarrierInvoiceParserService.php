@@ -482,7 +482,15 @@ class CarrierInvoiceParserService
         $newCorrections = 0;
 
         foreach ($correctionLines as $line) {
-            $isNew = $line->linkToCorrectionCache();
+            // One malformed correction must never fail the whole file's import (a batch PDF holds
+            // hundreds of invoices). Isolate each and keep going.
+            try {
+                $isNew = $line->linkToCorrectionCache();
+            } catch (\Throwable $e) {
+                Log::warning('Correction cache link failed', ['line_id' => $line->id, 'error' => $e->getMessage()]);
+
+                continue;
+            }
             if ($isNew) {
                 $newCorrections++;
             }
