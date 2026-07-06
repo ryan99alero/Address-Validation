@@ -20,13 +20,14 @@ beforeEach(function () {
     ]);
 });
 
-function charge(int $invoiceId, int $carrierId, string $tracking, float $amount): void
+function charge(int $invoiceId, int $carrierId, string $tracking, float $amount, ?string $service = null): void
 {
     DB::table('carrier_charges')->insert([
         'carrier_invoice_id' => $invoiceId,
         'carrier_id' => $carrierId,
         'tracking_number' => $tracking,
         'amount' => $amount,
+        'service' => $service,
         'created_at' => now(),
         'updated_at' => now(),
     ]);
@@ -106,6 +107,29 @@ test('summary by customer sums recoupable and orders largest first', function ()
         ->and($summary->first()->cartons)->toBe(2)
         ->and($summary->first()->recoupable)->toBe(23.00)
         ->and(app(RecoupService::class)->totalRecoupable())->toBe(28.00);
+});
+
+test('coverage counts outbound matched vs unmatched and excludes vendor shipments', function () {
+    charge($this->invoiceId, $this->carrier->id, '1ZA', 30.00, 'Ground Commercial Package'); // outbound, matched
+    carton('1ZA', 10.00);
+    charge($this->invoiceId, $this->carrier->id, '1ZB', 20.00, 'Ground Residential');          // outbound, unmatched
+    charge($this->invoiceId, $this->carrier->id, '1ZC', 50.00, 'Ground Commercial Collect');    // vendor — excluded
+    charge($this->invoiceId, $this->carrier->id, '1ZD', 40.00, 'Ground Commercial Third Party'); // vendor — excluded
+
+    $cov = app(RecoupService::class)->coverage();
+
+    expect($cov->total)->toBe(2)
+        ->and($cov->matched)->toBe(1)
+        ->and($cov->unmatched)->toBe(1)
+        ->and($cov->pct)->toBe(50.0);
+});
+
+test('unmatchedTrackings excludes vendor Collect and Third-Party shipments', function () {
+    charge($this->invoiceId, $this->carrier->id, '1ZB', 20.00, 'Ground Residential');
+    charge($this->invoiceId, $this->carrier->id, '1ZC', 50.00, 'Ground Commercial Collect');
+    charge($this->invoiceId, $this->carrier->id, '1ZD', 40.00, 'Ground Commercial Third Party');
+
+    expect(app(RecoupService::class)->unmatchedTrackings()->pluck('tracking_number')->all())->toBe(['1ZB']);
 });
 
 test('unmatched trackings surface charges with no carton', function () {

@@ -2,6 +2,7 @@
 
 namespace App\Services\Recoup;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -19,6 +20,31 @@ use Illuminate\Support\Facades\DB;
  */
 class RecoupService
 {
+    /**
+     * Service-name fragments that mark a charge as NOT an outbound customer shipment: "Collect"
+     * (a vendor shipping to us on our account) and "Third Party" (billed to a third party).
+     * Neither is recoupable to a customer, so they're excluded from coverage/blind-spot metrics.
+     *
+     * @var array<int, string>
+     */
+    private const NON_RECOUPABLE_SERVICE_MARKERS = ['%Collect%', '%Third Party%'];
+
+    /**
+     * Restrict a carrier_charges query to outbound (recoupable) shipments — dropping inbound
+     * Collect and Third-Party lines. Service may be null (older/other sources); those are kept.
+     */
+    protected function onlyOutbound(Builder $query, string $column = 'cc.service'): Builder
+    {
+        return $query->where(function ($q) use ($column): void {
+            $q->whereNull($column);
+            $q->orWhere(function ($q2) use ($column): void {
+                foreach (self::NON_RECOUPABLE_SERVICE_MARKERS as $marker) {
+                    $q2->where($column, 'not like', $marker);
+                }
+            });
+        });
+    }
+
     /**
      * Per-tracking recoup candidates: cartons whose invoiced total exceeds the recorded ship
      * cost by at least $minDelta and haven't been recouped yet. Largest delta first.
@@ -84,19 +110,21 @@ class RecoupService
     }
 
     /**
-     * Tracking numbers that carry carrier charges but have no carton match — the recoup blind
-     * spot. Either the carton source hasn't synced them yet or they arrived on a master
-     * (multi-package) tracking. Distinct tracking numbers with their invoiced total, largest
-     * first.
+     * Outbound tracking numbers that carry carrier charges but have no carton match — the recoup
+     * blind spot (the carton source hasn't synced them, or they arrived on a master tracking).
+     * Inbound Collect / Third-Party (vendor) shipments are excluded — they're not recoupable, so
+     * they aren't a blind spot. Distinct tracking numbers with their invoiced total, largest first.
      *
      * @return Collection<int, object{tracking_number:string, actual:float}>
      */
     public function unmatchedTrackings(): Collection
     {
-        return DB::table('carrier_charges as cc')
+        $query = DB::table('carrier_charges as cc')
             ->leftJoin('carton_costs as kc', 'kc.tracking_number', '=', 'cc.tracking_number')
             ->whereNotNull('cc.tracking_number')
-            ->whereNull('kc.id')
+            ->whereNull('kc.id');
+
+        return $this->onlyOutbound($query)
             ->groupBy('cc.tracking_number')
             ->selectRaw('cc.tracking_number, ROUND(SUM(cc.amount), 2) AS actual')
             ->orderByDesc('actual')
@@ -106,5 +134,32 @@ class RecoupService
 
                 return $r;
             });
+    }
+
+    /**
+     * Recoup carton coverage across outbound (recoupable) shipments: how many distinct tracking
+     * numbers have a Pace carton vs not. Inbound Collect / Third-Party are excluded.
+     *
+     * @return object{total:int, matched:int, unmatched:int, pct:float}
+     */
+    public function coverage(): object
+    {
+        $query = DB::table('carrier_charges as cc')
+            ->leftJoin('carton_costs as kc', 'kc.tracking_number', '=', 'cc.tracking_number')
+            ->whereNotNull('cc.tracking_number');
+
+        $row = $this->onlyOutbound($query)
+            ->selectRaw('COUNT(DISTINCT cc.tracking_number) AS total, COUNT(DISTINCT kc.tracking_number) AS matched')
+            ->first();
+
+        $total = (int) ($row->total ?? 0);
+        $matched = (int) ($row->matched ?? 0);
+
+        return (object) [
+            'total' => $total,
+            'matched' => $matched,
+            'unmatched' => $total - $matched,
+            'pct' => $total > 0 ? round($matched / $total * 100, 1) : 0.0,
+        ];
     }
 }
