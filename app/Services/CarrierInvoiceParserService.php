@@ -9,6 +9,7 @@ use App\Models\CarrierInvoice;
 use App\Models\CarrierInvoiceLine;
 use App\Models\CarrierShipment;
 use App\Services\Invoices\ChargeCategoryResolver;
+use App\Services\Invoices\ChargeDriverResolver;
 use App\Services\Invoices\FedExInvoiceParser;
 use App\Services\Invoices\InvoiceIdentity;
 use App\Services\Invoices\PdfTextExtractor;
@@ -815,9 +816,11 @@ class CarrierInvoiceParserService
 
     protected ?ChargeCategoryResolver $chargeCategoryResolver = null;
 
+    protected ?ChargeDriverResolver $chargeDriverResolver = null;
+
     /**
-     * Record a single fee line for fee analytics, resolving it to a canonical
-     * charge category. Skips empty/zero non-charges.
+     * Record a single fee line for fee analytics, resolving it to a canonical charge category
+     * (WHAT it is) and a driver (WHY we were billed). Skips empty/zero non-charges.
      *
      * @param  array<string, mixed>  $data
      */
@@ -835,6 +838,9 @@ class CarrierInvoiceParserService
         }
 
         $this->chargeCategoryResolver ??= new ChargeCategoryResolver;
+        $this->chargeDriverResolver ??= new ChargeDriverResolver;
+
+        [$driver, $driverSource] = $this->chargeDriverResolver->resolve($code, $data['section'] ?? null, $description);
 
         CarrierCharge::create([
             'carrier_invoice_id' => $invoice->id,
@@ -847,7 +853,11 @@ class CarrierInvoiceParserService
             'raw_charge_code' => $code,
             'raw_charge_description' => $description,
             'charge_category_id' => $this->chargeCategoryResolver->resolve($invoice->carrier_id, $code, $description),
+            'driver' => $driver,
+            'driver_source' => $driverSource,
             'amount' => $amount,
+            'published' => $data['published'] ?? null,
+            'incentive' => $data['incentive'] ?? null,
             'service' => $data['service'] ?? null,
             'zone' => $data['zone'] ?? null,
             'weight' => $data['weight'] ?? null,
@@ -1429,6 +1439,9 @@ class CarrierInvoiceParserService
                     'carrier_shipment_id' => $shipment->id,
                     'charge_description' => $c['description'],
                     'amount' => $c['amount'],
+                    'published' => $c['published'] ?? null,
+                    'incentive' => $c['incentive'] ?? null,
+                    'section' => $s['section'],
                     'tracking_number' => $s['tracking_number'],
                     'ship_date' => $s['ship_date'],
                     'service' => $s['service'],

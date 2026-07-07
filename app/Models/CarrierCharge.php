@@ -18,7 +18,11 @@ class CarrierCharge extends Model
         'raw_charge_code',
         'raw_charge_description',
         'charge_category_id',
+        'driver',
+        'driver_source',
         'amount',
+        'published',
+        'incentive',
         'service',
         'zone',
         'weight',
@@ -34,6 +38,8 @@ class CarrierCharge extends Model
             'invoice_date' => 'date',
             'ship_date' => 'date',
             'amount' => 'decimal:2',
+            'published' => 'decimal:2',
+            'incentive' => 'decimal:2',
             'weight' => 'decimal:2',
         ];
     }
