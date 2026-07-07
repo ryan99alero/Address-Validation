@@ -56,6 +56,22 @@ class ChargeDriverResolver
     ];
 
     /**
+     * Billing code → driver value, for backfill/reporting. @return array<string, string>
+     */
+    public static function codeMap(): array
+    {
+        return array_map(fn (ChargeDriver $d): string => $d->value, self::CODE_DRIVERS);
+    }
+
+    /**
+     * PDF section → driver value, for backfill/reporting. @return array<string, string>
+     */
+    public static function sectionMap(): array
+    {
+        return array_map(fn (ChargeDriver $d): string => $d->value, self::SECTION_DRIVERS);
+    }
+
+    /**
      * @return array{0: string, 1: string} [driver value, source]
      */
     public function resolve(?string $code, ?string $section, ?string $description): array
