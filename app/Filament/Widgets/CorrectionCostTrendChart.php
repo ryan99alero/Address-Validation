@@ -37,22 +37,29 @@ class CorrectionCostTrendChart extends ChartWidget
         $svc = app(CostAnalyticsService::class);
         [$year, $month] = $this->selectedPeriod($svc);
 
-        $rows = ($month !== null ? $svc->yearlyTotalsForMonth($month) : $svc->yearlyTotals())
-            ->filter(fn ($r): bool => $r->correction > 0)->values();
+        // "All years" → the multi-year yearly trend. A specific year → that year drilled into
+        // months (the selected month highlighted). Follows the period filter at the top.
+        if ($year === null) {
+            $rows = $svc->yearlyTotals()->filter(fn ($r): bool => $r->correction > 0)->values();
+            $labels = $rows->pluck('year')->all();
+            $highlight = null;
+            $this->heading = 'Address Correction Fees by Year';
+        } else {
+            $rows = $svc->monthlyTotals($year)->filter(fn ($r): bool => $r->correction > 0)->values();
+            $labels = $rows->map(fn ($r): string => substr(Dashboard::MONTHS[$r->month], 0, 3))->all();
+            $highlight = $month;
+            $this->heading = 'Address Correction Fees by Month · '.$year;
+        }
 
-        $this->heading = 'Address Correction Fees by Year'
-            .($month !== null ? ' · '.Dashboard::MONTHS[$month] : '');
-
-        // Highlight the selected year against the rest of the trend.
-        $colors = $rows->map(fn ($r): string => $r->year === $year ? '#b91c1c' : '#ef4444')->all();
+        $colors = $rows->map(fn ($r): string => ($highlight !== null && $r->month === $highlight) ? '#b91c1c' : '#ef4444')->all();
 
         return [
             'datasets' => [[
-                'label' => 'Address correction fees $'.($month !== null ? ' ('.Dashboard::MONTHS[$month].')' : ''),
+                'label' => 'Address correction fees $',
                 'data' => $rows->pluck('correction')->all(),
                 'backgroundColor' => $colors,
             ]],
-            'labels' => $rows->pluck('year')->all(),
+            'labels' => $labels,
         ];
     }
 

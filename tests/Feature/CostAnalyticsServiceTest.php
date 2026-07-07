@@ -140,6 +140,20 @@ test('period category mix is period scoped and excludes base', function () {
     expect($mix->first()->category)->toBe('Fuel Surcharge')->and($mix->first()->total)->toBe(900.0);
 });
 
+test('monthly totals break a single year into its months', function () {
+    seedCharge('2025-02-10', 2 /* fuel */, 300, 'A');
+    seedCharge('2025-02-20', CostAnalyticsService::CAT_BASE, 700, 'A');
+    seedCharge('2025-05-10', 2 /* fuel */, 500, 'B');
+    seedCharge('2024-05-10', 2 /* fuel */, 999, 'C'); // other year, excluded
+
+    $rows = app(CostAnalyticsService::class)->monthlyTotals(2025);
+
+    expect($rows->pluck('month')->all())->toBe([2, 5])
+        ->and($rows->firstWhere('month', 2)->total)->toBe(1000.0)
+        ->and($rows->firstWhere('month', 5)->total)->toBe(500.0)
+        ->and($rows->first()->year)->toBe(2025);
+});
+
 test('yearly totals for a month give one point per year for that month only', function () {
     seedCharge('2024-06-10', 2 /* fuel */, 300, 'A');
     seedCharge('2024-07-10', 2 /* fuel */, 999, 'A'); // July — excluded

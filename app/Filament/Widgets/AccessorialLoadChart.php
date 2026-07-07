@@ -37,19 +37,26 @@ class AccessorialLoadChart extends ChartWidget
         $svc = app(CostAnalyticsService::class);
         [$year, $month] = $this->selectedPeriod($svc);
 
-        $rows = ($month !== null ? $svc->yearlyTotalsForMonth($month) : $svc->yearlyTotals())
-            ->filter(fn ($r): bool => $r->total > 0)->values();
+        // "All years" → the multi-year yearly trend. A specific year → that year drilled into
+        // months (the selected month highlighted). Follows the period filter at the top.
+        if ($year === null) {
+            $rows = $svc->yearlyTotals()->filter(fn ($r): bool => $r->total > 0)->values();
+            $labels = $rows->pluck('year')->all();
+            $highlight = null;
+            $this->heading = 'Accessorial Load % by Year';
+        } else {
+            $rows = $svc->monthlyTotals($year)->filter(fn ($r): bool => $r->total > 0)->values();
+            $labels = $rows->map(fn ($r): string => substr(Dashboard::MONTHS[$r->month], 0, 3))->all();
+            $highlight = $month;
+            $this->heading = 'Accessorial Load % by Month · '.$year;
+        }
 
-        $this->heading = 'Accessorial Load % by Year'
-            .($month !== null ? ' · '.Dashboard::MONTHS[$month] : '');
-
-        // Highlight the selected year against the rest of the trend.
-        $pointColors = $rows->map(fn ($r): string => $r->year === $year ? '#b45309' : '#f59e0b')->all();
-        $pointRadii = $rows->map(fn ($r): int => $r->year === $year ? 6 : 3)->all();
+        $pointColors = $rows->map(fn ($r): string => ($highlight !== null && $r->month === $highlight) ? '#b45309' : '#f59e0b')->all();
+        $pointRadii = $rows->map(fn ($r): int => ($highlight !== null && $r->month === $highlight) ? 6 : 3)->all();
 
         return [
             'datasets' => [[
-                'label' => 'Accessorial load %'.($month !== null ? ' ('.Dashboard::MONTHS[$month].')' : ''),
+                'label' => 'Accessorial load %',
                 'data' => $rows->pluck('load_pct')->all(),
                 'borderColor' => '#f59e0b',
                 'backgroundColor' => 'rgba(245, 158, 11, 0.15)',
@@ -58,7 +65,7 @@ class AccessorialLoadChart extends ChartWidget
                 'fill' => true,
                 'tension' => 0.3,
             ]],
-            'labels' => $rows->pluck('year')->all(),
+            'labels' => $labels,
         ];
     }
 

@@ -212,6 +212,33 @@ class CostAnalyticsService
     }
 
     /**
+     * Per-month totals within a single year (the drill-down series for the trend charts when a
+     * specific year is selected). Same row shape as yearlyTotals(), with month set.
+     *
+     * @return Collection<int, object{year:int, month:int, total:float, base:float, credit:float, correction:float, accessorial:float, ships:int, load_pct:float, cost_per_ship:float}>
+     */
+    public function monthlyTotals(int $year): Collection
+    {
+        [$start, $end] = $this->range($year, null);
+
+        return DB::table('carrier_charges')
+            ->whereNotNull('invoice_date')
+            ->where('invoice_date', '>=', $start)->where('invoice_date', '<', $end)
+            ->groupByRaw('substr(invoice_date, 6, 2)')
+            ->orderByRaw('substr(invoice_date, 6, 2)')
+            ->selectRaw('
+                substr(invoice_date, 6, 2) AS month,
+                ROUND(SUM(amount), 2) AS total,
+                ROUND(SUM(CASE WHEN charge_category_id = ? THEN amount ELSE 0 END), 2) AS base,
+                ROUND(SUM(CASE WHEN charge_category_id = ? THEN amount ELSE 0 END), 2) AS credit,
+                ROUND(SUM(CASE WHEN charge_category_id = ? THEN amount ELSE 0 END), 2) AS correction,
+                COUNT(DISTINCT CASE WHEN charge_category_id = ? THEN tracking_number END) AS ships
+            ', [self::CAT_BASE, self::CAT_CREDIT, self::CAT_ADDRESS_CORRECTION, self::CAT_BASE])
+            ->get()
+            ->map(fn ($r): object => $this->shapeTotals($r, $year, (int) $r->month));
+    }
+
+    /**
      * Spend by canonical category for a given year (or all years when null), largest first —
      * the fee-mix breakdown. Base transportation is excluded so accessorials stand out.
      *
