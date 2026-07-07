@@ -1,6 +1,7 @@
 <?php
 
 use App\Filament\Pages\CompanySetup;
+use App\Filament\Resources\ChargeDrivers\ChargeDriverResource;
 use App\Filament\Resources\FolderIntegrations\FolderIntegrationResource;
 use App\Filament\Resources\IntegrationConnections\IntegrationConnectionResource;
 use App\Filament\Resources\MailIntegrations\MailIntegrationResource;
@@ -17,6 +18,7 @@ $adminOnly = [
     FolderIntegrationResource::class,
     CompanySetup::class,
     ShipViaCodeResource::class,
+    ChargeDriverResource::class,
 ];
 
 it('hides admin-only config from non-admins', function (string $resource) {
