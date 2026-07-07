@@ -12,23 +12,33 @@ use App\Services\Analytics\CostAnalyticsService;
 trait ReadsDashboardPeriod
 {
     /**
-     * The selected year (falls back to the latest year with data) and month (null = full year).
+     * The selected year and month. Year is null for "All years" (filter value 0); when the year
+     * filter is entirely unset it falls back to the latest year with data. Month is null = full year.
      *
      * @return array{0: ?int, 1: ?int}
      */
     protected function selectedPeriod(CostAnalyticsService $svc): array
     {
-        $year = (int) ($this->pageFilters['year'] ?? 0) ?: $svc->availableYears()[0] ?? null;
+        $raw = $this->pageFilters['year'] ?? null;
+        if ($raw === null || $raw === '') {
+            $year = $svc->availableYears()[0] ?? null; // unset → default to the latest year
+        } else {
+            $year = (int) $raw ?: null; // 0 => "All years"
+        }
         $month = (int) ($this->pageFilters['month'] ?? 0) ?: null;
 
         return [$year, $month];
     }
 
     /**
-     * A short human label for a period, e.g. "2025" or "Jun 2025".
+     * A short human label for a period, e.g. "2025", "Jun 2025", "All years" or "All years · Jun".
      */
-    protected function periodLabel(int $year, ?int $month): string
+    protected function periodLabel(?int $year, ?int $month): string
     {
+        if ($year === null) {
+            return $month !== null ? 'All years · '.substr(Dashboard::MONTHS[$month], 0, 3) : 'All years';
+        }
+
         return $month !== null
             ? substr(Dashboard::MONTHS[$month], 0, 3).' '.$year
             : (string) $year;

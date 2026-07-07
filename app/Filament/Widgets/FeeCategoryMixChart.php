@@ -31,9 +31,9 @@ class FeeCategoryMixChart extends ChartWidget
     {
         $svc = app(CostAnalyticsService::class);
         [$year, $month] = $this->selectedPeriod($svc);
-        $mix = $year !== null ? $svc->periodCategoryMix($year, $month)->take(12) : collect();
+        $mix = $svc->periodCategoryMix($year, $month)->take(12);
 
-        $this->heading = 'Accessorial Spend by Category'.($year !== null ? ' · '.$this->periodLabel($year, $month) : '');
+        $this->heading = 'Accessorial Spend by Category · '.$this->periodLabel($year, $month);
 
         return [
             'datasets' => [[

@@ -29,8 +29,8 @@ class Dashboard extends BaseDashboard
                 ->schema([
                     Select::make('year')
                         ->label('Year')
-                        ->options(array_combine($years, $years) ?: [])
-                        ->default($years[0] ?? null)
+                        ->options([0 => 'All years'] + (array_combine($years, $years) ?: []))
+                        ->default($years[0] ?? 0)
                         ->selectablePlaceholder(false)
                         ->native(false),
                     Select::make('month')

@@ -2,6 +2,7 @@
 
 namespace App\Services\Analytics;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -37,17 +38,16 @@ class CostAnalyticsService
     }
 
     /**
-     * Totals for one period — a full year (month = null) or a single month — computed live from
-     * carrier_charges over the invoice_date range. Same shape as a yearlyTotals() row.
+     * Totals for one period — computed live from carrier_charges. The period is a full year, a
+     * single month within a year, all years (year = null), or one month across all years
+     * (year = null, month set). Same shape as a yearlyTotals() row.
      */
-    public function periodTotals(int $year, ?int $month = null): object
+    public function periodTotals(?int $year, ?int $month = null): object
     {
-        [$start, $end] = $this->range($year, $month);
+        $query = DB::table('carrier_charges')->whereNotNull('invoice_date');
+        $this->applyPeriod($query, $year, $month);
 
-        $row = DB::table('carrier_charges')
-            ->whereNotNull('invoice_date')
-            ->where('invoice_date', '>=', $start)
-            ->where('invoice_date', '<', $end)
+        $row = $query
             ->selectRaw('
                 ROUND(SUM(amount), 2) AS total,
                 ROUND(SUM(CASE WHEN charge_category_id = ? THEN amount ELSE 0 END), 2) AS base,
@@ -65,15 +65,14 @@ class CostAnalyticsService
      *
      * @return Collection<int, object{category:string, total:float}>
      */
-    public function periodCategoryMix(int $year, ?int $month = null): Collection
+    public function periodCategoryMix(?int $year, ?int $month = null): Collection
     {
-        [$start, $end] = $this->range($year, $month);
-
-        return DB::table('carrier_charges as cc')
+        $query = DB::table('carrier_charges as cc')
             ->leftJoin('charge_categories as c', 'c.id', '=', 'cc.charge_category_id')
-            ->whereNotNull('cc.invoice_date')
-            ->where('cc.invoice_date', '>=', $start)
-            ->where('cc.invoice_date', '<', $end)
+            ->whereNotNull('cc.invoice_date');
+        $this->applyPeriod($query, $year, $month, 'cc.invoice_date');
+
+        return $query
             ->where(fn ($q) => $q->whereNull('cc.charge_category_id')->orWhere('cc.charge_category_id', '!=', self::CAT_BASE))
             ->selectRaw('COALESCE(c.name, ?) AS category, ROUND(SUM(cc.amount), 2) AS total', ['Uncategorized'])
             ->groupBy('category')
@@ -85,6 +84,25 @@ class CostAnalyticsService
 
                 return $r;
             });
+    }
+
+    /**
+     * Constrain a carrier_charges query to the selected period:
+     *   year+month → the [start, end) range for that month
+     *   year only  → the [start, end) range for that year (uses the invoice_date index)
+     *   month only (year = null) → that calendar month across all years (portable substr)
+     *   neither    → all time (no date constraint)
+     *
+     * @param  Builder  $query
+     */
+    private function applyPeriod($query, ?int $year, ?int $month, string $column = 'invoice_date'): void
+    {
+        if ($year !== null) {
+            [$start, $end] = $this->range($year, $month);
+            $query->where($column, '>=', $start)->where($column, '<', $end);
+        } elseif ($month !== null) {
+            $query->whereRaw("substr($column, 6, 2) = ?", [sprintf('%02d', $month)]);
+        }
     }
 
     /**
@@ -104,7 +122,7 @@ class CostAnalyticsService
     /**
      * Shape a raw totals row into the standard cost object (accessorial/load/cost-per-ship).
      */
-    private function shapeTotals(?object $row, int $year, ?int $month): object
+    private function shapeTotals(?object $row, ?int $year, ?int $month): object
     {
         $r = (object) [
             'year' => $year,

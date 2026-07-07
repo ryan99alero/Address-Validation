@@ -86,6 +86,33 @@ test('period totals aggregate a single year live from charges', function () {
         ->and($p->load_pct)->toBe(22.2);
 });
 
+test('period totals with null year aggregate all time', function () {
+    seedCharge('2024-03-10', CostAnalyticsService::CAT_BASE, 1000, 'T1');
+    seedCharge('2025-03-10', CostAnalyticsService::CAT_BASE, 2000, 'T2');
+
+    $p = app(CostAnalyticsService::class)->periodTotals(null);
+
+    expect($p->total)->toBe(3000.0)->and($p->year)->toBeNull();
+});
+
+test('period totals with null year and a month aggregate that month across years', function () {
+    seedCharge('2024-06-10', 2 /* fuel */, 300, 'T1');
+    seedCharge('2025-06-10', 2 /* fuel */, 500, 'T2');
+    seedCharge('2025-07-10', 2 /* fuel */, 999, 'T3'); // other month, excluded
+
+    expect(app(CostAnalyticsService::class)->periodTotals(null, 6)->total)->toBe(800.0);
+});
+
+test('period category mix with null year covers all time', function () {
+    seedCharge('2024-01-10', 2 /* fuel */, 400, 'T1');
+    seedCharge('2025-01-10', 2 /* fuel */, 600, 'T2');
+    seedCharge('2025-01-10', CostAnalyticsService::CAT_BASE, 5000, 'T2'); // base excluded
+
+    $mix = app(CostAnalyticsService::class)->periodCategoryMix(null);
+
+    expect($mix->first()->category)->toBe('Fuel Surcharge')->and($mix->first()->total)->toBe(1000.0);
+});
+
 test('period totals narrow to a single month', function () {
     seedCharge('2025-06-05', 2 /* fuel */, 300, 'T1');
     seedCharge('2025-07-05', 2 /* fuel */, 700, 'T2'); // different month, excluded

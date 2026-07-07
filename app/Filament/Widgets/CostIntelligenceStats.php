@@ -25,13 +25,25 @@ class CostIntelligenceStats extends StatsOverviewWidget
         $svc = app(CostAnalyticsService::class);
         [$year, $month] = $this->selectedPeriod($svc);
 
-        if ($year === null) {
+        if ($svc->availableYears() === []) {
             return [Stat::make('No invoice data yet', '—')];
         }
 
         $current = $svc->periodTotals($year, $month);
-        $prior = $svc->periodTotals($year - 1, $month);
-        $priorLabel = $this->periodLabel($year - 1, $month);
+
+        // Year-over-year only applies to a specific year; "All years" (year = null) is all-time and
+        // has no prior period to compare against, so the delta lines are suppressed there.
+        $noDelta = ['text' => '', 'icon' => null, 'color' => null];
+        if ($year !== null) {
+            $prior = $svc->periodTotals($year - 1, $month);
+            $priorLabel = $this->periodLabel($year - 1, $month);
+            $totalDelta = $this->delta($current->total, $prior->total, $priorLabel);
+            $loadDelta = $this->delta($current->load_pct, $prior->load_pct, $priorLabel, '%pt');
+            $cpsDelta = $this->delta($current->cost_per_ship, $prior->cost_per_ship, $priorLabel);
+            $corrDelta = $this->delta($current->correction, $prior->correction, $priorLabel);
+        } else {
+            $totalDelta = $loadDelta = $cpsDelta = $corrDelta = $noDelta;
+        }
 
         // Full-history yearly trend for the card sparklines (trajectory, independent of the filter).
         $years = $svc->yearlyTotals();
@@ -40,11 +52,6 @@ class CostIntelligenceStats extends StatsOverviewWidget
         $cpsTrend = $years->pluck('cost_per_ship')->map(fn ($v): float => (float) $v)->all();
 
         $label = $this->periodLabel($year, $month);
-
-        $totalDelta = $this->delta($current->total, $prior->total, $priorLabel);
-        $loadDelta = $this->delta($current->load_pct, $prior->load_pct, $priorLabel, '%pt');
-        $cpsDelta = $this->delta($current->cost_per_ship, $prior->cost_per_ship, $priorLabel);
-        $corrDelta = $this->delta($current->correction, $prior->correction, $priorLabel);
 
         return [
             Stat::make('Total Spend · '.$label, '$'.number_format($current->total))

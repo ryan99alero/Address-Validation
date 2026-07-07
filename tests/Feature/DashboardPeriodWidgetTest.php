@@ -33,6 +33,15 @@ test('cost intelligence widget reads the page filter and shows a year-over-year 
         ->assertSee('vs 2024'); // YoY comparison line rendered
 });
 
+test('cost intelligence widget shows all-time totals with no YoY delta for All years', function () {
+    // 2024 $1,000 + 2025 $400 corrections => $1,400 all-time, and no "vs <year>" comparison line.
+    Livewire::test(CostIntelligenceStats::class, ['pageFilters' => ['year' => 0, 'month' => 0]])
+        ->assertOk()
+        ->assertSee('Address Correction Fees · All years')
+        ->assertSee('$1,400')
+        ->assertDontSee('vs 2024');
+});
+
 test('cost intelligence widget respects a month filter', function () {
     Livewire::test(CostIntelligenceStats::class, ['pageFilters' => ['year' => 2025, 'month' => 5]])
         ->assertOk()
