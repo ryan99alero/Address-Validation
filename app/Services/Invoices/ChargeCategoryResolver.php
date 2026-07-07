@@ -36,6 +36,11 @@ class ChargeCategoryResolver
             return $this->cache[$cacheKey];
         }
 
+        // The category is WHAT the charge is, not why we got it. Carriers prefix the "why" onto the
+        // description ("Address Correction Ground"); strip it so re-rated transport/fuel resolves to
+        // its real category. The driver dimension carries the "why" separately.
+        $matchDescription = $this->stripDriverPrefix($description);
+
         foreach ($this->sortedMappings() as $mapping) {
             if ($mapping->carrier_id !== null && $mapping->carrier_id !== $carrierId) {
                 continue;
@@ -45,12 +50,44 @@ class ChargeCategoryResolver
                 if ($code !== null && $code !== '' && strcasecmp($code, $mapping->match_value) === 0) {
                     return $this->cache[$cacheKey] = $mapping->charge_category_id;
                 }
-            } elseif ($description !== null && $description !== '' && stripos($description, $mapping->match_value) !== false) {
+            } elseif ($matchDescription !== null && $matchDescription !== '' && stripos($matchDescription, $mapping->match_value) !== false) {
                 return $this->cache[$cacheKey] = $mapping->charge_category_id;
             }
         }
 
         return $this->cache[$cacheKey] = null;
+    }
+
+    /**
+     * Driver prefixes carriers prepend to the underlying charge description. Removing one exposes
+     * the true category ("Address Correction Ground" → "Ground" → Base). A bare prefix with nothing
+     * after it (a flat "Address Correction" fee) is left intact so it still resolves to its category.
+     *
+     * @var array<int, string>
+     */
+    private const DRIVER_PREFIXES = [
+        'Address Correction',
+        'Shipping Charge Correction',
+        'Chargeback',
+        'Not Previously Billed',
+        'Returns',
+    ];
+
+    private function stripDriverPrefix(?string $description): ?string
+    {
+        if ($description === null || $description === '') {
+            return $description;
+        }
+
+        foreach (self::DRIVER_PREFIXES as $prefix) {
+            if (stripos($description, $prefix) === 0) {
+                $rest = trim(substr($description, strlen($prefix)));
+
+                return $rest !== '' ? $rest : $description;
+            }
+        }
+
+        return $description;
     }
 
     /**

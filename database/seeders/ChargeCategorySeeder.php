@@ -42,8 +42,10 @@ class ChargeCategorySeeder extends Seeder
 
         // [carrier_id, match_type, match_value, category, priority]
         $mappings = [
-            // Exact carrier codes (highest confidence)
-            [$ups?->id, 'code', 'ADC', 'Address Correction', 100],
+            // Exact carrier codes (highest confidence). NOTE: UPS "ADC" is deliberately NOT mapped
+            // to a category — on UPS it prefixes rebilled transport/fuel ("Address Correction Ground"),
+            // so the category comes from the stripped description while driver=address_correction
+            // captures the "why". FedEx ADDCOR IS a flat address-correction fee, so it stays mapped.
             [$fedex?->id, 'code', 'ADDCOR', 'Address Correction', 100],
 
             // Cross-carrier description patterns
@@ -78,6 +80,7 @@ class ChargeCategorySeeder extends Seeder
             [null, 'description', 'Residential', 'Base Transportation', 9],
             [null, 'description', 'Saver', 'Base Transportation', 10],
             [null, 'description', 'Ground', 'Base Transportation', 8],
+            [null, 'description', 'Air', 'Base Transportation', 7], // 2nd Day Air / Next Day Air re-rates
         ];
 
         foreach ($mappings as [$carrierId, $type, $value, $categoryName, $priority]) {

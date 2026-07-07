@@ -64,3 +64,17 @@ test('repeated resolves are memoized and stay consistent (incl. cached nulls)', 
             ->and($resolver->resolve($this->ups->id, 'XYZ', 'Some Mystery Fee'))->toBeNull();
     }
 });
+
+test('a driver prefix is stripped so the underlying category resolves (not ADC pollution)', function () {
+    $base = ChargeCategory::create(['name' => 'Base Transportation']);
+    ChargeCodeMapping::create(['carrier_id' => null, 'match_type' => 'description', 'match_value' => 'Ground', 'charge_category_id' => $base->id, 'priority' => 8]);
+    ChargeCodeMapping::create(['carrier_id' => null, 'match_type' => 'description', 'match_value' => 'Address Correction', 'charge_category_id' => $this->addressCorrection->id, 'priority' => 50]);
+
+    $resolver = app(ChargeCategoryResolver::class);
+
+    // UPS rebills the shipment under an address correction: transport → Base, fuel → Fuel.
+    expect($resolver->resolve($this->ups->id, null, 'Address Correction Ground'))->toBe($base->id)
+        ->and($resolver->resolve($this->ups->id, null, 'Address Correction Fuel Surcharge'))->toBe($this->fuel->id)
+        // A flat address-correction fee (nothing after the prefix) still resolves to ADC.
+        ->and($resolver->resolve($this->fedex->id, null, 'Address Correction'))->toBe($this->addressCorrection->id);
+});
