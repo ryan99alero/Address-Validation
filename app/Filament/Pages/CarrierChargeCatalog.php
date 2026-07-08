@@ -3,15 +3,18 @@
 namespace App\Filament\Pages;
 
 use App\Enums\ChargeDriver;
+use App\Filament\Resources\CarrierCharges\CarrierChargeResource;
 use App\Models\Carrier;
 use App\Models\CarrierCharge;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use UnitEnum;
@@ -32,11 +35,22 @@ class CarrierChargeCatalog extends Page implements HasTable
 
     protected static string|UnitEnum|null $navigationGroup = 'Carrier Invoices';
 
-    protected static ?string $navigationLabel = 'Charge Catalog';
-
-    protected static ?int $navigationSort = 6;
+    // Reached from Adjustments (Carrier Charges) via its "Charge Catalog" button — not its own top
+    // menu item, to keep the nav lean.
+    protected static bool $shouldRegisterNavigation = false;
 
     protected static ?string $title = 'Carrier Charge Catalog';
+
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('adjustments')
+                ->label('Back to Adjustments')
+                ->icon(Heroicon::OutlinedArrowLeft)
+                ->color('gray')
+                ->url(CarrierChargeResource::getUrl()),
+        ];
+    }
 
     public function table(Table $table): Table
     {
@@ -64,6 +78,16 @@ class CarrierChargeCatalog extends Page implements HasTable
                     ->label('Carrier')
                     ->options(fn (): array => Carrier::query()->orderBy('name')->pluck('name', 'id')->all())
                     ->attribute('carrier_charges.carrier_id'),
+                TernaryFilter::make('mapping')
+                    ->label('Mapping')
+                    ->placeholder('All charge types')
+                    ->trueLabel('Mapped only')
+                    ->falseLabel('Unmapped only')
+                    ->queries(
+                        true: fn (Builder $q): Builder => $q->whereNotNull('carrier_charges.charge_category_id'),
+                        false: fn (Builder $q): Builder => $q->whereNull('carrier_charges.charge_category_id'),
+                        blank: fn (Builder $q): Builder => $q,
+                    ),
             ])
             ->defaultSort('total', 'desc')
             ->paginated([50, 100])
