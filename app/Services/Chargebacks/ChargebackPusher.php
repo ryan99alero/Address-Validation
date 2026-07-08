@@ -49,8 +49,7 @@ class ChargebackPusher
             ['name' => 'trackingNumber', 'xpath' => '@trackingNumber'],
             ['name' => 'job', 'xpath' => '@job'],
             ['name' => 'jobPart', 'xpath' => '@jobPart'],
-            ['name' => 'customer', 'xpath' => 'job/@customer'],
-            ['name' => 'shipDate', 'xpath' => '@dateTime'],
+            ['name' => 'customer', 'xpath' => '@customer'],
             ['name' => 'openJob', 'xpath' => 'job/adminStatus/@openJob'],
         ];
 
