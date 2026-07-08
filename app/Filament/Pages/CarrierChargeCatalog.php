@@ -48,8 +48,9 @@ class CarrierChargeCatalog extends Page implements HasTable
             ->leftJoin('carriers as ca', 'ca.id', '=', 'cc.carrier_id')
             ->leftJoin('charge_categories as c', 'c.id', '=', 'cc.charge_category_id')
             ->groupBy('ca.name', 'cc.raw_charge_code', 'cc.raw_charge_description', 'c.abbreviation', 'cc.driver')
+            // NOTE: alias the count `line_count`, not `lines` — `lines` is a reserved word in MySQL.
             ->selectRaw('ca.name AS carrier, cc.raw_charge_code AS code, cc.raw_charge_description AS description,
-                c.abbreviation AS category, cc.driver AS driver, COUNT(*) AS lines, ROUND(SUM(cc.amount), 2) AS total')
+                c.abbreviation AS category, cc.driver AS driver, COUNT(*) AS line_count, ROUND(SUM(cc.amount), 2) AS total')
             ->orderByDesc('total')
             ->get()
             ->map(fn (object $r, int $i): array => [
@@ -60,7 +61,7 @@ class CarrierChargeCatalog extends Page implements HasTable
                 'category' => $r->category ?? 'UNMAPPED',
                 'mapped' => $r->category !== null,
                 'driver' => $r->driver !== null ? (ChargeDriver::tryFrom($r->driver)?->abbreviation() ?? $r->driver) : '—',
-                'lines' => (int) $r->lines,
+                'lines' => (int) $r->line_count,
                 'total' => (float) $r->total,
             ]));
     }
