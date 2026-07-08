@@ -37,21 +37,22 @@ class CorrectionCostTrendChart extends ChartWidget
         $svc = app(CostAnalyticsService::class);
         [$year, $month] = $this->selectedPeriod($svc);
 
-        // "All years" → the multi-year yearly trend. A specific year → that year drilled into
-        // months (the selected month highlighted). Follows the period filter at the top.
+        // Drill with the period filter: All years → yearly; a year → months; a year+month → days.
         if ($year === null) {
             $rows = $svc->yearlyTotals()->filter(fn ($r): bool => $r->correction > 0)->values();
             $labels = $rows->pluck('year')->all();
-            $highlight = null;
             $this->heading = 'Address Correction Fees by Year';
+        } elseif ($month !== null) {
+            $rows = $svc->dailyTotals($year, $month)->filter(fn ($r): bool => $r->correction > 0)->values();
+            $labels = $rows->pluck('day')->all();
+            $this->heading = 'Address Correction Fees by Day · '.Dashboard::MONTHS[$month].' '.$year;
         } else {
             $rows = $svc->monthlyTotals($year)->filter(fn ($r): bool => $r->correction > 0)->values();
             $labels = $rows->map(fn ($r): string => substr(Dashboard::MONTHS[$r->month], 0, 3))->all();
-            $highlight = $month;
             $this->heading = 'Address Correction Fees by Month · '.$year;
         }
 
-        $colors = $rows->map(fn ($r): string => ($highlight !== null && $r->month === $highlight) ? '#b91c1c' : '#ef4444')->all();
+        $colors = array_fill(0, $rows->count(), '#ef4444');
 
         return [
             'datasets' => [[

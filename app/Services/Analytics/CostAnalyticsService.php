@@ -239,6 +239,38 @@ class CostAnalyticsService
     }
 
     /**
+     * Per-day totals within a single month (the drill-down series for the trend charts when a
+     * specific month is selected). Same row shape as monthlyTotals(), with a `day` added.
+     *
+     * @return Collection<int, object>
+     */
+    public function dailyTotals(int $year, int $month): Collection
+    {
+        [$start, $end] = $this->range($year, $month);
+
+        return DB::table('carrier_charges')
+            ->whereNotNull('invoice_date')
+            ->where('invoice_date', '>=', $start)->where('invoice_date', '<', $end)
+            ->groupByRaw('substr(invoice_date, 9, 2)')
+            ->orderByRaw('substr(invoice_date, 9, 2)')
+            ->selectRaw('
+                substr(invoice_date, 9, 2) AS day,
+                ROUND(SUM(amount), 2) AS total,
+                ROUND(SUM(CASE WHEN charge_category_id = ? THEN amount ELSE 0 END), 2) AS base,
+                ROUND(SUM(CASE WHEN charge_category_id = ? THEN amount ELSE 0 END), 2) AS credit,
+                ROUND(SUM(CASE WHEN charge_category_id = ? THEN amount ELSE 0 END), 2) AS correction,
+                COUNT(DISTINCT CASE WHEN charge_category_id = ? THEN tracking_number END) AS ships
+            ', [self::CAT_BASE, self::CAT_CREDIT, self::CAT_ADDRESS_CORRECTION, self::CAT_BASE])
+            ->get()
+            ->map(function ($r) use ($year, $month): object {
+                $o = $this->shapeTotals($r, $year, $month);
+                $o->day = (int) $r->day;
+
+                return $o;
+            });
+    }
+
+    /**
      * Spend by canonical category for a given year (or all years when null), largest first —
      * the fee-mix breakdown. Base transportation is excluded so accessorials stand out.
      *

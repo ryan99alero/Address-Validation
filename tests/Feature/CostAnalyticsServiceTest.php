@@ -154,6 +154,20 @@ test('monthly totals break a single year into its months', function () {
         ->and($rows->first()->year)->toBe(2025);
 });
 
+test('daily totals break a single month into its days', function () {
+    seedCharge('2025-06-03', 2 /* fuel */, 300, 'A');
+    seedCharge('2025-06-03', CostAnalyticsService::CAT_BASE, 200, 'A');
+    seedCharge('2025-06-20', 2 /* fuel */, 500, 'B');
+    seedCharge('2025-07-03', 2 /* fuel */, 999, 'C'); // other month, excluded
+
+    $rows = app(CostAnalyticsService::class)->dailyTotals(2025, 6);
+
+    expect($rows->pluck('day')->all())->toBe([3, 20])
+        ->and($rows->firstWhere('day', 3)->total)->toBe(500.0)
+        ->and($rows->firstWhere('day', 20)->total)->toBe(500.0)
+        ->and($rows->first()->month)->toBe(6);
+});
+
 test('yearly totals for a month give one point per year for that month only', function () {
     seedCharge('2024-06-10', 2 /* fuel */, 300, 'A');
     seedCharge('2024-07-10', 2 /* fuel */, 999, 'A'); // July — excluded
