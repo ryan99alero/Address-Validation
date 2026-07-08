@@ -31,6 +31,8 @@ class CarrierInvoiceResource extends Resource
 
     protected static ?int $navigationSort = 1;
 
+    protected static ?string $recordTitleAttribute = 'invoice_number';
+
     public static function form(Schema $schema): Schema
     {
         return CarrierInvoiceForm::configure($schema);

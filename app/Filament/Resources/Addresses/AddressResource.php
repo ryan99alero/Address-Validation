@@ -29,6 +29,8 @@ class AddressResource extends Resource
 
     protected static ?int $navigationSort = 2;
 
+    protected static ?string $recordTitleAttribute = 'input_address_1';
+
     public static function form(Schema $schema): Schema
     {
         return AddressForm::configure($schema);

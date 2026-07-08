@@ -22,6 +22,7 @@ use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
+use pxlrbt\FilamentSpotlight\SpotlightPlugin;
 
 class AdminPanelProvider extends PanelProvider
 {
@@ -72,6 +73,11 @@ class AdminPanelProvider extends PanelProvider
                     ->group('Admin')
                     ->sort(99)
                     ->visible(fn (): bool => Auth::user()?->isAdmin() ?? false),
+            ])
+            ->plugins([
+                // Ctrl/Cmd+K command palette. Auto-indexes the pages + resources the current user
+                // can access (respects Filament gating), plus record search via recordTitleAttribute.
+                SpotlightPlugin::make(),
             ])
             ->middleware([
                 EncryptCookies::class,

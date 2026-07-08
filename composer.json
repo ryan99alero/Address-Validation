@@ -19,6 +19,7 @@
         "livewire/livewire": "^4.0",
         "maatwebsite/excel": "^3.1",
         "phpoffice/phpspreadsheet": "^1.30@dev",
+        "pxlrbt/filament-spotlight": "^2.1",
         "smalot/pdfparser": "^2.12",
         "webklex/laravel-imap": "^6.2"
     },

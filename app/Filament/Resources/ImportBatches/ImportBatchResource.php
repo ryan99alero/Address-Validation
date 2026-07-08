@@ -27,6 +27,8 @@ class ImportBatchResource extends Resource
 
     protected static ?int $navigationSort = 4;
 
+    protected static ?string $recordTitleAttribute = 'name';
+
     public static function form(Schema $schema): Schema
     {
         return ImportBatchForm::configure($schema);
