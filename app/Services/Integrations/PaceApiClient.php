@@ -2,6 +2,7 @@
 
 namespace App\Services\Integrations;
 
+use App\Exceptions\PaceRequestException;
 use App\Models\IntegrationConnection;
 use App\Models\IntegrationQueryTemplate;
 use Exception;
@@ -380,6 +381,39 @@ class PaceApiClient
     }
 
     /**
+     * Create an object (write). Deliberately uses a NON-retrying client — a transparently retried
+     * POST after a timeout Pace already committed would create a duplicate record; for a financial
+     * write that means double-billing. Retry is the caller's job, behind a verify-in-Pace step.
+     * Throws PaceRequestException (carrying the HTTP status) on an error response; a connection
+     * error / timeout propagates as-is so the caller treats it as "maybe applied → verify".
+     *
+     * @param  array<string, mixed>  $object
+     * @return array<string, mixed>
+     */
+    public function createObject(string $type, array $object): array
+    {
+        $client = $this->buildClient(retry: false);
+
+        $endpoint = '/CreateObject/create'.$type;
+        if ($this->connection->auth_type === 'api_key' &&
+            $this->connection->getCredential('api_key_location') === 'query') {
+            $name = $this->connection->getCredential('api_key_name', 'api_key');
+            $endpoint .= (str_contains($endpoint, '?') ? '&' : '?').$name.'='.urlencode($this->connection->getCredential('api_key'));
+        }
+
+        $response = $client->post($endpoint, $object);
+
+        if ($response->failed()) {
+            $this->connection->markError($response->body());
+            throw new PaceRequestException($response->status(), $response->body());
+        }
+
+        $this->connection->markConnected();
+
+        return $response->json() ?? [];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function readContact(string $primaryKey): array
@@ -462,11 +496,14 @@ class PaceApiClient
     /**
      * Build the HTTP client with authentication
      */
-    protected function buildClient(): PendingRequest
+    protected function buildClient(bool $retry = true): PendingRequest
     {
         $client = Http::baseUrl($this->connection->base_url)
             ->timeout($this->connection->timeout_seconds)
-            ->retry($this->connection->retry_attempts, 100)
+            // Writes pass $retry=false: an auto-retried POST after a timeout that Pace already
+            // committed would create a second record. Retry policy for writes lives in the queue
+            // job, behind a verify step.
+            ->when($retry, fn (PendingRequest $c): PendingRequest => $c->retry($this->connection->retry_attempts, 100))
             ->acceptJson()
             ->asJson();
 
