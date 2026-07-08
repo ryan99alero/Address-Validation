@@ -2,6 +2,7 @@
 
 namespace App\Services\Invoices;
 
+use App\Models\ChargeCategory;
 use App\Models\ChargeCodeMapping;
 use Illuminate\Support\Collection;
 
@@ -36,10 +37,21 @@ class ChargeCategoryResolver
             return $this->cache[$cacheKey];
         }
 
-        // The category is WHAT the charge is, not why we got it. Carriers prefix the "why" onto the
-        // description ("Address Correction Ground"); strip it so re-rated transport/fuel resolves to
-        // its real category. The driver dimension carries the "why" separately.
-        $matchDescription = $this->stripDriverPrefix($description);
+        // A correction line prefixes the correction onto the description. An ADDRESS correction is a
+        // flat fee, so its line IS the fee (→ Address Correction) even when labelled with a service
+        // ("Address Correction Ground" is a fixed $20.20, not the ~$8 real transport). A SHIPPING
+        // CHARGE correction is a real re-rate, so its line keeps the underlying transport/fuel
+        // category. In both, a named non-base surcharge (fuel) keeps its own category. The driver
+        // dimension carries the "why" separately.
+        if ($description !== null && $description !== '') {
+            foreach (self::CORRECTION_PREFIXES as $prefix => [$feeCategory, $transportIsFee]) {
+                if (stripos($description, $prefix) === 0) {
+                    return $this->cache[$cacheKey] = $this->correctionCategory(
+                        $carrierId, $feeCategory, $transportIsFee, trim(substr($description, strlen($prefix)))
+                    );
+                }
+            }
+        }
 
         foreach ($this->sortedMappings() as $mapping) {
             if ($mapping->carrier_id !== null && $mapping->carrier_id !== $carrierId) {
@@ -50,7 +62,7 @@ class ChargeCategoryResolver
                 if ($code !== null && $code !== '' && strcasecmp($code, $mapping->match_value) === 0) {
                     return $this->cache[$cacheKey] = $mapping->charge_category_id;
                 }
-            } elseif ($matchDescription !== null && $matchDescription !== '' && stripos($matchDescription, $mapping->match_value) !== false) {
+            } elseif ($description !== null && $description !== '' && stripos($description, $mapping->match_value) !== false) {
                 return $this->cache[$cacheKey] = $mapping->charge_category_id;
             }
         }
@@ -59,35 +71,41 @@ class ChargeCategoryResolver
     }
 
     /**
-     * Driver prefixes carriers prepend to the underlying charge description. Removing one exposes
-     * the true category ("Address Correction Ground" → "Ground" → Base). A bare prefix with nothing
-     * after it (a flat "Address Correction" fee) is left intact so it still resolves to its category.
+     * Correction prefixes → [fee category name, is a service-labelled line the FEE itself?].
+     * Address correction = a flat fee (the transport-labelled line IS the fee). Shipping charge
+     * correction = a re-rate (the transport-labelled line keeps its transport category).
      *
-     * @var array<int, string>
+     * @var array<string, array{0: string, 1: bool}>
      */
-    private const DRIVER_PREFIXES = [
-        'Address Correction',
-        'Shipping Charge Correction',
-        'Chargeback',
-        'Not Previously Billed',
-        'Returns',
+    private const CORRECTION_PREFIXES = [
+        'Address Correction' => ['Address Correction', true],
+        'Shipping Charge Correction' => ['Audit / Correction Fee', false],
     ];
 
-    private function stripDriverPrefix(?string $description): ?string
+    /** @var array<string, ?int> */
+    private array $categoryIds = [];
+
+    private function correctionCategory(?int $carrierId, string $feeCategory, bool $transportIsFee, string $remainder): ?int
     {
-        if ($description === null || $description === '') {
-            return $description;
+        if ($remainder === '') {
+            return $this->categoryIdByName($feeCategory);
         }
 
-        foreach (self::DRIVER_PREFIXES as $prefix) {
-            if (stripos($description, $prefix) === 0) {
-                $rest = trim(substr($description, strlen($prefix)));
+        $remainderCategory = $this->resolve($carrierId, null, $remainder);
 
-                return $rest !== '' ? $rest : $description;
-            }
+        // A named non-base surcharge (fuel, DAS, residential…) keeps its own category.
+        if ($remainderCategory !== null && $remainderCategory !== $this->categoryIdByName('Base Transportation')) {
+            return $remainderCategory;
         }
 
-        return $description;
+        // Remainder is base transport (or unmatched): a flat-fee correction → the fee category;
+        // a true re-rate → the underlying transport category as resolved.
+        return $transportIsFee ? $this->categoryIdByName($feeCategory) : $remainderCategory;
+    }
+
+    private function categoryIdByName(string $name): ?int
+    {
+        return $this->categoryIds[$name] ??= ChargeCategory::query()->where('name', $name)->value('id');
     }
 
     /**

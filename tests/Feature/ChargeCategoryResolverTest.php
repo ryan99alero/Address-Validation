@@ -65,16 +65,30 @@ test('repeated resolves are memoized and stay consistent (incl. cached nulls)', 
     }
 });
 
-test('a driver prefix is stripped so the underlying category resolves (not ADC pollution)', function () {
+test('address correction is a flat fee: the service-labelled line is the fee, fuel stays fuel', function () {
     $base = ChargeCategory::create(['name' => 'Base Transportation']);
     ChargeCodeMapping::create(['carrier_id' => null, 'match_type' => 'description', 'match_value' => 'Ground', 'charge_category_id' => $base->id, 'priority' => 8]);
-    ChargeCodeMapping::create(['carrier_id' => null, 'match_type' => 'description', 'match_value' => 'Address Correction', 'charge_category_id' => $this->addressCorrection->id, 'priority' => 50]);
 
     $resolver = app(ChargeCategoryResolver::class);
 
-    // UPS rebills the shipment under an address correction: transport → Base, fuel → Fuel.
-    expect($resolver->resolve($this->ups->id, null, 'Address Correction Ground'))->toBe($base->id)
-        ->and($resolver->resolve($this->ups->id, null, 'Address Correction Fuel Surcharge'))->toBe($this->fuel->id)
-        // A flat address-correction fee (nothing after the prefix) still resolves to ADC.
+    // "Address Correction Ground" is a fixed fee (not the ~$8 real Ground) → Address Correction.
+    expect($resolver->resolve($this->ups->id, 'ADC', 'Address Correction Ground'))->toBe($this->addressCorrection->id)
+        // Its fuel keeps the Fuel category.
+        ->and($resolver->resolve($this->ups->id, 'ADC', 'Address Correction Fuel Surcharge'))->toBe($this->fuel->id)
+        // A flat "Address Correction" line still resolves to Address Correction.
         ->and($resolver->resolve($this->fedex->id, null, 'Address Correction'))->toBe($this->addressCorrection->id);
+});
+
+test('shipping charge correction is a re-rate: transport keeps Base, fuel keeps Fuel', function () {
+    $base = ChargeCategory::create(['name' => 'Base Transportation']);
+    $audit = ChargeCategory::create(['name' => 'Audit / Correction Fee']);
+    ChargeCodeMapping::create(['carrier_id' => null, 'match_type' => 'description', 'match_value' => 'Ground', 'charge_category_id' => $base->id, 'priority' => 8]);
+
+    $resolver = app(ChargeCategoryResolver::class);
+
+    // A DIM/weight re-rate is a real transport adjustment → keeps Base / Fuel (not the fee bucket).
+    expect($resolver->resolve($this->ups->id, 'SCC', 'Shipping Charge Correction Ground'))->toBe($base->id)
+        ->and($resolver->resolve($this->ups->id, 'SCC', 'Shipping Charge Correction Fuel Surcharge'))->toBe($this->fuel->id)
+        // A bare correction with no service is the flat audit fee.
+        ->and($resolver->resolve($this->ups->id, 'SCC', 'Shipping Charge Correction'))->toBe($audit->id);
 });
