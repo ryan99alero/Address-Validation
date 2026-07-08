@@ -414,6 +414,29 @@ class PaceApiClient
     }
 
     /**
+     * Find a JobCost we created by its [CB:id] idempotency token (embedded in notes). Used to answer
+     * "did that timed-out create actually apply?" before ever re-posting — the anti-double-bill check.
+     * Returns the JobCost primary key, or null if none exists.
+     */
+    public function findJobCostIdByToken(string $token): ?string
+    {
+        $filter = "contains(@notes, '".str_replace("'", "''", $token)."')";
+        $response = $this->loadValueObjects(
+            objectName: 'JobCost',
+            fields: [['name' => 'id', 'xpath' => '@id']],
+            xpathFilter: $filter,
+            limit: 5,
+        );
+        $rows = $this->parseValueObjects($response['valueObjects'] ?? []);
+        if ($rows->isEmpty()) {
+            return null;
+        }
+        $first = $rows->first();
+
+        return isset($first['id']) ? (string) $first['id'] : ($first['_primaryKey'] ?? null);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function readContact(string $primaryKey): array

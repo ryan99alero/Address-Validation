@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\PushInvoiceChargebacks;
 use App\Jobs\SyncInvoiceCartonCosts;
 use App\Models\Carrier;
 use App\Models\CarrierCharge;
@@ -1553,6 +1554,9 @@ class CarrierInvoiceParserService
         // Queued: it makes a live Pace API call and must not block the import.
         if ($survived !== []) {
             SyncInvoiceCartonCosts::dispatch($survived);
+            // Push eligible carrier charges back to Pace as JobCost chargebacks. No-op unless the
+            // master toggle is on; queued so a Pace call never blocks the import.
+            PushInvoiceChargebacks::dispatch($survived);
         }
 
         return $survived;
