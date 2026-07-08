@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\ImportBatch;
+use App\Models\RecentItem;
+use Filament\Notifications\Notification;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -34,6 +36,25 @@ foreach ($clusterMoves as $old => $new) {
     Route::get("/{$old}/{rest}", fn (string $rest): RedirectResponse => redirect("/{$new}/{$rest}"))
         ->where('rest', '.*');
 }
+
+// Recents fail-soft redirector: /recent/{item} → the stored URL, or (for a since-deleted record)
+// drop the stale row + notify + land on the resource index. Returns a redirect, so the capture
+// middleware ignores it. Both the sidebar links and the spotlight commands point here.
+Route::get('/recent/{recentItem}', function (RecentItem $recentItem) {
+    abort_unless($recentItem->user_id === auth()->id(), 403);
+
+    if ($recentItem->type === RecentItem::TYPE_RECORD
+        && $recentItem->filament_class
+        && class_exists($recentItem->filament_class)
+        && ! $recentItem->filament_class::getModel()::query()->whereKey($recentItem->record_key)->exists()) {
+        $recentItem->delete();
+        Notification::make()->title('That item no longer exists')->warning()->send();
+
+        return redirect($recentItem->filament_class::getUrl('index'));
+    }
+
+    return redirect($recentItem->url);
+})->middleware('auth')->name('recent.go');
 
 // Export download route
 Route::get('/batch-processing/download/{batch}', function (ImportBatch $batch) {
