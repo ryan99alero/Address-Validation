@@ -51,6 +51,7 @@ class AdminPanelProvider extends PanelProvider
                 // sidebar until you open it — a real menu at the bottom, like the others.
                 NavigationGroup::make()->label('Recent')->collapsed(),
             ])
+            ->sidebarCollapsibleOnDesktop()
             ->renderHook(
                 PanelsRenderHook::SIDEBAR_FOOTER,
                 fn (): string => view('filament.sidebar-environment')->render(),
