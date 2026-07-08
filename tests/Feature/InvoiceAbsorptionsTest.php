@@ -4,6 +4,7 @@ use App\Filament\Pages\ChargebackPushes;
 use App\Filament\Resources\CarrierInvoices\Pages\ViewCarrierInvoice;
 use App\Filament\Resources\CarrierInvoices\RelationManagers\ChargebackPushesRelationManager;
 use App\Filament\Resources\CarrierInvoices\RelationManagers\ShipmentsRelationManager;
+use App\Filament\Resources\CarrierShipmentSummaries\CarrierShipmentSummaryResource;
 use App\Models\Carrier;
 use App\Models\CarrierInvoice;
 use App\Models\User;
@@ -53,8 +54,9 @@ test('the global chargeback ledger stays reachable and keeps its CSV export', fu
         ->assertSee('Export CSV');
 });
 
-test('absorbed pages are removed from the sidebar navigation', function () {
-    expect(CarrierInvoice::class)->toBeString(); // anchor
-    expect(\App\Filament\Resources\CarrierShipmentSummaries\CarrierShipmentSummaryResource::shouldRegisterNavigation())->toBeFalse();
-    expect(ChargebackPushes::shouldRegisterNavigation())->toBeFalse();
+test('Per-Shipment Costs is hidden from nav, but the Chargeback ledger stays visible', function () {
+    // Per-Shipment Costs is fully absorbed into the invoice tab.
+    expect(CarrierShipmentSummaryResource::shouldRegisterNavigation())->toBeFalse();
+    // The chargeback (recoup) ledger stays a Carrier Costs menu item — it's a primary view.
+    expect(ChargebackPushes::shouldRegisterNavigation())->toBeTrue();
 });
