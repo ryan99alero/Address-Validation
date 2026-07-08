@@ -41,24 +41,16 @@ class CarrierChargeCatalog extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->query(
-                CarrierCharge::query()
-                    ->leftJoin('carriers as ca', 'ca.id', '=', 'carrier_charges.carrier_id')
-                    ->leftJoin('charge_categories as c', 'c.id', '=', 'carrier_charges.charge_category_id')
-                    ->groupBy('carrier_charges.carrier_id', 'ca.name', 'carrier_charges.raw_charge_code', 'carrier_charges.raw_charge_description', 'carrier_charges.charge_category_id', 'c.abbreviation', 'carrier_charges.driver')
-                    ->selectRaw('MIN(carrier_charges.id) AS id, ca.name AS carrier, carrier_charges.raw_charge_code AS code,
-                        carrier_charges.raw_charge_description AS description, c.abbreviation AS category, carrier_charges.driver AS driver,
-                        COUNT(*) AS line_count, ROUND(SUM(carrier_charges.amount), 2) AS total')
-            )
+            ->query(fn (): Builder => $this->catalogQuery())
             ->columns([
                 TextColumn::make('carrier')->badge()->sortable()
                     ->color(fn (?string $state): string => match ($state) {
                         'FedEx' => 'purple', 'UPS' => 'warning', default => 'gray',
                     }),
                 TextColumn::make('code')->label('Raw Code')->fontFamily('mono')->placeholder('—')
-                    ->searchable(query: fn (Builder $q, string $s): Builder => $q->where('carrier_charges.raw_charge_code', 'like', "%{$s}%")),
+                    ->searchable(query: fn (Builder $q, string $s): Builder => $q->orWhere('carrier_charges.code', 'like', "%{$s}%")),
                 TextColumn::make('description')->label('Carrier Description')->wrap()->limit(48)
-                    ->searchable(query: fn (Builder $q, string $s): Builder => $q->where('carrier_charges.raw_charge_description', 'like', "%{$s}%")),
+                    ->searchable(query: fn (Builder $q, string $s): Builder => $q->orWhere('carrier_charges.description', 'like', "%{$s}%")),
                 TextColumn::make('category')->label('→ Category')->badge()
                     ->getStateUsing(fn (CarrierCharge $record): string => $record->category ?? 'UNMAPPED')
                     ->color(fn (CarrierCharge $record): string => $record->category !== null ? 'gray' : 'danger'),
@@ -76,5 +68,42 @@ class CarrierChargeCatalog extends Page implements HasTable
             ->defaultSort('total', 'desc')
             ->paginated([50, 100])
             ->emptyStateHeading('No charges imported yet');
+    }
+
+    /**
+     * Aggregate ~850k charge lines into one row per distinct charge type inside a DERIVED table,
+     * then select from it. The derived table is aliased as the model's own table name so Filament's
+     * stable-pagination tie-break (ORDER BY carrier_charges.id) resolves to the derived MIN(id)
+     * column — legal under MySQL ONLY_FULL_GROUP_BY, where ordering by the raw grouped column is not.
+     */
+    protected function catalogQuery(): Builder
+    {
+        $aggregate = CarrierCharge::query()
+            ->toBase()
+            ->leftJoin('carriers as ca', 'ca.id', '=', 'carrier_charges.carrier_id')
+            ->leftJoin('charge_categories as c', 'c.id', '=', 'carrier_charges.charge_category_id')
+            ->groupBy(
+                'carrier_charges.carrier_id',
+                'ca.name',
+                'carrier_charges.raw_charge_code',
+                'carrier_charges.raw_charge_description',
+                'carrier_charges.charge_category_id',
+                'c.abbreviation',
+                'carrier_charges.driver',
+            )
+            ->selectRaw('
+                MIN(carrier_charges.id) AS id,
+                carrier_charges.carrier_id AS carrier_id,
+                ca.name AS carrier,
+                carrier_charges.raw_charge_code AS code,
+                carrier_charges.raw_charge_description AS description,
+                carrier_charges.charge_category_id AS charge_category_id,
+                c.abbreviation AS category,
+                carrier_charges.driver AS driver,
+                COUNT(*) AS line_count,
+                ROUND(SUM(carrier_charges.amount), 2) AS total
+            ');
+
+        return CarrierCharge::query()->fromSub($aggregate, 'carrier_charges')->select('carrier_charges.*');
     }
 }
