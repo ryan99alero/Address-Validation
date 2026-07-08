@@ -109,8 +109,14 @@ class ObjectsRelationManager extends RelationManager
                             ->required(),
                         Select::make('api_method')
                             ->label('API Method')
-                            ->options(['loadValueObjects' => 'loadValueObjects', 'findObjects' => 'findObjects'])
+                            ->options([
+                                'loadValueObjects' => 'loadValueObjects (read)',
+                                'findObjects' => 'findObjects (read)',
+                                'createObject' => 'createObject (write)',
+                                'updateObject' => 'updateObject (write)',
+                            ])
                             ->default('loadValueObjects')
+                            ->helperText('Reads pull data in; writes (createObject/updateObject) push data out — e.g. JobCost chargebacks.')
                             ->required(),
                         Select::make('sync_frequency')
                             ->options(['manual' => 'Manual', 'hourly' => 'Hourly', 'daily' => 'Daily', 'weekly' => 'Weekly'])
