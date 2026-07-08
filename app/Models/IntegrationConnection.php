@@ -37,6 +37,7 @@ class IntegrationConnection extends Model
         'rate_limit_per_minute',
         'validation_carriers',
         'dry_run',
+        'chargeback_push_enabled',
         'is_active',
         'last_connected_at',
         'last_error_at',
@@ -67,6 +68,7 @@ class IntegrationConnection extends Model
             'rate_limit_per_minute' => 'integer',
             'validation_carriers' => 'array',
             'dry_run' => 'boolean',
+            'chargeback_push_enabled' => 'boolean',
             'sync_interval_minutes' => 'integer',
             'last_synced_at' => 'datetime',
         ];

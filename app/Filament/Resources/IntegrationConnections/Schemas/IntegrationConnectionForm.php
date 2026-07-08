@@ -142,6 +142,13 @@ class IntegrationConnectionForm
                                         ->label('Shadow / dry-run mode (no write-back)')
                                         ->helperText('When ON: the engine validates and logs exactly what it WOULD change, but does NOT push anything back to Pace. Use to observe corrections for a while before going live.'),
                                 ]),
+                            Section::make('Customer Chargeback Push')
+                                ->description('Push eligible carrier charges (a Carrier Chargeback Code flagged to push, with a cost center) back to Pace as JobCost records.')
+                                ->schema([
+                                    Toggle::make('chargeback_push_enabled')
+                                        ->label('Enable chargeback push')
+                                        ->helperText('OFF (default) ignores records — nothing is pushed. Turning ON pushes only newly imported invoices going forward; earlier charges are released deliberately via the backfill command, never automatically.'),
+                                ]),
                             Section::make('Sync')
                                 ->schema([
                                     TextInput::make('sync_interval_minutes')
