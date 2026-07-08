@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Carriers;
 
+use App\Filament\Clusters\Integrations\IntegrationsCluster;
 use App\Filament\Resources\Carriers\Pages\CreateCarrier;
 use App\Filament\Resources\Carriers\Pages\EditCarrier;
 use App\Filament\Resources\Carriers\Pages\ListCarriers;
@@ -22,6 +23,8 @@ class CarrierResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCog6Tooth;
 
+    protected static ?string $cluster = IntegrationsCluster::class;
+
     protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'API Integrations';
@@ -30,7 +33,7 @@ class CarrierResource extends Resource
 
     protected static ?string $pluralModelLabel = 'API Integrations';
 
-    protected static ?int $navigationSort = 10;
+    protected static ?int $navigationSort = 1;
 
     public static function canAccess(): bool
     {

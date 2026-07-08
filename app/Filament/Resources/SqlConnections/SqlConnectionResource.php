@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\SqlConnections;
 
+use App\Filament\Clusters\Integrations\IntegrationsCluster;
 use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\SqlConnections\Pages\CreateSqlConnection;
 use App\Filament\Resources\SqlConnections\Pages\EditSqlConnection;
@@ -24,13 +25,15 @@ class SqlConnectionResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCircleStack;
 
+    protected static ?string $cluster = IntegrationsCluster::class;
+
     protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'SQL Connections';
 
     protected static ?string $modelLabel = 'SQL Connection';
 
-    protected static ?int $navigationSort = 14;
+    protected static ?int $navigationSort = 5;
 
     public static function form(Schema $schema): Schema
     {

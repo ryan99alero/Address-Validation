@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ChargeDrivers;
 
+use App\Filament\Clusters\ChargeClassification\ChargeClassificationCluster;
 use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\ChargeDrivers\Pages\EditChargeDriver;
 use App\Filament\Resources\ChargeDrivers\Pages\ListChargeDrivers;
@@ -28,11 +29,13 @@ class ChargeDriverResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedReceiptPercent;
 
+    protected static ?string $cluster = ChargeClassificationCluster::class;
+
     protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'Carrier Chargeback Codes';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 2;
 
     public static function canCreate(): bool
     {

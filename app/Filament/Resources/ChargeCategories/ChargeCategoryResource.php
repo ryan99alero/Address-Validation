@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ChargeCategories;
 
+use App\Filament\Clusters\ChargeClassification\ChargeClassificationCluster;
 use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\ChargeCategories\Pages\EditChargeCategory;
 use App\Filament\Resources\ChargeCategories\Pages\ListChargeCategories;
@@ -28,11 +29,13 @@ class ChargeCategoryResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTag;
 
+    protected static ?string $cluster = ChargeClassificationCluster::class;
+
     protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'Fee Categories';
 
-    protected static ?int $navigationSort = 5;
+    protected static ?int $navigationSort = 1;
 
     public static function canCreate(): bool
     {

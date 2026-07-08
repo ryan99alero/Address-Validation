@@ -34,6 +34,10 @@ class ChargebackPushes extends Page implements HasTable
 
     protected static ?int $navigationSort = 4;
 
+    // Absorbed into the Invoices "Chargeback Pushes" relation-manager tab; the global cross-invoice
+    // ledger + CSV export stay reachable via the "Chargeback Ledger" button on the Invoices list.
+    protected static bool $shouldRegisterNavigation = false;
+
     protected static ?string $title = 'Chargeback Pushes (Pace JobCost)';
 
     public static function getNavigationBadge(): ?string

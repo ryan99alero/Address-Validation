@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\IntegrationConnections;
 
+use App\Filament\Clusters\Integrations\IntegrationsCluster;
 use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\IntegrationConnections\Pages\CreateIntegrationConnection;
 use App\Filament\Resources\IntegrationConnections\Pages\EditIntegrationConnection;
@@ -24,13 +25,15 @@ class IntegrationConnectionResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-server-stack';
 
+    protected static ?string $cluster = IntegrationsCluster::class;
+
     protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'ERP & Pace Connections';
 
     protected static ?string $modelLabel = 'Integration Connection';
 
-    protected static ?int $navigationSort = 11;
+    protected static ?int $navigationSort = 2;
 
     public static function form(Schema $schema): Schema
     {

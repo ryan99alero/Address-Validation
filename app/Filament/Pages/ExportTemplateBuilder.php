@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Clusters\Templates\TemplatesCluster;
 use App\Models\CompanySetting;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
@@ -31,9 +32,11 @@ class ExportTemplateBuilder extends Page implements HasSchemas
 
     protected static ?string $navigationLabel = 'Export Template Builder';
 
+    protected static ?string $cluster = TemplatesCluster::class;
+
     protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
-    protected static ?int $navigationSort = 20;
+    protected static ?int $navigationSort = 3;
 
     protected static ?string $title = 'Export Template Builder';
 

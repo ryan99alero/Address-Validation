@@ -4,8 +4,10 @@ namespace App\Filament\Resources\CarrierInvoices;
 
 use App\Filament\Resources\CarrierInvoices\Pages\ListCarrierInvoices;
 use App\Filament\Resources\CarrierInvoices\Pages\ViewCarrierInvoice;
+use App\Filament\Resources\CarrierInvoices\RelationManagers\ChargebackPushesRelationManager;
 use App\Filament\Resources\CarrierInvoices\RelationManagers\ChargesRelationManager;
 use App\Filament\Resources\CarrierInvoices\RelationManagers\CorrectionLinesRelationManager;
+use App\Filament\Resources\CarrierInvoices\RelationManagers\ShipmentsRelationManager;
 use App\Filament\Resources\CarrierInvoices\RelationManagers\SourceFilesRelationManager;
 use App\Filament\Resources\CarrierInvoices\Schemas\CarrierInvoiceForm;
 use App\Filament\Resources\CarrierInvoices\Tables\CarrierInvoicesTable;
@@ -43,6 +45,8 @@ class CarrierInvoiceResource extends Resource
     {
         return [
             ChargesRelationManager::class,
+            ShipmentsRelationManager::class,
+            ChargebackPushesRelationManager::class,
             CorrectionLinesRelationManager::class,
             SourceFilesRelationManager::class,
         ];

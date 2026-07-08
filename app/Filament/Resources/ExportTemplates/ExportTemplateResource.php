@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ExportTemplates;
 
+use App\Filament\Clusters\Templates\TemplatesCluster;
 use App\Filament\Resources\ExportTemplates\Pages\CreateExportTemplate;
 use App\Filament\Resources\ExportTemplates\Pages\EditExportTemplate;
 use App\Filament\Resources\ExportTemplates\Pages\ListExportTemplates;
@@ -22,11 +23,13 @@ class ExportTemplateResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCloudArrowDown;
 
+    protected static ?string $cluster = TemplatesCluster::class;
+
     protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'Export Templates';
 
-    protected static ?int $navigationSort = 21;
+    protected static ?int $navigationSort = 2;
 
     public static function form(Schema $schema): Schema
     {

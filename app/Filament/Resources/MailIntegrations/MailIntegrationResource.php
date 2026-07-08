@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\MailIntegrations;
 
+use App\Filament\Clusters\Integrations\IntegrationsCluster;
 use App\Filament\Concerns\AdminOnly;
 use App\Filament\Resources\MailIntegrations\Pages\CreateMailIntegration;
 use App\Filament\Resources\MailIntegrations\Pages\EditMailIntegration;
@@ -24,11 +25,13 @@ class MailIntegrationResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedEnvelope;
 
+    protected static ?string $cluster = IntegrationsCluster::class;
+
     protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'Mail Integrations';
 
-    protected static ?int $navigationSort = 13;
+    protected static ?int $navigationSort = 4;
 
     protected static ?string $modelLabel = 'Mail Integration';
 

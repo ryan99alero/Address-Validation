@@ -30,6 +30,9 @@ class CarrierShipmentSummaryResource extends Resource
 
     protected static ?int $navigationSort = 3;
 
+    // Absorbed into the Invoices "Per-Shipment Costs" relation-manager tab; kept URL-reachable.
+    protected static bool $shouldRegisterNavigation = false;
+
     public static function canCreate(): bool
     {
         return false;
