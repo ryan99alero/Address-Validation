@@ -32,8 +32,8 @@ class ChargebackPush extends Model
     protected $fillable = [
         'dedupe_key', 'carrier_charge_id', 'carrier_id', 'carrier_invoice_id', 'tracking_number',
         'charge_category_id', 'driver', 'amount', 'ship_date', 'pace_job', 'pace_job_part',
-        'pace_customer_id', 'activity_code', 'notes', 'pace_jobcost_id', 'status', 'attempts',
-        'last_error', 'pushed_at',
+        'pace_customer_id', 'activity_code', 'notes', 'pace_jobcost_id', 'response_snapshot',
+        'status', 'attempts', 'last_error', 'pushed_at',
     ];
 
     /**
@@ -46,6 +46,7 @@ class ChargebackPush extends Model
             'ship_date' => 'date',
             'attempts' => 'integer',
             'pushed_at' => 'datetime',
+            'response_snapshot' => 'array',
         ];
     }
 

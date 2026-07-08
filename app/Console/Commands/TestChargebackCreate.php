@@ -2,24 +2,23 @@
 
 namespace App\Console\Commands;
 
+use App\Models\ChargebackPush;
 use App\Services\Chargebacks\ChargebackPusher;
 use App\Services\Integrations\PaceApiClient;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 
 /**
- * One-shot live test of the chargeback create path against a test job/tracking (safe while Pace's
- * Create-Costs is off): JobShipment lookup → openJob gate → JobCost payload → createObject →
- * read the new record back. Does NOT touch the ledger or import flow.
+ * One-shot live test of the FULL chargeback path against a test job/tracking (safe while Pace's
+ * Create-Costs is off): JobShipment lookup → openJob gate → claim-first ledger row → JobCost create
+ * → confirm the ledger with the returned id + snapshot. Creates BOTH lines of an address correction
+ * (the fee → 72510 and its fuel → 72520), so ADV shows two rows marked pushed.
  */
 class TestChargebackCreate extends Command
 {
-    protected $signature = 'chargebacks:test-create
-        {--tracking=TEST061522TRACK}
-        {--amount=20.20}
-        {--activity=72510}
-        {--label=Address Correction fee}';
+    protected $signature = 'chargebacks:test-create {--tracking=TEST061522TRACK}';
 
-    protected $description = 'Create one test JobCost chargeback in Pace and read it back';
+    protected $description = 'Create the test address-correction chargebacks (fee + fuel) through the ledger';
 
     public function handle(ChargebackPusher $pusher): int
     {
@@ -30,60 +29,72 @@ class TestChargebackCreate extends Command
             return self::FAILURE;
         }
         $client = new PaceApiClient($connection);
-
         $tracking = (string) $this->option('tracking');
+        $carrierId = (int) DB::table('carriers')->where('name', 'like', '%UPS%')->value('id');
+
         $this->info("Looking up JobShipment for {$tracking}…");
         $shipments = $pusher->lookupJobShipments($client, $tracking);
         if ($shipments === []) {
-            $this->error('No JobShipment found — would be skipped_no_jobshipment.');
+            $this->error('No JobShipment found — skipped_no_jobshipment.');
 
             return self::FAILURE;
-        }
-        if (count($shipments) > 1) {
-            $this->warn(count($shipments).' shipments matched (recycled tracking) — real path would disambiguate by ship date.');
         }
         $s = $shipments[0];
-        $this->line('  job='.($s['job'] ?? '?').' jobPart='.($s['jobPart'] ?? '?').' customer='.($s['customer'] ?? '-').' openJob='.var_export($s['openJob'] ?? null, true));
-
+        $this->line('  job='.($s['job'] ?? '?').' jobPart='.($s['jobPart'] ?? '?').' openJob='.var_export($s['openJob'] ?? null, true));
         if (($s['openJob'] ?? null) !== true) {
-            $this->error('Job is not open — would be skipped_job_closed. Aborting test.');
+            $this->error('Job not open — skipped_job_closed.');
 
             return self::FAILURE;
         }
 
-        $notes = $pusher->buildNotes(0, [
-            'carrier' => 'UPS',
-            'label' => (string) $this->option('label'),
-            'tracking' => $tracking,
-            'invoice' => 'TEST-INV',
-            'invoice_date' => now()->toDateString(),
-            'amount' => (float) $this->option('amount'),
-            'recorded' => '450 FARABEE DR S, LAFAYETTE IN 47905',
-            'corrected' => '313 FARABEE DR S, LAFAYETTE IN 47905',
-        ]);
+        // The two lines an address correction produces: the flat fee and its fuel.
+        $lines = [
+            ['activity' => '72510', 'amount' => 20.20, 'label' => 'Address Correction fee'],
+            ['activity' => '72520', 'amount' => 2.62, 'label' => 'Address Correction fuel surcharge'],
+        ];
 
-        $payload = $pusher->buildJobCostPayload([
-            'job' => (string) $s['job'],
-            'jobPart' => (string) ($s['jobPart'] ?? '01'),
-            'activityCode' => (string) $this->option('activity'),
-            'amount' => (float) $this->option('amount'),
-            'tracking' => $tracking,
-            'notes' => $notes,
-        ]);
+        foreach ($lines as $line) {
+            $dedupe = 'TEST|'.$tracking.'|'.$line['activity'].'|'.$line['amount'];
 
-        $this->info('Creating JobCost with payload:');
-        $this->line(json_encode($payload, JSON_PRETTY_PRINT));
+            // Claim-first: the row exists BEFORE the Pace call; the unique key is the mutex.
+            $ledger = ChargebackPush::firstOrCreate(['dedupe_key' => $dedupe], [
+                'carrier_id' => $carrierId, 'tracking_number' => $tracking, 'driver' => 'address_correction',
+                'amount' => $line['amount'], 'activity_code' => $line['activity'],
+                'pace_job' => $s['job'] ?? null, 'pace_job_part' => $s['jobPart'] ?? null,
+                'pace_customer_id' => $s['customer'] ?? null, 'status' => ChargebackPush::STATUS_PENDING,
+            ]);
 
-        $result = $client->createObject('JobCost', $payload);
-        $newId = $result['id'] ?? $result['primaryKey'] ?? null;
-        $this->info('Created JobCost id: '.var_export($newId, true));
+            if ($ledger->status === ChargebackPush::STATUS_PUSHED) {
+                $this->warn("  {$line['label']}: already pushed (JobCost {$ledger->pace_jobcost_id}) — idempotency held, skipping.");
 
-        if ($newId) {
-            $readBack = $client->readObject('JobCost', (string) $newId);
-            $this->info('Read-back confirms:');
-            foreach (['id', 'job', 'jobPart', 'activityCode', 'cost', 'actualCost', 'sourceID', 'notes', 'postedDate', 'startDateTime'] as $f) {
-                $this->line(sprintf('  %-14s = %s', $f, $readBack[$f] ?? '(none)'));
+                continue;
             }
+
+            $notes = $pusher->buildNotes($ledger->id, [
+                'carrier' => 'UPS', 'label' => $line['label'], 'tracking' => $tracking,
+                'invoice' => 'TEST-INV', 'invoice_date' => now()->toDateString(), 'amount' => $line['amount'],
+                'recorded' => '450 FARABEE DR S, LAFAYETTE IN 47905', 'corrected' => '313 FARABEE DR S, LAFAYETTE IN 47905',
+            ]);
+            $payload = $pusher->buildJobCostPayload([
+                'job' => (string) $s['job'], 'jobPart' => (string) ($s['jobPart'] ?? '01'),
+                'activityCode' => $line['activity'], 'amount' => $line['amount'], 'tracking' => $tracking, 'notes' => $notes,
+            ]);
+
+            $result = $client->createObject('JobCost', $payload);
+            $jobCostId = $result['id'] ?? $result['primaryKey'] ?? null;
+
+            $ledger->update([
+                'notes' => $notes, 'pace_jobcost_id' => $jobCostId, 'response_snapshot' => $result,
+                'status' => ChargebackPush::STATUS_PUSHED, 'pushed_at' => now(), 'attempts' => $ledger->attempts + 1,
+            ]);
+
+            $this->info("  {$line['label']}: JobCost {$jobCostId} → activityCode {$line['activity']} \${$line['amount']}  (ledger #{$ledger->id} = pushed)");
+        }
+
+        $this->newLine();
+        $this->info('Ledger rows for this tracking:');
+        foreach (ChargebackPush::where('tracking_number', $tracking)->get() as $r) {
+            $this->line(sprintf('  #%d  %-8s  act=%s  $%s  JobCost=%s  %s', $r->id, $r->status, $r->activity_code, $r->amount, $r->pace_jobcost_id ?? '-', $r->pushed_at));
         }
 
         return self::SUCCESS;
