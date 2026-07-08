@@ -11,6 +11,7 @@ class ChargeCategory extends Model
     protected $fillable = [
         'name',
         'abbreviation',
+        'pace_cost_center',
         'parent_id',
         'sort_order',
         'is_active',
