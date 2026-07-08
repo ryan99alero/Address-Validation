@@ -33,7 +33,7 @@ class CarrierChargeCatalog extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTableCells;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Carrier Invoices';
+    protected static string|UnitEnum|null $navigationGroup = 'Carrier Costs';
 
     // Reached from Adjustments (Carrier Charges) via its "Charge Catalog" button — not its own top
     // menu item, to keep the nav lean.

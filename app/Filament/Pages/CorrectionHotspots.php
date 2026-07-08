@@ -41,11 +41,11 @@ class CorrectionHotspots extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedMapPin;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Reports';
+    protected static string|UnitEnum|null $navigationGroup = 'Carrier Costs';
 
     protected static ?string $navigationLabel = 'Correction Hotspots';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 13;
 
     protected static ?string $title = 'Address Correction Hotspots';
 

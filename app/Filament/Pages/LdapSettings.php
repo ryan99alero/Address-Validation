@@ -27,7 +27,7 @@ class LdapSettings extends Page implements HasSchemas
 
     protected static ?string $navigationLabel = 'LDAP Settings';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Settings';
+    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?int $navigationSort = 2;
 

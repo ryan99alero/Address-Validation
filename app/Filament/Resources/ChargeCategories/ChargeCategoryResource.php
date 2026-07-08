@@ -28,7 +28,7 @@ class ChargeCategoryResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTag;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Settings';
+    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'Fee Categories';
 

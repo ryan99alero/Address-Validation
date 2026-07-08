@@ -17,13 +17,13 @@ class PaceCorrectionResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-map-pin';
 
-    protected static string|UnitEnum|null $navigationGroup = null;
+    protected static string|UnitEnum|null $navigationGroup = 'Address Intelligence';
 
-    protected static ?string $navigationLabel = 'Pace Address Corrections';
+    protected static ?string $navigationLabel = 'Pace Corrections';
 
     protected static ?string $modelLabel = 'Pace Address Correction';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 6;
 
     public static function getEloquentQuery(): Builder
     {

@@ -22,11 +22,11 @@ class ExportTemplateResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCloudArrowDown;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Templates';
+    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'Export Templates';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 21;
 
     public static function form(Schema $schema): Schema
     {

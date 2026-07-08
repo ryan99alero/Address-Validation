@@ -46,11 +46,11 @@ class CarrierFeeSummary extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBanknotes;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Reports';
+    protected static string|UnitEnum|null $navigationGroup = 'Carrier Costs';
 
     protected static ?string $navigationLabel = 'Carrier Fee Summary';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 12;
 
     protected static ?string $title = 'Carrier Fee Summary';
 

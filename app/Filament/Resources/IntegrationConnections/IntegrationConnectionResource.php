@@ -24,13 +24,13 @@ class IntegrationConnectionResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-server-stack';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Integrations';
+    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'ERP & Pace Connections';
 
     protected static ?string $modelLabel = 'Integration Connection';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 11;
 
     public static function form(Schema $schema): Schema
     {

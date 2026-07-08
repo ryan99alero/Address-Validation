@@ -23,11 +23,11 @@ class CarrierInvoiceResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentText;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Carrier Invoices';
+    protected static string|UnitEnum|null $navigationGroup = 'Carrier Costs';
 
     protected static ?string $navigationLabel = 'Invoices';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 1;
 
     public static function form(Schema $schema): Schema
     {

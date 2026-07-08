@@ -20,9 +20,9 @@ class AddressCorrectionResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedMapPin;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Carrier Invoices';
+    protected static string|UnitEnum|null $navigationGroup = 'Address Intelligence';
 
-    protected static ?string $navigationLabel = 'Address Corrections';
+    protected static ?string $navigationLabel = 'Correction Cache';
 
     protected static ?string $modelLabel = 'Address Correction';
 
@@ -30,7 +30,7 @@ class AddressCorrectionResource extends Resource
 
     protected static ?string $slug = 'address-corrections';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 5;
 
     public static function table(Table $table): Table
     {

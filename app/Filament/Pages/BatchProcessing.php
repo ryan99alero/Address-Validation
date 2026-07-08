@@ -35,9 +35,11 @@ class BatchProcessing extends Page implements HasSchemas
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowsRightLeft;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Address Intelligence';
+
     protected static ?string $navigationLabel = 'Batch Processing';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 3;
 
     protected string $view = 'filament.pages.batch-processing';
 

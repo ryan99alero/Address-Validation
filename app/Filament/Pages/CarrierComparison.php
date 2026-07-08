@@ -46,11 +46,11 @@ class CarrierComparison extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedScale;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Reports';
+    protected static string|UnitEnum|null $navigationGroup = 'Carrier Costs';
 
     protected static ?string $navigationLabel = 'Carrier Comparison';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 10;
 
     protected static ?string $title = 'Carrier Comparison — Who Costs More';
 

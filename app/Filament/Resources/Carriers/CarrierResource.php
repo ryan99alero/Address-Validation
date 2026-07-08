@@ -22,7 +22,7 @@ class CarrierResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCog6Tooth;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Integrations';
+    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'API Integrations';
 
@@ -30,7 +30,7 @@ class CarrierResource extends Resource
 
     protected static ?string $pluralModelLabel = 'API Integrations';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 10;
 
     public static function canAccess(): bool
     {

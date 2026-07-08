@@ -30,9 +30,11 @@ class ValidateAddress extends Page implements HasSchemas
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCheckBadge;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Address Intelligence';
+
     protected static ?string $navigationLabel = 'Validate Address';
 
-    protected static ?int $navigationSort = 5;
+    protected static ?int $navigationSort = 1;
 
     protected string $view = 'filament.pages.validate-address';
 

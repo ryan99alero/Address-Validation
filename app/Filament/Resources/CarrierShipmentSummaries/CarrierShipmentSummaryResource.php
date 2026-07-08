@@ -22,13 +22,13 @@ class CarrierShipmentSummaryResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTruck;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Carrier Invoices';
+    protected static string|UnitEnum|null $navigationGroup = 'Carrier Costs';
 
     protected static ?string $navigationLabel = 'Per-Shipment Costs';
 
     protected static ?string $modelLabel = 'Shipment';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 3;
 
     public static function canCreate(): bool
     {

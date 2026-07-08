@@ -31,9 +31,9 @@ class ExportTemplateBuilder extends Page implements HasSchemas
 
     protected static ?string $navigationLabel = 'Export Template Builder';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Templates';
+    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 20;
 
     protected static ?string $title = 'Export Template Builder';
 

@@ -24,11 +24,11 @@ class FolderIntegrationResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedFolderOpen;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Integrations';
+    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'Folder Integrations';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 12;
 
     protected static ?string $modelLabel = 'Folder Integration';
 

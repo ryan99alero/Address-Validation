@@ -24,13 +24,13 @@ class SqlConnectionResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCircleStack;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Integrations';
+    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'SQL Connections';
 
     protected static ?string $modelLabel = 'SQL Connection';
 
-    protected static ?int $navigationSort = 5;
+    protected static ?int $navigationSort = 14;
 
     public static function form(Schema $schema): Schema
     {

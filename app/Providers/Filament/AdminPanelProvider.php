@@ -33,6 +33,12 @@ class AdminPanelProvider extends PanelProvider
             ->viteTheme('resources/css/filament/admin/theme.css')
             ->login(Login::class)
             ->brandName('Address Validation')
+            ->navigationGroups([
+                'Address Intelligence',
+                'Carrier Costs',
+                'Configuration',
+                'Admin',
+            ])
             ->darkMode(true)
             // Bell (top-right) with an unread-count badge — where completed exports
             // land with a Download link, so no email/mail server is needed.

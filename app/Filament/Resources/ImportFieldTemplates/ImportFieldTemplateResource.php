@@ -22,11 +22,11 @@ class ImportFieldTemplateResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTableCells;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Templates';
+    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'Import Templates';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 22;
 
     public static function form(Schema $schema): Schema
     {
