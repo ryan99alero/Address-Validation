@@ -63,6 +63,13 @@ Schedule::command('reports:rebuild')
 // invoice import), so no nightly pull is needed. `recoup:sync-cartons` remains for manual
 // backfill of invoices imported before this was wired.
 
+// Resolve stuck chargeback pushes (create timed out → outcome unknown) by verifying the [CB:] token
+// in Pace before ever re-posting. Cheap no-op when nothing is stuck; the anti-double-bill safety net.
+Schedule::command('chargebacks:reconcile')
+    ->everyFiveMinutes()
+    ->name('chargebacks-reconcile')
+    ->withoutOverlapping();
+
 // Prune Telescope debug entries nightly (keep 48h). telescope_entries is otherwise the largest
 // table and grows unbounded; Telescope stays on for now but doesn't need weeks of history.
 Schedule::command('telescope:prune --hours=48')

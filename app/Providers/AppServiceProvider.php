@@ -3,11 +3,15 @@
 namespace App\Providers;
 
 use App\Listeners\SpawnWorkerOnJobQueued;
+use App\Models\IntegrationConnection;
 use Carbon\CarbonImmutable;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Queue\Events\JobQueued;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -28,6 +32,20 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureDefaults();
         $this->registerEventListeners();
+        $this->registerRateLimiters();
+    }
+
+    /**
+     * Throttle the JobCost chargeback push to Pace so a big invoice's fan-out can't hammer the ERP.
+     * The ceiling is the Pace connection's editable "Rate Limit (per min)" (blank = unlimited).
+     */
+    protected function registerRateLimiters(): void
+    {
+        RateLimiter::for('pace-chargebacks', function () {
+            $rpm = (int) Cache::remember('pace.rate_limit_per_minute', now()->addMinutes(5), fn () => (int) IntegrationConnection::byDriver(IntegrationConnection::DRIVER_PACE)->active()->value('rate_limit_per_minute'));
+
+            return $rpm > 0 ? Limit::perMinute($rpm) : Limit::none();
+        });
     }
 
     /**

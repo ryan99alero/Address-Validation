@@ -9,6 +9,7 @@ use App\Services\Chargebacks\ChargebackPusher;
 use App\Services\Integrations\PaceApiClient;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -41,6 +42,14 @@ class PushChargeback implements ShouldQueue
     public function backoff(): array
     {
         return [1200, 1800]; // ~20 + 30 min ≈ spread over an hour
+    }
+
+    /**
+     * @return array<int, object>
+     */
+    public function middleware(): array
+    {
+        return [new RateLimited('pace-chargebacks')];
     }
 
     public function handle(ChargebackPusher $pusher): void
