@@ -13,6 +13,7 @@ use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Navigation\NavigationGroup;
 use Filament\Navigation\NavigationItem;
 use Filament\Panel;
 use Filament\PanelProvider;
@@ -42,19 +43,17 @@ class AdminPanelProvider extends PanelProvider
             ->login(Login::class)
             ->brandName('Address Validation')
             ->navigationGroups([
-                'Address Intelligence',
-                'Carrier Costs',
-                'Configuration',
-                'Admin',
+                NavigationGroup::make()->label('Address Intelligence'),
+                NavigationGroup::make()->label('Carrier Costs'),
+                NavigationGroup::make()->label('Configuration'),
+                NavigationGroup::make()->label('Admin'),
+                // Populated per-user in the serving hook below; collapsed so it never grows the
+                // sidebar until you open it — a real menu at the bottom, like the others.
+                NavigationGroup::make()->label('Recent')->collapsed(),
             ])
-            ->sidebarCollapsibleOnDesktop()
             ->renderHook(
                 PanelsRenderHook::SIDEBAR_FOOTER,
                 fn (): string => view('filament.sidebar-environment')->render(),
-            )
-            ->renderHook(
-                PanelsRenderHook::SIDEBAR_NAV_START,
-                fn (): string => view('filament.sidebar-recents')->render(),
             )
             ->bootUsing(function (): void {
                 // Per request (php-fpm), after the spotlight plugin's serving listener populates
@@ -81,6 +80,17 @@ class AdminPanelProvider extends PanelProvider
 
                     Spotlight::$commands = array_merge($commands, Spotlight::$commands);
                     config()->set('livewire-ui-spotlight.show_results_without_input', true);
+
+                    // Surface the same recents as a real, collapsible "Recent" nav group at the
+                    // bottom of the sidebar (added here because auth is available during serving).
+                    Filament::getCurrentPanel()->navigationItems(
+                        $recents->values()->map(fn (RecentItem $item, int $i): NavigationItem => NavigationItem::make($item->label)
+                            ->url(route('recent.go', $item))
+                            ->icon($item->type === RecentItem::TYPE_RECORD ? Heroicon::OutlinedDocument : Heroicon::OutlinedClock)
+                            ->group('Recent')
+                            ->sort($i))
+                            ->all(),
+                    );
                 });
             })
             ->darkMode(true)

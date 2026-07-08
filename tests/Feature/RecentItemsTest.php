@@ -113,3 +113,14 @@ test('a guest hitting the login page records nothing', function () {
 
     expect(RecentItem::count())->toBe(0);
 });
+
+test('recents render as a Recent nav group at the bottom of the sidebar', function () {
+    $user = User::factory()->create(['is_admin' => true]);
+    $this->actingAs($user);
+    $item = seedRecent($user, ['label' => 'Zesty Unique Recent', 'url' => 'http://localhost/adjustments']);
+
+    $this->get(CarrierChargeResource::getUrl('index'))
+        ->assertOk()
+        ->assertSee(route('recent.go', $item), false) // the Recent nav item's link (redirector)
+        ->assertSee('Zesty Unique Recent');           // its label rendered in the sidebar
+});
