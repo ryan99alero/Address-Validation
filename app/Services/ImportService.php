@@ -771,6 +771,11 @@ class ImportService
                 'contains' => [],
                 'regex' => [],
             ],
+            'input_is_residential' => [
+                'exact' => ['residential', 'is residential', 'residential flag', 'residential status', 'res com', 'res/com', 'rescom', 'residential commercial', 'commercial residential', 'rdi', 'address type', 'delivery type', 'location type'],
+                'contains' => ['residential', 'rdi'],
+                'regex' => [],
+            ],
         ];
 
         // Note: 'phone' and 'email' patterns removed - these are not valid Address model fields

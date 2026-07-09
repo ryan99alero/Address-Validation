@@ -25,6 +25,41 @@ class Address extends Model
         });
     }
 
+    /**
+     * Parse a file-supplied residential/commercial value into a boolean — handles Yes/No, R/C,
+     * Residential/Commercial, Home/Business, 1/0. Unrecognized → null.
+     */
+    public static function parseResidential(mixed $value): ?bool
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (in_array($normalized, ['residential', 'res', 'r', 'home', 'y', 'yes', 'true', '1'], true)) {
+            return true;
+        }
+
+        if (in_array($normalized, ['commercial', 'com', 'c', 'business', 'biz', 'b', 'n', 'no', 'false', '0'], true)) {
+            return false;
+        }
+
+        return null;
+    }
+
+    /**
+     * A raw file value like "Yes"/"Commercial"/"R" is parsed on the way in — the boolean cast alone
+     * would treat any non-empty string (incl. "No") as true.
+     */
+    public function setInputIsResidentialAttribute(mixed $value): void
+    {
+        $this->attributes['input_is_residential'] = self::parseResidential($value);
+    }
+
     // Validation source constants
     public const SOURCE_LOCAL_CACHE = 'local_cache';
 
@@ -74,6 +109,7 @@ class Address extends Model
             'can_meet_required_date' => 'boolean',
             'bestway_optimized' => 'boolean',
             'is_residential' => 'boolean',
+            'input_is_residential' => 'boolean',
             'confidence_score' => 'decimal:2',
             'distance_miles' => 'decimal:2',
             'validated_at' => 'datetime',
@@ -99,6 +135,7 @@ class Address extends Model
             'input_state' => 'State/Province',
             'input_postal' => 'Postal/ZIP Code',
             'input_country' => 'Country Code',
+            'input_is_residential' => 'Residential (Y/N)',
             'ship_via_code' => 'Ship Via Code',
             'requested_ship_date' => 'Requested Ship Date',
             'required_on_site_date' => 'Required On-Site Date',

@@ -118,6 +118,7 @@ class ExportService
                 default => '',
             },
             'is_residential' => $address->is_residential === null ? '' : ($address->is_residential ? 'Yes' : 'No'),
+            'input_is_residential' => $address->input_is_residential === null ? '' : ($address->input_is_residential ? 'Yes' : 'No'),
             'classification' => $address->classification,
             'confidence_score' => $address->confidence_score ? number_format($address->confidence_score * 100, 0).'%' : null,
             'carrier' => $address->validatedByCarrier?->name,
