@@ -754,6 +754,23 @@ class ImportService
                 'contains' => ['reference', 'order', 'invoice', 'ticket'],
                 'regex' => ['/^(?:order|ref|po|job|ticket)[\s_-]*(?:id|num(?:ber)?)?$/i'],
             ],
+            // NB: normalizeHeader() strips a leading "ship "/"shipping " and splits camelCase, so
+            // "ShipViaCode"/"Ship Via Code" both arrive here as "via code" (no "ship").
+            'ship_via_code' => [
+                'exact' => ['ship via code', 'shipvia code', 'via code', 'ship via', 'shipvia', 'via', 'ship method', 'shipping method', 'ship service', 'service code', 'service type', 'service', 'method', 'carrier service', 'delivery method', 'ship type'],
+                'contains' => ['via code', 'shipvia'],
+                'regex' => ['/^(?:ship\s*)?via(?:\s*code)?$/', '/^(?:ship\s*)?(?:method|service)(?:\s*(?:code|type))?$/'],
+            ],
+            'required_on_site_date' => [
+                'exact' => ['required on site date', 'required onsite date', 'on site date', 'onsite date', 'on site', 'onsite', 'need by date', 'needed by date', 'in home date', 'in hands date', 'inhands date', 'in home', 'in hands', 'due date', 'arrival date', 'must arrive by'],
+                'contains' => ['on site', 'onsite', 'in home', 'in hands'],
+                'regex' => ['/on\s*site/', '/in\s*(?:home|hands)/'],
+            ],
+            'requested_ship_date' => [
+                'exact' => ['requested ship date', 'requested date', 'ship date', 'shipdate', 'date'],
+                'contains' => [],
+                'regex' => [],
+            ],
         ];
 
         // Note: 'phone' and 'email' patterns removed - these are not valid Address model fields
