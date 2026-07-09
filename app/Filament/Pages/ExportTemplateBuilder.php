@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Clusters\Templates\TemplatesCluster;
+use App\Filament\Resources\ExportTemplates\ExportTemplateResource;
 use App\Models\CompanySetting;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
@@ -494,7 +495,7 @@ class ExportTemplateBuilder extends Page implements HasSchemas
                 ->send();
 
             // Redirect to template list
-            $this->redirect(route('filament.admin.resources.export-templates.index'));
+            $this->redirect(ExportTemplateResource::getUrl('index'));
 
         } catch (\Exception $e) {
             Notification::make()

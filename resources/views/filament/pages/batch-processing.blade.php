@@ -710,7 +710,7 @@
                 <div class="mt-4 flex gap-3">
                     <x-filament::button
                         tag="a"
-                        href="{{ route('filament.admin.resources.export-templates.create') }}"
+                        href="{{ \App\Filament\Resources\ExportTemplates\ExportTemplateResource::getUrl('create') }}"
                         color="primary"
                         icon="heroicon-o-plus"
                     >
@@ -718,7 +718,7 @@
                     </x-filament::button>
                     <x-filament::button
                         tag="a"
-                        href="{{ route('filament.admin.resources.export-templates.index') }}"
+                        href="{{ \App\Filament\Resources\ExportTemplates\ExportTemplateResource::getUrl('index') }}"
                         color="gray"
                         icon="heroicon-o-cog-6-tooth"
                     >
