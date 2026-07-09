@@ -13,6 +13,7 @@ use App\Models\ImportFieldTemplate;
 use App\Services\ImportService;
 use BackedEnum;
 use Filament\Forms\Components\Checkbox;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -214,8 +215,15 @@ class BatchProcessing extends Page implements HasSchemas
                         Checkbox::make('find_best_service')
                             ->label('Find Best Service (BestWay Optimization)')
                             ->default(false)
+                            ->live()
                             ->visible(fn ($get) => $get('include_transit_times'))
                             ->helperText('Automatically select the most economical shipping service that meets the Required On-Site Date. Original ShipVia will be preserved in Previous_ShipViaCode.'),
+                        DatePicker::make('default_on_site_date')
+                            ->label('On-Site Date (applies to all orders)')
+                            ->native(false)
+                            ->closeOnDateSelection()
+                            ->visible(fn ($get) => $get('include_transit_times') && $get('find_best_service'))
+                            ->helperText('One date for the whole batch. Any row that has its own Required On-Site Date in the file overrides this.'),
                     ]),
             ])
             ->statePath('uploadData');
@@ -383,6 +391,7 @@ class BatchProcessing extends Page implements HasSchemas
                 'origin_postal_code' => $data['origin_postal_code'] ?? null,
                 'origin_country_code' => 'US',
                 'find_best_service' => $data['find_best_service'] ?? false,
+                'default_on_site_date' => $data['default_on_site_date'] ?? null,
                 'imported_by' => auth()->id(),
             ]);
 

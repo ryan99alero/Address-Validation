@@ -7,6 +7,7 @@ use App\Models\ImportBatch;
 use App\Models\ShipViaCode;
 use App\Services\ImportService;
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -34,6 +35,25 @@ class ProcessImportBatchImport implements ShouldQueue
         public array $mappings,
         public bool $autoValidate = true
     ) {}
+
+    /**
+     * BestWay optimization: when the batch has a single On-Site Date entered on the import GUI, fill
+     * it in for any row that did not supply its own Required On-Site Date. A per-row value from the
+     * file always wins (it is already set on $addressData by this point). ?CarbonInterface (not
+     * Carbon) — the model casts dates to CarbonImmutable, which is NOT a Carbon\Carbon, so a Carbon
+     * hint would silently skip the fallback.
+     *
+     * @param  array<string, mixed>  $addressData
+     * @return array<string, mixed>
+     */
+    public static function applyDefaultOnSiteDate(array $addressData, ?CarbonInterface $default): array
+    {
+        if (empty($addressData['required_on_site_date']) && $default !== null) {
+            $addressData['required_on_site_date'] = $default->toDateString();
+        }
+
+        return $addressData;
+    }
 
     public function handle(): void
     {
@@ -263,6 +283,9 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
 
                 // Sanitize date fields - handle Excel formulas and invalid values
                 $addressData = $this->sanitizeDateFields($addressData);
+
+                // BestWay: fall back to the batch-wide On-Site Date for rows with none of their own.
+                $addressData = ProcessImportBatchImport::applyDefaultOnSiteDate($addressData, $this->batch->default_on_site_date);
 
                 // Only create if we have input_address_1
                 if (! empty($addressData['input_address_1'])) {
