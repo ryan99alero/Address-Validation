@@ -37,19 +37,18 @@ class ProcessImportBatchImport implements ShouldQueue
     ) {}
 
     /**
-     * BestWay optimization: when the batch has a single On-Site Date entered on the import GUI, fill
-     * it in for any row that did not supply its own Required On-Site Date. A per-row value from the
-     * file always wins (it is already set on $addressData by this point). ?CarbonInterface (not
-     * Carbon) — the model casts dates to CarbonImmutable, which is NOT a Carbon\Carbon, so a Carbon
-     * hint would silently skip the fallback.
+     * BestWay: when the batch carries a single GUI date (Ship Date or On-Site Date), fill it into any
+     * row that did not supply its own — a per-row value from the file always wins (it is already set
+     * on $addressData by this point). ?CarbonInterface (not Carbon) — the model casts dates to
+     * CarbonImmutable, which is NOT a Carbon\Carbon, so a Carbon hint would silently skip the fill.
      *
      * @param  array<string, mixed>  $addressData
      * @return array<string, mixed>
      */
-    public static function applyDefaultOnSiteDate(array $addressData, ?CarbonInterface $default): array
+    public static function applyBatchDateDefault(array $addressData, string $field, ?CarbonInterface $default): array
     {
-        if (empty($addressData['required_on_site_date']) && $default !== null) {
-            $addressData['required_on_site_date'] = $default->toDateString();
+        if (empty($addressData[$field]) && $default !== null) {
+            $addressData[$field] = $default->toDateString();
         }
 
         return $addressData;
@@ -284,8 +283,10 @@ class ChunkedAddressImporter implements ToArray, WithChunkReading, WithHeadingRo
                 // Sanitize date fields - handle Excel formulas and invalid values
                 $addressData = $this->sanitizeDateFields($addressData);
 
-                // BestWay: fall back to the batch-wide On-Site Date for rows with none of their own.
-                $addressData = ProcessImportBatchImport::applyDefaultOnSiteDate($addressData, $this->batch->default_on_site_date);
+                // BestWay: fall back to the batch-wide Ship Date / On-Site Date for rows with none of
+                // their own (a per-row file value always wins).
+                $addressData = ProcessImportBatchImport::applyBatchDateDefault($addressData, 'required_on_site_date', $this->batch->default_on_site_date);
+                $addressData = ProcessImportBatchImport::applyBatchDateDefault($addressData, 'requested_ship_date', $this->batch->default_ship_date);
 
                 // Only create if we have input_address_1
                 if (! empty($addressData['input_address_1'])) {

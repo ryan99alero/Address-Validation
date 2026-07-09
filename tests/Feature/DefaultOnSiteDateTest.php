@@ -11,27 +11,28 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-it('fills the batch On-Site Date only when a row has none of its own', function () {
-    $default = Carbon::parse('2026-08-15');
+it('fills a batch date default (on-site or ship) only when a row has none of its own', function () {
+    $onSite = Carbon::parse('2026-08-15');
+    $ship = Carbon::parse('2026-08-10');
 
-    // Row without its own date → gets the batch-wide default.
-    $filled = ProcessImportBatchImport::applyDefaultOnSiteDate(['input_address_1' => 'x'], $default);
-    expect($filled['required_on_site_date'])->toBe('2026-08-15');
+    // On-Site Date: row without its own → gets the batch default; row with a file value → kept.
+    expect(ProcessImportBatchImport::applyBatchDateDefault(['input_address_1' => 'x'], 'required_on_site_date', $onSite)['required_on_site_date'])->toBe('2026-08-15')
+        ->and(ProcessImportBatchImport::applyBatchDateDefault(['required_on_site_date' => '2026-09-01'], 'required_on_site_date', $onSite)['required_on_site_date'])->toBe('2026-09-01');
 
-    // Row with its own file date → the file value wins (unchanged).
-    $kept = ProcessImportBatchImport::applyDefaultOnSiteDate(['required_on_site_date' => '2026-09-01'], $default);
-    expect($kept['required_on_site_date'])->toBe('2026-09-01');
+    // Ship Date behaves identically.
+    expect(ProcessImportBatchImport::applyBatchDateDefault(['input_address_1' => 'x'], 'requested_ship_date', $ship)['requested_ship_date'])->toBe('2026-08-10')
+        ->and(ProcessImportBatchImport::applyBatchDateDefault(['requested_ship_date' => '2026-08-12'], 'requested_ship_date', $ship)['requested_ship_date'])->toBe('2026-08-12');
 
-    // No batch default → nothing is added.
-    $none = ProcessImportBatchImport::applyDefaultOnSiteDate(['input_address_1' => 'x'], null);
-    expect($none)->not->toHaveKey('required_on_site_date');
+    // No batch default → nothing added.
+    expect(ProcessImportBatchImport::applyBatchDateDefault(['input_address_1' => 'x'], 'required_on_site_date', null))->not->toHaveKey('required_on_site_date');
 });
 
-it('casts the batch default_on_site_date to a date', function () {
-    $batch = new ImportBatch(['default_on_site_date' => '2026-08-15']);
+it('casts the batch default ship + on-site dates to dates', function () {
+    $batch = new ImportBatch(['default_on_site_date' => '2026-08-15', 'default_ship_date' => '2026-08-10']);
 
     expect($batch->default_on_site_date)->toBeInstanceOf(CarbonInterface::class)
-        ->and($batch->default_on_site_date->toDateString())->toBe('2026-08-15');
+        ->and($batch->default_on_site_date->toDateString())->toBe('2026-08-15')
+        ->and($batch->default_ship_date->toDateString())->toBe('2026-08-10');
 });
 
 it('renders the batch import form with the new On-Site Date field', function () {

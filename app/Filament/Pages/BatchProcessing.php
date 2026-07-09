@@ -218,12 +218,16 @@ class BatchProcessing extends Page implements HasSchemas
                             ->live()
                             ->visible(fn ($get) => $get('include_transit_times'))
                             ->helperText('Automatically select the most economical shipping service that meets the Required On-Site Date. Original ShipVia will be preserved in Previous_ShipViaCode.'),
+                        DatePicker::make('default_ship_date')
+                            ->label('Ship Date (applies to all orders)')
+                            ->native(true) // native browser date input — emits plain Y-m-d, no timezone shift
+                            ->visible(fn ($get) => $get('include_transit_times') && $get('find_best_service'))
+                            ->helperText('When the batch ships — the transit clock starts here. A Ship Date column in the file overrides this per row. Defaults to today if left blank.'),
                         DatePicker::make('default_on_site_date')
                             ->label('On-Site Date (applies to all orders)')
-                            ->native(false)
-                            ->closeOnDateSelection()
+                            ->native(true)
                             ->visible(fn ($get) => $get('include_transit_times') && $get('find_best_service'))
-                            ->helperText('One date for the whole batch. Any row that has its own Required On-Site Date in the file overrides this.'),
+                            ->helperText('Deliver-by deadline. A Required On-Site Date column in the file overrides this per row.'),
                     ]),
             ])
             ->statePath('uploadData');
@@ -392,6 +396,7 @@ class BatchProcessing extends Page implements HasSchemas
                 'origin_country_code' => 'US',
                 'find_best_service' => $data['find_best_service'] ?? false,
                 'default_on_site_date' => $data['default_on_site_date'] ?? null,
+                'default_ship_date' => $data['default_ship_date'] ?? null,
                 'imported_by' => auth()->id(),
             ]);
 
