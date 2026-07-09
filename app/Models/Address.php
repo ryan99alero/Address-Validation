@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\PostalCode;
 use Database\Factories\AddressFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,6 +13,17 @@ class Address extends Model
 {
     /** @use HasFactory<AddressFactory> */
     use HasFactory;
+
+    /**
+     * Repair Excel-truncated US ship-to ZIPs (dropped leading zeros) on every save — the single
+     * choke point covering all standardization entry points (batch import, single validation, Pace).
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (Address $address): void {
+            $address->input_postal = PostalCode::normalizeUs($address->input_postal, $address->input_country);
+        });
+    }
 
     // Validation source constants
     public const SOURCE_LOCAL_CACHE = 'local_cache';
