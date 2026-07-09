@@ -11,7 +11,6 @@ use Illuminate\Console\Command;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Postal\Parser;
 
 /**
  * Answers "is Smarty worth paying for over the UPS/FedEx APIs we already have?" — takes real invoice
@@ -25,8 +24,6 @@ class CompareAddressCorrectionApis extends Command
         {--per-carrier=50 : bad addresses from each of UPS and FedEx invoices}
         {--units=20 : of the total, how many must involve a secondary unit (Suite/Bldg/Apt)}
         {--sleep=250 : ms between API calls}
-        {--normalize : preprocess each address through libpostal before validating (Arm B)}
-        {--from-csv= : reuse the exact line ids from a prior run CSV (same 100 for a fair A/B)}
         {--select-only : show the selected sample only, make no API calls}';
 
     protected $description = 'Compare Smarty vs UPS vs FedEx address-correction APIs against real invoice corrections';
@@ -55,13 +52,6 @@ class CompareAddressCorrectionApis extends Command
             return self::SUCCESS;
         }
 
-        $normalize = (bool) $this->option('normalize');
-        if ($normalize && ! class_exists(Parser::class)) {
-            $this->error('libpostal not loaded. Run with:  php -d extension=postal.so artisan address:compare-apis --normalize ...');
-
-            return self::FAILURE;
-        }
-
         $carriers = [
             'smarty' => (new SmartyCarrier)->setCarrier(Carrier::where('slug', 'smarty')->firstOrFail()),
             'fedex' => (new FedExCarrier)->setCarrier(Carrier::where('slug', 'fedex')->firstOrFail()),
@@ -78,23 +68,17 @@ class CompareAddressCorrectionApis extends Command
             $truthZip = $this->zip5($line->corrected_postal);
             $hasUnit = filled($line->corrected_address_2) || filled($line->original_address_2);
 
-            $input = $normalize ? $this->libpostalNormalize($line) : [
-                'a1' => $line->original_address_1, 'a2' => $line->original_address_2, 'city' => $line->original_city,
-                'state' => $line->original_state, 'postal' => $line->original_postal, 'country' => $line->original_country ?: 'US',
-            ];
-
             $row = [
                 'id' => $line->id,
                 'source' => strtoupper($line->slug),
                 'change_type' => $line->change_type,
                 'has_unit' => $hasUnit ? 'Y' : '',
                 'original' => $this->fmt($line->original_address_1, $line->original_address_2, $line->original_city, $line->original_state, $line->original_postal),
-                'fed_input' => $this->fmt($input['a1'], $input['a2'], $input['city'], $input['state'], $input['postal']),
                 'invoice_correction' => $this->fmt($line->corrected_address_1, $line->corrected_address_2, $line->corrected_city, $line->corrected_state, $line->corrected_postal),
             ];
 
             foreach ($carriers as $name => $carrier) {
-                $r = $this->runCarrier($carrier, $input, $sleepUs);
+                $r = $this->runCarrier($carrier, $line, $sleepUs);
                 $row[$name] = $r['ok'] ? $this->fmt($r['a1'], $r['a2'], $r['city'], $r['state'], $r['postal']) : 'ERR: '.$r['err'];
                 $row[$name.'_match'] = ! $r['ok'] ? 'ERR'
                     : ($this->canon($r['a1'], $r['a2'], $r['city'], $r['state'], $r['postal']) === $truth ? 'FULL'
@@ -116,19 +100,16 @@ class CompareAddressCorrectionApis extends Command
         return self::SUCCESS;
     }
 
-    /**
-     * @param  array{a1:?string,a2:?string,city:?string,state:?string,postal:?string,country:?string}  $input
-     * @return array{ok:bool,err:?string,a1:?string,a2:?string,city:?string,state:?string,postal:?string}
-     */
-    private function runCarrier(object $carrier, array $input, int $sleepUs): array
+    /** @return array{ok:bool,err:?string,a1:?string,a2:?string,city:?string,state:?string,postal:?string} */
+    private function runCarrier(object $carrier, object $line, int $sleepUs): array
     {
         $address = Address::create([
-            'input_address_1' => $input['a1'],
-            'input_address_2' => $input['a2'],
-            'input_city' => $input['city'],
-            'input_state' => $input['state'],
-            'input_postal' => $input['postal'],
-            'input_country' => $input['country'] ?: 'US',
+            'input_address_1' => $line->original_address_1,
+            'input_address_2' => $line->original_address_2,
+            'input_city' => $line->original_city,
+            'input_state' => $line->original_state,
+            'input_postal' => $line->original_postal,
+            'input_country' => $line->original_country ?: 'US',
             'validation_status' => 'pending',
         ]);
 
@@ -148,74 +129,8 @@ class CompareAddressCorrectionApis extends Command
         return $result;
     }
 
-    /**
-     * Arm B: re-parse the (often mangled) invoice address with libpostal, then rebuild clean input
-     * fields — crucially with the unit in its OWN field instead of jammed into the street line.
-     *
-     * @return array{a1:string,a2:?string,city:string,state:?string,postal:?string,country:string}
-     */
-    private function libpostalNormalize(object $line): array
-    {
-        $raw = trim(implode(' ', array_filter([
-            $line->original_address_1, $line->original_address_2, $line->original_city, $line->original_state, $line->original_postal,
-        ])));
-
-        $c = [];
-        foreach (Parser::parse_address($raw) as $part) {
-            $c[$part['label']][] = $part['value'];
-        }
-        $first = fn (string $k): ?string => isset($c[$k]) ? trim($c[$k][0]) : null;
-        $join = fn (string $k): ?string => isset($c[$k]) ? trim(implode(' ', $c[$k])) : null;
-
-        $street = trim(implode(' ', array_filter([$first('house_number'), $join('road')])));
-        $unit = $join('unit');
-
-        return [
-            'a1' => strtoupper($street ?: (string) $line->original_address_1),
-            'a2' => $unit ? strtoupper($unit) : null,
-            'city' => strtoupper((string) ($first('city') ?? $line->original_city)),
-            'state' => $this->stateCode($first('state') ?? (string) $line->original_state),
-            'postal' => $first('postcode') ?? $line->original_postal,
-            'country' => 'US',
-        ];
-    }
-
-    private function stateCode(?string $state): ?string
-    {
-        if (! $state) {
-            return null;
-        }
-        $s = strtoupper(trim($state));
-        if (strlen($s) === 2) {
-            return $s;
-        }
-
-        static $map = [
-            'ALABAMA' => 'AL', 'ALASKA' => 'AK', 'ARIZONA' => 'AZ', 'ARKANSAS' => 'AR', 'CALIFORNIA' => 'CA',
-            'COLORADO' => 'CO', 'CONNECTICUT' => 'CT', 'DELAWARE' => 'DE', 'FLORIDA' => 'FL', 'GEORGIA' => 'GA',
-            'HAWAII' => 'HI', 'IDAHO' => 'ID', 'ILLINOIS' => 'IL', 'INDIANA' => 'IN', 'IOWA' => 'IA',
-            'KANSAS' => 'KS', 'KENTUCKY' => 'KY', 'LOUISIANA' => 'LA', 'MAINE' => 'ME', 'MARYLAND' => 'MD',
-            'MASSACHUSETTS' => 'MA', 'MICHIGAN' => 'MI', 'MINNESOTA' => 'MN', 'MISSISSIPPI' => 'MS', 'MISSOURI' => 'MO',
-            'MONTANA' => 'MT', 'NEBRASKA' => 'NE', 'NEVADA' => 'NV', 'NEW HAMPSHIRE' => 'NH', 'NEW JERSEY' => 'NJ',
-            'NEW MEXICO' => 'NM', 'NEW YORK' => 'NY', 'NORTH CAROLINA' => 'NC', 'NORTH DAKOTA' => 'ND', 'OHIO' => 'OH',
-            'OKLAHOMA' => 'OK', 'OREGON' => 'OR', 'PENNSYLVANIA' => 'PA', 'RHODE ISLAND' => 'RI', 'SOUTH CAROLINA' => 'SC',
-            'SOUTH DAKOTA' => 'SD', 'TENNESSEE' => 'TN', 'TEXAS' => 'TX', 'UTAH' => 'UT', 'VERMONT' => 'VT',
-            'VIRGINIA' => 'VA', 'WASHINGTON' => 'WA', 'WEST VIRGINIA' => 'WV', 'WISCONSIN' => 'WI', 'WYOMING' => 'WY',
-            'DISTRICT OF COLUMBIA' => 'DC',
-        ];
-
-        return $map[$s] ?? $s;
-    }
-
     private function select(int $perCarrier, int $units): Collection
     {
-        if ($csv = $this->option('from-csv')) {
-            $rows = array_map('str_getcsv', file($csv, FILE_SKIP_EMPTY_LINES));
-            array_shift($rows); // header
-
-            return $this->hydrate(collect($rows)->pluck(0)->filter()->map(fn ($v) => (int) $v));
-        }
-
         $unitsPer = intdiv($units, 2);
         $ids = collect();
 
@@ -231,11 +146,6 @@ class CompareAddressCorrectionApis extends Command
             $ids = $ids->merge($withUnit)->merge($rest);
         }
 
-        return $this->hydrate($ids);
-    }
-
-    private function hydrate(Collection $ids): Collection
-    {
         return collect(DB::table('carrier_invoice_lines as l')
             ->join('carrier_invoices as i', 'i.id', '=', 'l.carrier_invoice_id')
             ->join('carriers as c', 'c.id', '=', 'i.carrier_id')
