@@ -71,6 +71,7 @@ class ImportBatch extends Model
         'find_best_service',
         'default_on_site_date',
         'default_ship_date',
+        'bestway_plant_id',
         'ship_via_code_column',
         'error_file_path',
         'export_file_path',

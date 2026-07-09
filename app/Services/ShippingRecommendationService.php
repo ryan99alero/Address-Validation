@@ -516,7 +516,7 @@ class ShippingRecommendationService
      *
      * Returns true if optimization was applied, false otherwise.
      */
-    public function applyBestWayOptimization(Address $address): bool
+    public function applyBestWayOptimization(Address $address, ?string $plantOverride = null): bool
     {
         // Must have a required on-site date to optimize
         if (! $address->required_on_site_date) {
@@ -548,7 +548,7 @@ class ShippingRecommendationService
             ? $address->shipViaCodeRecord
             : ShipViaCode::lookup($address->ship_via_code);
 
-        $plantId = $originalShipViaCode?->plant_id;
+        $plantId = $plantOverride ?: $originalShipViaCode?->plant_id;
         $paymentType = $originalShipViaCode?->payment_type;
         $accountNumber = $originalShipViaCode?->account_number;
 
@@ -624,7 +624,7 @@ class ShippingRecommendationService
      * @param  Collection<int, Address>  $addresses
      * @return array{processed: int, optimized: int, already_optimal: int, no_viable_service: int, no_matching_code: int}
      */
-    public function applyBestWayOptimizationBatch(Collection $addresses): array
+    public function applyBestWayOptimizationBatch(Collection $addresses, ?string $plantOverride = null): array
     {
         $processed = 0;
         $optimized = 0;
@@ -669,7 +669,7 @@ class ShippingRecommendationService
                 ? $address->shipViaCodeRecord
                 : ShipViaCode::lookup($address->ship_via_code);
 
-            $plantId = $originalShipViaCode?->plant_id;
+            $plantId = $plantOverride ?: $originalShipViaCode?->plant_id;
             $paymentType = $originalShipViaCode?->payment_type;
             $accountNumber = $originalShipViaCode?->account_number;
 

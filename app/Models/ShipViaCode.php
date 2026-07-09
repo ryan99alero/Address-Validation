@@ -179,8 +179,12 @@ class ShipViaCode extends Model
      * Checks all possible code fields for a match.
      * Returns the matching ShipViaCode or null.
      */
-    public static function lookup(string $code): ?self
+    public static function lookup(?string $code): ?self
     {
+        if ($code === null || trim($code) === '') {
+            return null;
+        }
+
         $upperCode = strtoupper($code);
 
         // First try exact match on user's custom code (case-sensitive)
