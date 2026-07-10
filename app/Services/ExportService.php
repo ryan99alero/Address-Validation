@@ -128,6 +128,10 @@ class ExportService
             'requested_ship_date' => $address->requested_ship_date?->format('Y-m-d'),
             'required_on_site_date' => $address->required_on_site_date?->format('Y-m-d'),
 
+            // Reverse scheduling: latest ship date + cheapest on-time service
+            'recommended_ship_date' => $address->recommended_ship_date?->format('Y-m-d'),
+            'recommended_ship_service' => $address->recommended_ship_service,
+
             // Ship via fields (directly on address)
             'ship_via_code' => $address->ship_via_code,
             'previous_ship_via_code' => $address->previous_ship_via_code,

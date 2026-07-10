@@ -117,6 +117,8 @@ class ExportTemplate extends Model
             'recommended_service' => 'Recommended Service',
             'estimated_delivery_date' => 'Estimated Delivery Date',
             'can_meet_required_date' => 'Can Meet Required Date',
+            'recommended_ship_date' => 'Recommended Ship Date (reverse scheduled)',
+            'recommended_ship_service' => 'Recommended Ship Service (reverse scheduled)',
 
             // Alternative suggestion when ship_via doesn't meet deadline
             'suggested_service' => 'Suggested Service (Alternative)',

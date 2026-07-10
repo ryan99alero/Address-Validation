@@ -99,6 +99,7 @@ class Address extends Model
     {
         return [
             'requested_ship_date' => 'date',
+            'recommended_ship_date' => 'date',
             'required_on_site_date' => 'date',
             'ship_via_date' => 'date',
             'fastest_date' => 'date',

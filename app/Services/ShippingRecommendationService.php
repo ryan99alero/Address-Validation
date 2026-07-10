@@ -766,6 +766,130 @@ class ShippingRecommendationService
     }
 
     /**
+     * Reverse scheduling ("arrive on the exact date"): for an address with a
+     * required on-site date, work backward to the LATEST ship date and CHEAPEST
+     * service that still arrives on time.
+     *
+     * Approach: each service's worst-case transit duration (business days) is
+     * inverted from the required date to a latest ship date. The cheapest service
+     * whose latest ship date is not already in the past (>= $floor) wins. Sets
+     * recommended_ship_date + recommended_ship_service.
+     *
+     * Limitations (honest): duration is business-day based and holiday-naive, and
+     * taken from a single anchor probe — there is no live re-probe at the computed
+     * ship date. Good for planning; not a booking guarantee.
+     */
+    public function applyReverseSchedule(Address $address, ?CarbonInterface $floor = null): bool
+    {
+        $transitTimes = $address->relationLoaded('transitTimes')
+            ? $address->transitTimes
+            : $address->transitTimes()->get();
+
+        $changed = $this->computeReverseSchedule($address, $transitTimes, $floor);
+        $address->save();
+
+        return $changed;
+    }
+
+    /**
+     * Reverse-schedule many addresses with a single bulk update.
+     *
+     * @param  Collection<int, Address>  $addresses
+     * @return array{processed: int, scheduled: int, cannot_meet: int}
+     */
+    public function applyReverseScheduleBatch(Collection $addresses, ?CarbonInterface $floor = null): array
+    {
+        $processed = 0;
+        $scheduled = 0;
+        $cannotMeet = 0;
+        $updates = [];
+
+        foreach ($addresses as $address) {
+            $processed++;
+
+            $transitTimes = $address->relationLoaded('transitTimes')
+                ? $address->transitTimes
+                : $address->transitTimes()->get();
+
+            $this->computeReverseSchedule($address, $transitTimes, $floor);
+
+            if ($address->recommended_ship_date) {
+                $scheduled++;
+            } elseif ($address->required_on_site_date) {
+                $cannotMeet++;
+            }
+
+            if ($address->isDirty(['recommended_ship_date', 'recommended_ship_service'])) {
+                $updates[$address->id] = [
+                    'recommended_ship_date' => $address->recommended_ship_date,
+                    'recommended_ship_service' => $address->recommended_ship_service,
+                ];
+            }
+        }
+
+        foreach ($updates as $addressId => $data) {
+            Address::where('id', $addressId)->update($data);
+        }
+
+        return ['processed' => $processed, 'scheduled' => $scheduled, 'cannot_meet' => $cannotMeet];
+    }
+
+    /**
+     * Core reverse-schedule computation (no save). Returns true when a ship date
+     * was set. Clears the fields when there is no required date / no viable service.
+     *
+     * @param  Collection<int, TransitTime>  $transitTimes
+     */
+    protected function computeReverseSchedule(Address $address, Collection $transitTimes, ?CarbonInterface $floor = null): bool
+    {
+        $address->recommended_ship_date = null;
+        $address->recommended_ship_service = null;
+
+        if (! $address->required_on_site_date || $transitTimes->isEmpty()) {
+            return false;
+        }
+
+        $required = $address->required_on_site_date->startOfDay();
+        $floor = ($floor ?? now())->startOfDay();
+
+        // Candidate = [service, latestShipDate], keeping only services that can
+        // still be shipped on or after the floor and arrive by the required date.
+        $candidates = $transitTimes
+            ->map(function (TransitTime $tt) use ($required) {
+                $duration = $tt->transitBusinessDays();
+                if ($duration === null) {
+                    return null;
+                }
+
+                return [
+                    'tt' => $tt,
+                    'ship_date' => $required->copy()->subWeekdays($duration),
+                ];
+            })
+            ->filter()
+            ->filter(fn (array $c): bool => $c['ship_date']->gte($floor));
+
+        if ($candidates->isEmpty()) {
+            return false;
+        }
+
+        // Cheapest service among the viable candidates (ties → latest ship date).
+        $best = $candidates
+            ->sortBy(fn (array $c): array => [
+                self::SERVICE_COST_RANK[$c['tt']->service_type] ?? 100,
+                -$c['ship_date']->timestamp,
+            ])
+            ->first();
+
+        $address->recommended_ship_date = $best['ship_date'];
+        $address->recommended_ship_service = $this->sanitizeServiceName(
+            $best['tt']->service_name ?: $best['tt']->service_type
+        );
+
+        return true;
+    }
+
+    /**
      * Get the standard shipping code for a service type.
      */
     protected function getServiceCodeForType(string $serviceType): ?string

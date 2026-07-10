@@ -223,13 +223,18 @@ describe('Address change summary', function () {
     it('is empty when nothing changed', function () {
         $address = Address::factory()->create([
             'input_address_1' => '123 Main St',
+            'input_address_2' => null,
             'input_city' => 'Springfield',
             'input_state' => 'IL',
             'input_postal' => '62701',
             'output_address_1' => '123 Main St',
+            'output_address_2' => null,
             'output_city' => 'Springfield',
             'output_state' => 'IL',
             'output_postal' => '62701',
+            'input_is_residential' => null,
+            'is_residential' => null,
+            'bestway_optimized' => false,
         ]);
 
         expect($address->change_summary)->toBe('');

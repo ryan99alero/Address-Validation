@@ -287,6 +287,9 @@ class ProcessExportBatch implements ShouldQueue
             ['field' => 'ground_service', 'header' => 'Ground Service'],
             ['field' => 'ground_date', 'header' => 'Ground Delivery Date'],
             ['field' => 'distance_miles', 'header' => 'Distance (Miles)'],
+            // Reverse scheduling: latest ship date + cheapest on-time service
+            ['field' => 'recommended_ship_date', 'header' => 'Recommended Ship Date'],
+            ['field' => 'recommended_ship_service', 'header' => 'Recommended Ship Service'],
             // BestWay optimization fields
             ['field' => 'previous_ship_via_code', 'header' => 'Previous Ship Via Code'],
             ['field' => 'bestway_optimized', 'header' => 'BestWay Optimized'],
