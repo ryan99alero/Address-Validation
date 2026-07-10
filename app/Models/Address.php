@@ -228,9 +228,10 @@ class Address extends Model
     }
 
     /**
-     * Human-readable, semicolon-separated summary of what changed for this address.
-     * Reconstructed from stored input vs output values — used as an export column so a
-     * user can see at a glance why a row was touched. Empty string when nothing changed.
+     * Address-cleansing summary: only the fields that changed, as "Header: newValue"
+     * (e.g. "City: Broskeville, Zip: 66823"). Blank when nothing changed. Feeds the
+     * AddressCleansingComment column. Address corrections only — service/ship-date
+     * changes live in ship_method_comment.
      */
     public function getChangeSummaryAttribute(): string
     {
@@ -239,36 +240,53 @@ class Address extends Model
         if ($this->output_address_1 !== null
             && ($this->output_address_1 !== $this->input_address_1
                 || (string) $this->output_address_2 !== (string) $this->input_address_2)) {
-            $changes[] = 'Street corrected';
+            $changes[] = 'Address: '.trim($this->output_address_1.' '.$this->output_address_2);
         }
 
         if ($this->output_city !== null && $this->output_city !== $this->input_city) {
-            $changes[] = 'City corrected';
+            $changes[] = 'City: '.$this->output_city;
         }
 
         if ($this->output_state !== null && $this->output_state !== $this->input_state) {
-            $changes[] = 'State corrected';
+            $changes[] = 'State: '.$this->output_state;
         }
 
         if ($this->output_postal !== null && $this->output_postal !== $this->input_postal) {
-            $changes[] = "ZIP {$this->input_postal}→{$this->output_postal}";
+            $changes[] = 'Zip: '.$this->output_postal;
         }
 
-        if ($this->input_is_residential !== null
-            && $this->is_residential !== null
-            && (bool) $this->input_is_residential !== (bool) $this->is_residential) {
-            $from = $this->input_is_residential ? 'Residential' : 'Commercial';
-            $to = $this->is_residential ? 'Residential' : 'Commercial';
-            $changes[] = "{$from}→{$to}";
+        return implode(', ', $changes);
+    }
+
+    /**
+     * Readable recap of the ship-method/date decision for the ShipMethodComment
+     * column, e.g. "FedEx Standard Overnight, ship 07/14/2026, arrive 07/15/2026
+     * (was 5133)". Blank when BestWay didn't run; a clear note when no on-account
+     * service could meet the in-store date.
+     */
+    public function getShipMethodCommentAttribute(): string
+    {
+        if ($this->ship_via_meets_deadline === false && ! $this->bestway_optimized) {
+            return 'No same-account service meets the in-store date';
         }
 
-        if ($this->bestway_optimized
-            && filled($this->previous_ship_via_code)
-            && $this->previous_ship_via_code !== $this->ship_via_code) {
-            $changes[] = "BestWay: {$this->previous_ship_via_code}→{$this->ship_via_code}";
+        if (! $this->bestway_optimized) {
+            return '';
         }
 
-        return implode('; ', $changes);
+        $parts = array_filter([
+            $this->ship_via_service,
+            $this->recommended_ship_date ? 'ship '.$this->recommended_ship_date->format('m/d/Y') : null,
+            $this->ship_via_date ? 'arrive '.$this->ship_via_date->format('m/d/Y') : null,
+        ]);
+
+        $comment = implode(', ', $parts);
+
+        if (filled($this->previous_ship_via_code) && $this->previous_ship_via_code !== $this->ship_via_code) {
+            $comment .= " (was {$this->previous_ship_via_code})";
+        }
+
+        return $comment;
     }
 
     /**

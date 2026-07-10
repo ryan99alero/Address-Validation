@@ -342,18 +342,10 @@ class ProcessImportBatchValidation implements ShouldQueue
             'with_suggestions' => $result['with_suggestions'],
         ]);
 
-        // Reverse scheduling: for addresses with a required on-site date, compute the
-        // latest ship date + cheapest service that still arrives on time.
-        $withRequiredDate = $addressesWithTransitTimes->filter(fn ($a) => $a->required_on_site_date !== null);
-        if ($withRequiredDate->isNotEmpty()) {
-            $reverse = $recommendationService->applyReverseScheduleBatch($withRequiredDate);
-            Log::info('ProcessImportBatchValidation: Reverse scheduling completed', [
-                'batch_id' => $this->batch->id,
-                'processed' => $reverse['processed'],
-                'scheduled' => $reverse['scheduled'],
-                'cannot_meet' => $reverse['cannot_meet'],
-            ]);
-        }
+        // Note: recommended_ship_date (the latest JIT ship date) is set by BestWay
+        // optimization, which is account/plant-constrained. The unconstrained
+        // reverse-schedule pass was removed so the ship date always reflects a
+        // service the address can actually use.
     }
 
     /**

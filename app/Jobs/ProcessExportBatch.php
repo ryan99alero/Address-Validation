@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\Address;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
 use App\Services\ExportService;
@@ -99,7 +100,8 @@ class ProcessExportBatch implements ShouldQueue
         $mappings = $this->batch->field_mappings ?? [];
         usort($mappings, fn ($a, $b) => ($a['position'] ?? 0) <=> ($b['position'] ?? 0));
 
-        $serviceFields = $appendServiceResults ? $this->getValidationFieldsToAppend() : [];
+        $sourceHeaders = array_map(fn ($m) => $m['source'] ?? '', $mappings);
+        $serviceFields = $appendServiceResults ? $this->getValidationFieldsToAppend($sourceHeaders) : [];
         $exportService = app(ExportService::class);
 
         $handle = fopen($filePath, 'w');
@@ -107,8 +109,9 @@ class ProcessExportBatch implements ShouldQueue
             throw new \Exception('Could not open export file for writing');
         }
 
-        // Write headers - original mapped columns + optional service-result columns
-        $headers = array_map(fn ($m) => $m['source'] ?? '', $mappings);
+        // Write headers - original mapped columns + only the appended columns the
+        // file doesn't already carry.
+        $headers = $sourceHeaders;
         foreach ($serviceFields as $field) {
             $headers[] = $field['header'];
         }
@@ -128,12 +131,23 @@ class ProcessExportBatch implements ShouldQueue
         $chunkSize = 500;
 
         $query->orderBy($this->getSortColumn(), $this->getSortDirection())
-            ->chunk($chunkSize, function ($addresses) use ($handle, $mappings, $serviceFields, $exportService, &$rowCount) {
+            ->chunk($chunkSize, function ($addresses) use ($handle, $mappings, $serviceFields, $exportService, $appendServiceResults, &$rowCount) {
                 foreach ($addresses as $address) {
                     $row = [];
                     foreach ($mappings as $mapping) {
-                        $target = $mapping['target'] ?? '';
-                        $row[] = empty($target) ? '' : ($exportService->getExportFieldValue($address, $target) ?? '');
+                        // When surfacing results, known columns (ShipDate, ShipViaCode,
+                        // ResidentialDelivery, AddressCleansing*) are populated in-place
+                        // with the computed value instead of echoing the imported one.
+                        $override = $appendServiceResults
+                            ? $this->computedColumnValue($address, $mapping['source'] ?? '')
+                            : null;
+
+                        if ($override !== null) {
+                            $row[] = $override;
+                        } else {
+                            $target = $mapping['target'] ?? '';
+                            $row[] = empty($target) ? '' : ($exportService->getExportFieldValue($address, $target) ?? '');
+                        }
                     }
                     foreach ($serviceFields as $field) {
                         $row[] = $exportService->getFieldValue($address, $field['field']) ?? '';
@@ -264,38 +278,56 @@ class ProcessExportBatch implements ShouldQueue
     }
 
     /**
-     * Get validation fields to append.
-     * Note: Corrected address data is already in the original columns via getExportFieldValue().
+     * Columns appended after the file's own columns when surfacing results. Most
+     * results are written IN-PLACE into existing columns (see computedColumnValue);
+     * only these three are genuinely new — a sortable transit-days number, the
+     * BestWay flag, and a readable ship-method recap. Any that the file already
+     * carries (by header name) are skipped so nothing is duplicated.
      *
+     * @param  array<int, string>  $existingHeaders
      * @return array<array{field: string, header: string}>
      */
-    protected function getValidationFieldsToAppend(): array
+    protected function getValidationFieldsToAppend(array $existingHeaders = []): array
     {
-        return [
-            // Validation status fields
-            ['field' => 'validation_status', 'header' => 'Validation Status'],
-            ['field' => 'is_residential', 'header' => 'Is Residential'],
-            ['field' => 'classification', 'header' => 'Classification'],
-            ['field' => 'carrier', 'header' => 'Carrier Used'],
-            // Transit data fields
-            ['field' => 'ship_via_service', 'header' => 'Ship Via Service'],
+        $have = array_map(fn ($h) => $this->normalizeHeader($h), $existingHeaders);
+
+        $fields = [
             ['field' => 'ship_via_days', 'header' => 'Ship Via Transit Days'],
-            ['field' => 'ship_via_date', 'header' => 'Ship Via Delivery Date'],
-            ['field' => 'ship_via_meets_deadline', 'header' => 'Ship Via Meets Deadline'],
-            ['field' => 'fastest_service', 'header' => 'Fastest Service'],
-            ['field' => 'fastest_date', 'header' => 'Fastest Delivery Date'],
-            ['field' => 'ground_service', 'header' => 'Ground Service'],
-            ['field' => 'ground_date', 'header' => 'Ground Delivery Date'],
-            ['field' => 'distance_miles', 'header' => 'Distance (Miles)'],
-            // Reverse scheduling: latest ship date + cheapest on-time service
-            ['field' => 'recommended_ship_date', 'header' => 'Recommended Ship Date'],
-            ['field' => 'recommended_ship_service', 'header' => 'Recommended Ship Service'],
-            // BestWay optimization fields
-            ['field' => 'previous_ship_via_code', 'header' => 'Previous Ship Via Code'],
             ['field' => 'bestway_optimized', 'header' => 'BestWay Optimized'],
-            // At-a-glance summary of everything that changed on the row
-            ['field' => 'change_summary', 'header' => 'What Changed'],
+            ['field' => 'ship_method_comment', 'header' => 'ShipMethodComment'],
         ];
+
+        return array_values(array_filter(
+            $fields,
+            fn ($f) => ! in_array($this->normalizeHeader($f['header']), $have, true)
+        ));
+    }
+
+    /**
+     * For a handful of well-known columns, the export writes the COMPUTED result
+     * into the file's existing column instead of echoing the imported value.
+     * Returns null for any other column (use the normal mapped value). Matched on
+     * the source header name, case/space/underscore-insensitive.
+     */
+    protected function computedColumnValue(Address $address, string $sourceHeader): ?string
+    {
+        return match ($this->normalizeHeader($sourceHeader)) {
+            'shipdate' => ($address->recommended_ship_date ?? $address->requested_ship_date)?->format('m/d/Y') ?? '',
+            'shipviacode' => (string) ($address->ship_via_code ?? ''),
+            'residentialdelivery' => $address->is_residential === null ? '' : ($address->is_residential ? 'Y' : 'N'),
+            'addresscleansingcomment' => $address->change_summary,
+            'addresscleansingreconciled' => (string) ($address->validation_status ?? ''),
+            'shipmethodcomment' => $address->ship_method_comment,
+            default => null,
+        };
+    }
+
+    /**
+     * Normalize a header for matching: lowercase, strip spaces/underscores/hyphens.
+     */
+    protected function normalizeHeader(string $header): string
+    {
+        return preg_replace('/[\s_\-]+/', '', strtolower(trim($header)));
     }
 
     public function failed(\Throwable $exception): void

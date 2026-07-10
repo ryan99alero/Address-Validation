@@ -507,112 +507,137 @@ class ShippingRecommendationService
     }
 
     /**
-     * Apply BestWay optimization to an address.
+     * Just-In-Time service selection: the CHEAPEST service that can arrive on/before
+     * the required on-site date shipping on/after the earliest ship date, AND that
+     * carries a ship-via code on the SAME plant + payment + account as the original.
+     * We never jump plant (a physical site) or account (billing, sometimes client-
+     * owned). Returns null when nothing on the same plant+account can arrive in time.
      *
-     * This finds the most economical shipping service that meets the required delivery date.
-     * - Preserves the original ship_via_code in previous_ship_via_code
-     * - Updates ship_via_code to the optimized service
-     * - Sets bestway_optimized flag to true
+     * Ship date is derived by inverting each service's business-day transit from the
+     * required date (ship as late as possible), so arrival lands on the required date.
      *
-     * Returns true if optimization was applied, false otherwise.
+     * @param  Collection<int, TransitTime>  $transitTimes
+     * @return array{transit: TransitTime, service_type: string, code: string, ship_date: CarbonInterface}|null
+     */
+    protected function selectJitService(Address $address, Collection $transitTimes, ?string $plantOverride): ?array
+    {
+        $required = $address->required_on_site_date?->startOfDay();
+        if (! $required || $transitTimes->isEmpty()) {
+            return null;
+        }
+
+        // Earliest we can ship: the requested ship date, but never in the past.
+        $floor = $address->requested_ship_date?->startOfDay() ?? now()->startOfDay();
+        if ($floor->lt(now()->startOfDay())) {
+            $floor = now()->startOfDay();
+        }
+
+        $original = $address->relationLoaded('shipViaCodeRecord')
+            ? $address->shipViaCodeRecord
+            : ShipViaCode::lookup($address->ship_via_code);
+        $plantId = $plantOverride ?: $original?->plant_id;
+        $paymentType = $original?->payment_type;
+        $accountNumber = $original?->account_number;
+
+        $candidates = $transitTimes
+            ->map(function (TransitTime $t) use ($required, $floor, $plantId, $paymentType, $accountNumber) {
+                $duration = $t->transitBusinessDays();
+                if ($duration === null) {
+                    return null;
+                }
+
+                $shipDate = $required->copy()->subWeekdays($duration);
+                if ($shipDate->lt($floor)) {
+                    return null; // would have to ship before the earliest ship date
+                }
+
+                $code = ShipViaCode::findMatchingForBestWay($t->service_type, $plantId, $paymentType, $accountNumber);
+                if (! $code) {
+                    return null; // no code on the same plant + account — never jump
+                }
+
+                return ['transit' => $t, 'service_type' => $t->service_type, 'code' => $code->code, 'ship_date' => $shipDate];
+            })
+            ->filter();
+
+        if ($candidates->isEmpty()) {
+            return null;
+        }
+
+        return $candidates
+            ->sortBy(fn (array $c): array => [
+                self::SERVICE_COST_RANK[$c['service_type']] ?? 100,
+                -$c['ship_date']->timestamp,
+            ])
+            ->first();
+    }
+
+    /**
+     * Apply the JIT selection to one address (no save). Sets the ship-via code, the
+     * latest ship date (recommended_ship_date), and ship-via service/days/arrival.
+     * When nothing on the same plant+account can arrive in time it flags the address
+     * (bestway_optimized=false, ship_via_meets_deadline=false) instead of silently
+     * leaving it on a service that misses the date.
+     *
+     * @param  Collection<int, TransitTime>  $transitTimes
+     * @return 'optimized'|'already_optimal'|'no_service'
+     */
+    protected function applyJitToAddress(Address $address, Collection $transitTimes, ?string $plantOverride): string
+    {
+        $jit = $this->selectJitService($address, $transitTimes, $plantOverride);
+
+        if (! $jit) {
+            $address->bestway_optimized = false;
+            $address->ship_via_meets_deadline = false;
+            $address->recommended_ship_date = null;
+            $address->recommended_ship_service = null;
+
+            return 'no_service';
+        }
+
+        $changed = $jit['code'] !== $address->ship_via_code;
+        $address->previous_ship_via_code = $address->ship_via_code;
+        $address->ship_via_code = $jit['code'];
+        $address->ship_via_code_id = null;
+        $this->resolveShipViaCode($address);
+
+        // Service label from the chosen transit option; arrival = the required date
+        // (ship date was computed as required − transit), days = business-day transit.
+        $this->populateShipViaInfo($address, $transitTimes, $jit['service_type']);
+        $address->ship_via_days = $jit['transit']->transitBusinessDays();
+        $address->ship_via_date = $address->required_on_site_date;
+        $address->ship_via_meets_deadline = true;
+        $address->recommended_ship_date = $jit['ship_date'];
+        $address->recommended_ship_service = $address->ship_via_service;
+        $address->suggested_service = null;
+        $address->suggested_delivery_date = null;
+        $address->bestway_optimized = true;
+
+        return $changed ? 'optimized' : 'already_optimal';
+    }
+
+    /**
+     * Apply BestWay (JIT) optimization to an address.
+     *
+     * Returns true if the ship-via service was changed, false otherwise.
      */
     public function applyBestWayOptimization(Address $address, ?string $plantOverride = null): bool
     {
-        // Must have a required on-site date to optimize
-        if (! $address->required_on_site_date) {
-            return false;
-        }
-
-        // Get transit times
         $transitTimes = $address->relationLoaded('transitTimes')
             ? $address->transitTimes
             : $address->transitTimes()->get();
 
-        if ($transitTimes->isEmpty()) {
-            return false;
-        }
-
-        // Find services that meet the deadline
-        $viableServices = $this->findServicesMeetingDeadline($transitTimes, $address->required_on_site_date);
-
-        if ($viableServices->isEmpty()) {
-            // No service can meet the deadline - keep original
+        if (! $address->required_on_site_date || $transitTimes->isEmpty()) {
             $address->bestway_optimized = false;
             $address->save();
 
             return false;
         }
 
-        // Get original ShipViaCode to extract plant/payment/account
-        $originalShipViaCode = $address->relationLoaded('shipViaCodeRecord')
-            ? $address->shipViaCodeRecord
-            : ShipViaCode::lookup($address->ship_via_code);
-
-        $plantId = $plantOverride ?: $originalShipViaCode?->plant_id;
-        $paymentType = $originalShipViaCode?->payment_type;
-        $accountNumber = $originalShipViaCode?->account_number;
-
-        // Find the most economical service that has a matching ShipViaCode
-        $bestServiceCode = null;
-        $bestService = null;
-
-        // Sort viable services by cost (cheapest first)
-        $sortedServices = $viableServices->sortBy(function ($tt) {
-            return self::SERVICE_COST_RANK[$tt->service_type] ?? 100;
-        });
-
-        foreach ($sortedServices as $candidateService) {
-            // Try to find a matching ShipViaCode for this service type
-            $matchingCode = ShipViaCode::findMatchingForBestWay(
-                $candidateService->service_type,
-                $plantId,
-                $paymentType,
-                $accountNumber
-            );
-
-            if ($matchingCode) {
-                $bestService = $candidateService;
-                $bestServiceCode = $matchingCode->code;
-                break;
-            }
-        }
-
-        if (! $bestServiceCode || ! $bestService) {
-            // No matching ShipViaCode found
-            $address->bestway_optimized = false;
-            $address->save();
-
-            return false;
-        }
-
-        // Check if we're already using the best service
-        $currentServiceType = $this->getShipViaServiceType($address);
-        $serviceChanged = ($currentServiceType !== $bestService->service_type);
-
-        // Preserve original ship_via_code
-        $address->previous_ship_via_code = $address->ship_via_code;
-
-        if ($serviceChanged) {
-            // Service needs to be changed
-            $address->ship_via_code = $bestServiceCode;
-            $address->ship_via_code_id = null; // Clear so it gets re-resolved
-
-            // Recalculate ship_via fields with new service
-            $this->resolveShipViaCode($address);
-            $shipViaServiceType = $this->getShipViaServiceType($address);
-            if ($shipViaServiceType) {
-                $this->populateShipViaInfo($address, $transitTimes, $shipViaServiceType);
-                if ($address->required_on_site_date) {
-                    $this->validateShipViaMeetsDeadline($address, $transitTimes);
-                }
-            }
-        }
-
-        // BestWay analyzed and confirmed/set optimal service
-        $address->bestway_optimized = true;
+        $outcome = $this->applyJitToAddress($address, $transitTimes, $plantOverride);
         $address->save();
 
-        return $serviceChanged;
+        return $outcome === 'optimized';
     }
 
     /**
@@ -626,116 +651,28 @@ class ShippingRecommendationService
      */
     public function applyBestWayOptimizationBatch(Collection $addresses, ?string $plantOverride = null): array
     {
-        $processed = 0;
-        $optimized = 0;
-        $alreadyOptimal = 0;
-        $noViableService = 0;
-        $noMatchingCode = 0;
-
+        $counts = ['processed' => 0, 'optimized' => 0, 'already_optimal' => 0, 'no_viable_service' => 0, 'no_matching_code' => 0];
         $updates = [];
 
         foreach ($addresses as $address) {
-            $processed++;
+            $counts['processed']++;
 
-            // Must have a required on-site date to optimize
-            if (! $address->required_on_site_date) {
-                continue;
-            }
-
-            // Get transit times
             $transitTimes = $address->relationLoaded('transitTimes')
                 ? $address->transitTimes
                 : $address->transitTimes()->get();
 
-            if ($transitTimes->isEmpty()) {
-                $noViableService++;
+            if (! $address->required_on_site_date || $transitTimes->isEmpty()) {
+                $counts['no_viable_service']++;
 
                 continue;
             }
 
-            // Find services that meet the deadline
-            $viableServices = $this->findServicesMeetingDeadline($transitTimes, $address->required_on_site_date);
-
-            if ($viableServices->isEmpty()) {
-                $noViableService++;
-                $address->bestway_optimized = false;
-                $updates[$address->id] = ['bestway_optimized' => false];
-
-                continue;
-            }
-
-            // Get original ShipViaCode to extract plant/payment/account
-            $originalShipViaCode = $address->relationLoaded('shipViaCodeRecord')
-                ? $address->shipViaCodeRecord
-                : ShipViaCode::lookup($address->ship_via_code);
-
-            $plantId = $plantOverride ?: $originalShipViaCode?->plant_id;
-            $paymentType = $originalShipViaCode?->payment_type;
-            $accountNumber = $originalShipViaCode?->account_number;
-
-            // Find the most economical service that has a matching ShipViaCode
-            $bestServiceCode = null;
-            $bestService = null;
-
-            // Sort viable services by cost (cheapest first)
-            $sortedServices = $viableServices->sortBy(function ($tt) {
-                return self::SERVICE_COST_RANK[$tt->service_type] ?? 100;
-            });
-
-            foreach ($sortedServices as $candidateService) {
-                // Try to find a matching ShipViaCode for this service type
-                $matchingCode = ShipViaCode::findMatchingForBestWay(
-                    $candidateService->service_type,
-                    $plantId,
-                    $paymentType,
-                    $accountNumber
-                );
-
-                if ($matchingCode) {
-                    $bestService = $candidateService;
-                    $bestServiceCode = $matchingCode->code;
-                    break;
-                }
-            }
-
-            if (! $bestServiceCode || ! $bestService) {
-                // No matching ShipViaCode found for any viable service
-                $noMatchingCode++;
-                $address->bestway_optimized = false;
-                $updates[$address->id] = ['bestway_optimized' => false];
-
-                continue;
-            }
-
-            // Check if we're already using the best service
-            $currentServiceType = $this->getShipViaServiceType($address);
-            $serviceChanged = ($currentServiceType !== $bestService->service_type);
-
-            if ($serviceChanged) {
-                // Service needs to be changed - preserve original and update
-                $address->previous_ship_via_code = $address->ship_via_code;
-                $address->ship_via_code = $bestServiceCode;
-                $address->ship_via_code_id = null;
-                $optimized++;
-
-                // Recalculate ship_via fields with new service
-                $this->resolveShipViaCode($address);
-                $shipViaServiceType = $this->getShipViaServiceType($address);
-                if ($shipViaServiceType) {
-                    $this->populateShipViaInfo($address, $transitTimes, $shipViaServiceType);
-                    if ($address->required_on_site_date) {
-                        $this->validateShipViaMeetsDeadline($address, $transitTimes);
-                    }
-                }
-            } else {
-                // Already using the best service - no change needed
-                $alreadyOptimal++;
-                // Set previous to same as current to indicate no change was needed
-                $address->previous_ship_via_code = $address->ship_via_code;
-            }
-
-            // BestWay analyzed and confirmed/set optimal service - always true when we reach here
-            $address->bestway_optimized = true;
+            $outcome = $this->applyJitToAddress($address, $transitTimes, $plantOverride);
+            match ($outcome) {
+                'optimized' => $counts['optimized']++,
+                'already_optimal' => $counts['already_optimal']++,
+                'no_service' => $counts['no_matching_code']++,
+            };
 
             $updates[$address->id] = [
                 'previous_ship_via_code' => $address->previous_ship_via_code,
@@ -745,24 +682,19 @@ class ShippingRecommendationService
                 'ship_via_days' => $address->ship_via_days,
                 'ship_via_date' => $address->ship_via_date,
                 'ship_via_meets_deadline' => $address->ship_via_meets_deadline,
+                'recommended_ship_date' => $address->recommended_ship_date,
+                'recommended_ship_service' => $address->recommended_ship_service,
                 'suggested_service' => $address->suggested_service,
                 'suggested_delivery_date' => $address->suggested_delivery_date,
-                'bestway_optimized' => true,
+                'bestway_optimized' => $address->bestway_optimized,
             ];
         }
 
-        // Bulk update all addresses
         foreach ($updates as $addressId => $data) {
             Address::where('id', $addressId)->update($data);
         }
 
-        return [
-            'processed' => $processed,
-            'optimized' => $optimized,
-            'already_optimal' => $alreadyOptimal,
-            'no_viable_service' => $noViableService,
-            'no_matching_code' => $noMatchingCode,
-        ];
+        return $counts;
     }
 
     /**

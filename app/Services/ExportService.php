@@ -154,8 +154,11 @@ class ExportService
             // Distance
             'distance_miles' => $address->distance_miles !== null ? number_format((float) $address->distance_miles, 1) : null,
 
-            // Human-readable summary of what changed (corrections, residential flip, BestWay remap)
+            // Address-cleansing summary of what changed (feeds AddressCleansingComment)
             'change_summary' => $address->change_summary,
+
+            // Readable ship-method/date recap (feeds ShipMethodComment)
+            'ship_method_comment' => $address->ship_method_comment,
 
             // Legacy field names for backwards compatibility
             'recommended_service' => $address->fastest_service,
