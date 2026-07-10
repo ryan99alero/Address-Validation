@@ -128,6 +128,9 @@ class ExportTemplate extends Model
 
             // Distance
             'distance_miles' => 'Distance (Miles)',
+
+            // Summary of what changed (corrections, residential flip, BestWay remap)
+            'change_summary' => 'What Changed',
         ];
     }
 

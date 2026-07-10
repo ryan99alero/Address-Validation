@@ -227,6 +227,50 @@ class Address extends Model
     }
 
     /**
+     * Human-readable, semicolon-separated summary of what changed for this address.
+     * Reconstructed from stored input vs output values — used as an export column so a
+     * user can see at a glance why a row was touched. Empty string when nothing changed.
+     */
+    public function getChangeSummaryAttribute(): string
+    {
+        $changes = [];
+
+        if ($this->output_address_1 !== null
+            && ($this->output_address_1 !== $this->input_address_1
+                || (string) $this->output_address_2 !== (string) $this->input_address_2)) {
+            $changes[] = 'Street corrected';
+        }
+
+        if ($this->output_city !== null && $this->output_city !== $this->input_city) {
+            $changes[] = 'City corrected';
+        }
+
+        if ($this->output_state !== null && $this->output_state !== $this->input_state) {
+            $changes[] = 'State corrected';
+        }
+
+        if ($this->output_postal !== null && $this->output_postal !== $this->input_postal) {
+            $changes[] = "ZIP {$this->input_postal}→{$this->output_postal}";
+        }
+
+        if ($this->input_is_residential !== null
+            && $this->is_residential !== null
+            && (bool) $this->input_is_residential !== (bool) $this->is_residential) {
+            $from = $this->input_is_residential ? 'Residential' : 'Commercial';
+            $to = $this->is_residential ? 'Residential' : 'Commercial';
+            $changes[] = "{$from}→{$to}";
+        }
+
+        if ($this->bestway_optimized
+            && filled($this->previous_ship_via_code)
+            && $this->previous_ship_via_code !== $this->ship_via_code) {
+            $changes[] = "BestWay: {$this->previous_ship_via_code}→{$this->ship_via_code}";
+        }
+
+        return implode('; ', $changes);
+    }
+
+    /**
      * Get full postal code with extension (ZIP+4 format).
      */
     public function getFullPostalCode(): ?string

@@ -58,12 +58,10 @@ class ProcessExportBatch implements ShouldQueue
             Storage::disk('local')->makeDirectory('exports');
             $fullPath = Storage::disk('local')->path($filePath);
 
-            if ($this->appendValidationFields) {
-                $this->exportWithValidationFields($fullPath);
-            } elseif ($this->useImportMapping) {
-                $this->exportUsingImportMapping($fullPath);
+            if ($this->useImportMapping) {
+                $this->exportUsingImportMapping($fullPath, $this->appendValidationFields);
             } else {
-                $this->exportUsingTemplate($fullPath);
+                $this->exportUsingTemplate($fullPath, $this->appendValidationFields);
             }
 
             $this->batch->update([
@@ -93,12 +91,15 @@ class ProcessExportBatch implements ShouldQueue
 
     /**
      * Export using the import field mappings - FAST with denormalized schema.
+     * When $appendServiceResults is true, the transit/BestWay result columns are
+     * appended after the original mapped columns.
      */
-    protected function exportUsingImportMapping(string $filePath): void
+    protected function exportUsingImportMapping(string $filePath, bool $appendServiceResults = false): void
     {
         $mappings = $this->batch->field_mappings ?? [];
         usort($mappings, fn ($a, $b) => ($a['position'] ?? 0) <=> ($b['position'] ?? 0));
 
+        $serviceFields = $appendServiceResults ? $this->getValidationFieldsToAppend() : [];
         $exportService = app(ExportService::class);
 
         $handle = fopen($filePath, 'w');
@@ -106,8 +107,11 @@ class ProcessExportBatch implements ShouldQueue
             throw new \Exception('Could not open export file for writing');
         }
 
-        // Write headers
+        // Write headers - original mapped columns + optional service-result columns
         $headers = array_map(fn ($m) => $m['source'] ?? '', $mappings);
+        foreach ($serviceFields as $field) {
+            $headers[] = $field['header'];
+        }
         fputcsv($handle, $headers, ',', '"', '');
 
         // Set phases
@@ -124,72 +128,16 @@ class ProcessExportBatch implements ShouldQueue
         $chunkSize = 500;
 
         $query->orderBy($this->getSortColumn(), $this->getSortDirection())
-            ->chunk($chunkSize, function ($addresses) use ($handle, $mappings, $exportService, &$rowCount) {
+            ->chunk($chunkSize, function ($addresses) use ($handle, $mappings, $serviceFields, $exportService, &$rowCount) {
                 foreach ($addresses as $address) {
                     $row = [];
                     foreach ($mappings as $mapping) {
                         $target = $mapping['target'] ?? '';
                         $row[] = empty($target) ? '' : ($exportService->getExportFieldValue($address, $target) ?? '');
                     }
-                    fputcsv($handle, $row, ',', '"', '');
-                    $rowCount++;
-                }
-
-                $this->batch->incrementExportProgress(count($addresses));
-            });
-
-        fclose($handle);
-    }
-
-    /**
-     * Export with validation fields appended.
-     */
-    protected function exportWithValidationFields(string $filePath): void
-    {
-        $mappings = $this->batch->field_mappings ?? [];
-        usort($mappings, fn ($a, $b) => ($a['position'] ?? 0) <=> ($b['position'] ?? 0));
-
-        $validationFields = $this->getValidationFieldsToAppend();
-        $exportService = app(ExportService::class);
-
-        $handle = fopen($filePath, 'w');
-        if (! $handle) {
-            throw new \Exception('Could not open export file for writing');
-        }
-
-        // Write headers - original + validation fields
-        $headers = array_map(fn ($m) => $m['source'] ?? '', $mappings);
-        foreach ($validationFields as $field) {
-            $headers[] = $field['header'];
-        }
-        fputcsv($handle, $headers, ',', '"', '');
-
-        $this->batch->setExportPhase(ImportBatch::EXPORT_PHASE_LOADING);
-
-        $query = $this->buildQuery();
-        $totalRows = $query->count();
-
-        $this->batch->setExportPhase(ImportBatch::EXPORT_PHASE_WRITING, $totalRows);
-
-        $rowCount = 0;
-        $chunkSize = 500;
-
-        $query->orderBy($this->getSortColumn(), $this->getSortDirection())
-            ->chunk($chunkSize, function ($addresses) use ($handle, $mappings, $validationFields, $exportService, &$rowCount) {
-                foreach ($addresses as $address) {
-                    $row = [];
-
-                    // Original mapped fields
-                    foreach ($mappings as $mapping) {
-                        $target = $mapping['target'] ?? '';
-                        $row[] = empty($target) ? '' : ($exportService->getExportFieldValue($address, $target) ?? '');
-                    }
-
-                    // Validation fields
-                    foreach ($validationFields as $field) {
+                    foreach ($serviceFields as $field) {
                         $row[] = $exportService->getFieldValue($address, $field['field']) ?? '';
                     }
-
                     fputcsv($handle, $row, ',', '"', '');
                     $rowCount++;
                 }
@@ -202,8 +150,10 @@ class ProcessExportBatch implements ShouldQueue
 
     /**
      * Export using a custom template.
+     * When $appendServiceResults is true, the transit/BestWay result columns are
+     * appended after the template's own columns (skipping any already present).
      */
-    protected function exportUsingTemplate(string $filePath): void
+    protected function exportUsingTemplate(string $filePath, bool $appendServiceResults = false): void
     {
         $template = ExportTemplate::find($this->templateId);
         if (! $template) {
@@ -213,6 +163,15 @@ class ProcessExportBatch implements ShouldQueue
         $exportService = app(ExportService::class);
         $fields = $template->ordered_fields;
 
+        // Only append service-result columns the template doesn't already emit.
+        $templateFieldKeys = array_column($fields, 'field');
+        $serviceFields = $appendServiceResults
+            ? array_values(array_filter(
+                $this->getValidationFieldsToAppend(),
+                fn ($f) => ! in_array($f['field'], $templateFieldKeys, true)
+            ))
+            : [];
+
         $handle = fopen($filePath, 'w');
         if (! $handle) {
             throw new \Exception('Could not open export file for writing');
@@ -221,6 +180,9 @@ class ProcessExportBatch implements ShouldQueue
         // Write headers
         if ($template->include_header) {
             $headers = array_map(fn ($f) => $f['header'] ?? $f['field'], $fields);
+            foreach ($serviceFields as $field) {
+                $headers[] = $field['header'];
+            }
             fputcsv($handle, $headers, ',', '"', '');
         }
 
@@ -235,10 +197,13 @@ class ProcessExportBatch implements ShouldQueue
         $chunkSize = 500;
 
         $query->orderBy($this->getSortColumn(), $this->getSortDirection())
-            ->chunk($chunkSize, function ($addresses) use ($handle, $fields, $exportService, &$rowCount) {
+            ->chunk($chunkSize, function ($addresses) use ($handle, $fields, $serviceFields, $exportService, &$rowCount) {
                 foreach ($addresses as $address) {
                     $row = [];
                     foreach ($fields as $field) {
+                        $row[] = $exportService->getFieldValue($address, $field['field']) ?? '';
+                    }
+                    foreach ($serviceFields as $field) {
                         $row[] = $exportService->getFieldValue($address, $field['field']) ?? '';
                     }
                     fputcsv($handle, $row, ',', '"', '');
@@ -325,6 +290,8 @@ class ProcessExportBatch implements ShouldQueue
             // BestWay optimization fields
             ['field' => 'previous_ship_via_code', 'header' => 'Previous Ship Via Code'],
             ['field' => 'bestway_optimized', 'header' => 'BestWay Optimized'],
+            // At-a-glance summary of everything that changed on the row
+            ['field' => 'change_summary', 'header' => 'What Changed'],
         ];
     }
 

@@ -22,6 +22,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Schemas\Schema;
@@ -267,7 +268,11 @@ class BatchProcessing extends Page implements HasSchemas
                             ->searchable()
                             ->required()
                             ->live()
-                            ->afterStateUpdated(fn ($state) => $this->updateExportBatchStats($state))
+                            ->afterStateUpdated(function ($state, Set $set) {
+                                $this->updateExportBatchStats($state);
+                                $batch = $state ? ImportBatch::find($state) : null;
+                                $set('append_service_results', (bool) ($batch?->include_transit_times || $batch?->find_best_service));
+                            })
                             ->helperText('Select a completed import batch to export'),
 
                         Select::make('template_id')
@@ -295,6 +300,11 @@ class BatchProcessing extends Page implements HasSchemas
                             ->searchable()
                             ->default('_import_mapping')
                             ->helperText('Use import mapping for same format, or add validation fields to original'),
+
+                        Checkbox::make('append_service_results')
+                            ->label('Include service / transit results')
+                            ->helperText('Appends the transit-time and BestWay result columns (service, delivery date, meets-deadline, distance, what changed…) after your normal columns. Auto-enabled when the batch was run with transit times or BestWay.')
+                            ->default(false),
 
                         Select::make('filter_status')
                             ->label('Filter by Validation Status')
@@ -712,12 +722,15 @@ class BatchProcessing extends Page implements HasSchemas
             return;
         }
 
-        // Check if using import mapping, import with validation, or a custom template
+        // Base export mode: import-field-mapping (default + the legacy "add validation
+        // fields" option) or a custom template. Appending service/transit results is
+        // now an orthogonal toggle that works with either base mode.
         $templateId = $data['template_id'] ?? '_import_mapping';
-        $useImportMapping = $templateId === '_import_mapping';
-        $useImportWithValidation = $templateId === '_import_with_validation';
+        $useImportMapping = in_array($templateId, ['_import_mapping', '_import_with_validation'], true);
+        $appendServiceResults = ($data['append_service_results'] ?? false)
+            || $templateId === '_import_with_validation';
 
-        if (! $useImportMapping && ! $useImportWithValidation) {
+        if (! $useImportMapping) {
             $template = ExportTemplate::find($templateId);
             if (! $template) {
                 Notification::make()
@@ -752,7 +765,7 @@ class BatchProcessing extends Page implements HasSchemas
         Log::info('BatchProcessing: Dispatching export job', [
             'batch_id' => $batch->id,
             'use_import_mapping' => $useImportMapping,
-            'use_import_with_validation' => $useImportWithValidation,
+            'append_service_results' => $appendServiceResults,
             'filter_status' => $filterStatus,
             'sort_by' => $sortBy,
         ]);
@@ -760,12 +773,12 @@ class BatchProcessing extends Page implements HasSchemas
         // Dispatch background job
         ProcessExportBatch::dispatch(
             $batch,
-            ($useImportMapping || $useImportWithValidation) ? null : (int) $templateId,
+            $useImportMapping ? null : (int) $templateId,
             $useImportMapping,
             $filterStatus,
             $filename,
             $sortBy,
-            $useImportWithValidation,
+            $appendServiceResults,
             $filterSource
         );
 

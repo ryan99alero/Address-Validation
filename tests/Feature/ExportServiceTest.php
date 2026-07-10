@@ -181,12 +181,14 @@ describe('ProcessExportBatch with validation fields', function () {
 
         $fields = $method->invoke($job);
 
-        // Should have core validation fields (using new field names)
+        // Corrected address stays in the ORIGINAL mapped columns (see method docblock),
+        // so the append list carries the validation/result fields, not output_address_1.
         $fieldNames = array_column($fields, 'field');
-        expect($fieldNames)->toContain('output_address_1');
+        expect($fieldNames)->not->toContain('output_address_1');
         expect($fieldNames)->toContain('validation_status');
         expect($fieldNames)->toContain('is_residential');
         expect($fieldNames)->toContain('carrier');
+        expect($fieldNames)->toContain('change_summary');
     });
 
     it('includes transit time fields when batch has them enabled', function () {
@@ -209,13 +211,107 @@ describe('ProcessExportBatch with validation fields', function () {
         $fields = $method->invoke($job);
         $fieldNames = array_column($fields, 'field');
 
-        // Should have core validation fields
-        expect($fieldNames)->toContain('output_address_1');
-
         // Should also have transit time fields
         expect($fieldNames)->toContain('ship_via_service');
         expect($fieldNames)->toContain('ship_via_days');
         expect($fieldNames)->toContain('fastest_service');
         expect($fieldNames)->toContain('distance_miles');
+    });
+});
+
+describe('Address change summary', function () {
+    it('is empty when nothing changed', function () {
+        $address = Address::factory()->create([
+            'input_address_1' => '123 Main St',
+            'input_city' => 'Springfield',
+            'input_state' => 'IL',
+            'input_postal' => '62701',
+            'output_address_1' => '123 Main St',
+            'output_city' => 'Springfield',
+            'output_state' => 'IL',
+            'output_postal' => '62701',
+        ]);
+
+        expect($address->change_summary)->toBe('');
+    });
+
+    it('summarizes a ZIP correction and BestWay remap', function () {
+        $address = Address::factory()->create([
+            'input_address_1' => '123 Main St',
+            'input_city' => 'Springfield',
+            'input_state' => 'IL',
+            'input_postal' => '62701',
+            'output_address_1' => '123 Main St',
+            'output_city' => 'Springfield',
+            'output_state' => 'IL',
+            'output_postal' => '62704',
+            'bestway_optimized' => true,
+            'previous_ship_via_code' => 'UPSNDA',
+            'ship_via_code' => 'UPS2DA',
+        ]);
+
+        expect($address->change_summary)
+            ->toContain('ZIP 62701→62704')
+            ->toContain('BestWay: UPSNDA→UPS2DA');
+    });
+
+    it('summarizes a residential flip', function () {
+        $address = Address::factory()->create([
+            'input_is_residential' => 'Commercial',
+            'is_residential' => true,
+        ]);
+
+        expect((bool) $address->input_is_residential)->toBeFalse();
+        expect($address->change_summary)->toContain('Commercial→Residential');
+    });
+
+    it('is resolvable as an export field', function () {
+        $service = new ExportService;
+        $address = Address::factory()->create([
+            'input_postal' => '62701',
+            'output_postal' => '62704',
+        ]);
+
+        expect($service->getFieldValue($address, 'change_summary'))->toContain('ZIP 62701→62704');
+    });
+});
+
+describe('ProcessExportBatch append is orthogonal to base mode', function () {
+    it('appends service-result columns to a custom template export when requested', function () {
+        $carrier = Carrier::factory()->create(['name' => 'UPS', 'slug' => 'ups']);
+        $batch = ImportBatch::factory()->create(['include_transit_times' => true]);
+        Address::factory()->create([
+            'import_batch_id' => $batch->id,
+            'input_postal' => '62701',
+            'output_postal' => '62704',
+            'ship_via_service' => 'UPS Ground',
+            'validated_by_carrier_id' => $carrier->id,
+        ]);
+
+        $template = ExportTemplate::factory()->create([
+            'include_header' => true,
+            'field_layout' => [
+                ['field' => 'corrected_city', 'header' => 'City', 'position' => 1],
+            ],
+        ]);
+
+        $job = new ProcessExportBatch(
+            batch: $batch,
+            templateId: $template->id,
+            useImportMapping: false,
+            appendValidationFields: true,
+        );
+
+        $path = tempnam(sys_get_temp_dir(), 'exp').'.csv';
+        $reflection = new ReflectionClass($job);
+        $method = $reflection->getMethod('exportUsingTemplate');
+        $method->setAccessible(true);
+        $method->invoke($job, $path, true);
+
+        $rows = array_map('str_getcsv', file($path));
+        expect($rows[0])->toContain('City')
+            ->toContain('Ship Via Service')
+            ->toContain('What Changed');
+        @unlink($path);
     });
 });

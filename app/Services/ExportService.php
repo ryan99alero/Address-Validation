@@ -150,6 +150,9 @@ class ExportService
             // Distance
             'distance_miles' => $address->distance_miles !== null ? number_format((float) $address->distance_miles, 1) : null,
 
+            // Human-readable summary of what changed (corrections, residential flip, BestWay remap)
+            'change_summary' => $address->change_summary,
+
             // Legacy field names for backwards compatibility
             'recommended_service' => $address->fastest_service,
             'estimated_delivery_date' => $address->fastest_date?->format('Y-m-d'),
