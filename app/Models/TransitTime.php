@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\CarbonInterface;
 use Database\Factories\TransitTimeFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -206,8 +207,11 @@ class TransitTime extends Model
      * scheduling (ship date = required date − this many weekdays). Prefers the
      * carrier's maximum transit time; falls back to counting weekdays between the
      * anchor ship date and delivery_date. Returns null when nothing is known.
+     *
+     * $shipDate anchors the fallback count on the actual probe ship date; when
+     * omitted it uses the loaded address's requested_ship_date, else calculated_at.
      */
-    public function transitBusinessDays(): ?int
+    public function transitBusinessDays(?CarbonInterface $shipDate = null): ?int
     {
         if ($this->maximum_transit_time || $this->minimum_transit_time) {
             $max = $this->maximum_transit_time ? $this->convertTransitTimeToNumber($this->maximum_transit_time) : null;
@@ -222,19 +226,21 @@ class TransitTime extends Model
             return null;
         }
 
-        $shipDate = null;
-        if ($this->relationLoaded('address') && $this->address?->requested_ship_date) {
-            $shipDate = $this->address->requested_ship_date;
-        }
-        $shipDate = $shipDate ?? $this->calculated_at?->startOfDay() ?? now()->startOfDay();
+        $anchor = $shipDate
+            ?? ($this->relationLoaded('address') ? $this->address?->requested_ship_date : null)
+            ?? $this->calculated_at
+            ?? now();
 
+        // Count weekdays between the ship date and delivery. Reassign on addDay()
+        // because our date casts are CarbonImmutable (addDay() returns a new
+        // instance and does NOT mutate in place).
+        $current = $anchor->copy()->startOfDay();
+        $deliveryDate = $this->delivery_date->copy()->startOfDay();
         $days = 0;
-        $current = $shipDate->copy();
-        $deliveryDate = $this->delivery_date->startOfDay();
         $iterations = 0;
 
         while ($current->lt($deliveryDate) && $iterations < 365) {
-            $current->addDay();
+            $current = $current->addDay();
             $iterations++;
             if (! $current->isWeekend()) {
                 $days++;

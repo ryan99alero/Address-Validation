@@ -80,6 +80,40 @@ it('does NOT jump to a cheaper different-account service even when one arrives o
     expect($a->fresh()->ship_via_code)->toBe('OV'); // stayed on our account, not the cheaper ES
 });
 
+it('computes transit duration from delivery_date when no max transit time is set (CarbonImmutable-safe)', function () {
+    $c = $this->carrier;
+    svcode($c, 'G1', 'FEDEX_GROUND', 'AAA');
+    svcode($c, 'OV', 'STANDARD_OVERNIGHT', 'AAA');
+
+    $a = Address::factory()->create([
+        'requested_ship_date' => '2026-07-10',
+        'required_on_site_date' => '2026-07-15',
+        'ship_via_code' => 'G1',
+        'validation_status' => 'valid',
+    ]);
+    // No maximum_transit_time — duration must come from delivery_date (the prod case
+    // that hit the 365-iteration cap under CarbonImmutable).
+    TransitTime::factory()->create([
+        'address_id' => $a->id, 'carrier_id' => $c->id, 'service_type' => 'STANDARD_OVERNIGHT',
+        'service_name' => 'FedEx Standard Overnight', 'maximum_transit_time' => null,
+        'minimum_transit_time' => null, 'delivery_date' => '2026-07-13', 'calculated_at' => '2026-07-10',
+    ]);
+    TransitTime::factory()->create([
+        'address_id' => $a->id, 'carrier_id' => $c->id, 'service_type' => 'FEDEX_GROUND',
+        'service_name' => 'FedEx Ground', 'maximum_transit_time' => null,
+        'minimum_transit_time' => null, 'delivery_date' => '2026-07-16', 'calculated_at' => '2026-07-10',
+    ]);
+
+    $this->svc->applyBestWayOptimization($a->load('transitTimes'));
+    $a->refresh();
+
+    // Overnight = 1 business day (7/10→7/13); Ground = 4 (7/9 ship, too early).
+    expect($a->ship_via_code)->toBe('OV')
+        ->and((int) $a->ship_via_days)->toBe(1)
+        ->and($a->recommended_ship_date->format('Y-m-d'))->toBe('2026-07-14')
+        ->and($a->bestway_optimized)->toBeTrue();
+});
+
 it('flags addresses where no same-account service can arrive in time (never silently ships late)', function () {
     $c = $this->carrier;
     // Only Ground (our account, too slow) and Express Saver (different account) exist.

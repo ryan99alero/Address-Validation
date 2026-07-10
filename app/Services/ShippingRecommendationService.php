@@ -540,8 +540,8 @@ class ShippingRecommendationService
         $accountNumber = $original?->account_number;
 
         $candidates = $transitTimes
-            ->map(function (TransitTime $t) use ($required, $floor, $plantId, $paymentType, $accountNumber) {
-                $duration = $t->transitBusinessDays();
+            ->map(function (TransitTime $t) use ($address, $required, $floor, $plantId, $paymentType, $accountNumber) {
+                $duration = $t->transitBusinessDays($address->requested_ship_date);
                 if ($duration === null) {
                     return null;
                 }
