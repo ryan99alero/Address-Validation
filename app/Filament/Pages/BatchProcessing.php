@@ -138,6 +138,29 @@ class BatchProcessing extends Page implements HasSchemas
     }
 
     /**
+     * Active single-carrier validation engines. FedEx↔UPS fallback chains were
+     * evaluated and dropped: both carriers validate US addresses against the same
+     * USPS/CASS data, so a second carrier recovers ~no additional corrections
+     * (measured n=120). validateBatchWithEngine() still supports chains if ever
+     * re-enabled, but they are intentionally not offered here.
+     *
+     * @return array<string, string>
+     */
+    public function validationEngineOptions(): array
+    {
+        $active = Carrier::where('is_active', true)->pluck('name', 'slug');
+        $options = [];
+        if ($active->has('fedex')) {
+            $options['fedex'] = 'FedEx';
+        }
+        if ($active->has('ups')) {
+            $options['ups'] = 'UPS';
+        }
+
+        return $options;
+    }
+
+    /**
      * In-page how-it-works guide for the Batch Processing tabs. Structure matches
      * the flexible guide-panel partial (heading/intro/rule/sections/note).
      *
@@ -155,11 +178,10 @@ class BatchProcessing extends Page implements HasSchemas
             ],
             'sections' => [
                 [
-                    'title' => 'Validation engines (Import tab)',
+                    'title' => 'Validation engine (Import tab)',
                     'items' => [
-                        ['name' => 'FedEx / UPS (single carrier)', 'means' => 'Checks the local invoice-correction cache first, then that one carrier\'s API for anything not found.', 'how' => 'cache → carrier'],
-                        ['name' => 'FedEx → UPS / UPS → FedEx (fallback chain)', 'means' => 'Cache first, then the carriers in order — the first one that returns a usable correction claims the address, so the second only sees what the first could not resolve. This is a fallback chain, not a two-source reconcile.', 'how' => 'cache → carrier A → carrier B'],
-                        ['name' => 'Check both sources', 'means' => 'Single-carrier only: validates against the invoice cache AND the carrier, flagging disagreements as Needs Review for a manual pick. Not used by fallback chains.'],
+                        ['name' => 'FedEx / UPS', 'means' => 'Checks the local invoice-correction cache first, then the chosen carrier\'s API for anything not found. FedEx and UPS validate US addresses against the same USPS/CASS data, so they return near-identical results — pick either.', 'how' => 'cache → carrier'],
+                        ['name' => 'Check both sources', 'means' => 'Validates against the invoice cache AND the carrier, flagging disagreements as Needs Review for a manual pick.'],
                     ],
                 ],
                 [
@@ -210,26 +232,11 @@ class BatchProcessing extends Page implements HasSchemas
                             ->helperText('Optional: Give this import a custom name for easy identification'),
                         Select::make('validation_engine')
                             ->label('Validation Engine')
-                            ->options(function (): array {
-                                $active = Carrier::where('is_active', true)->pluck('name', 'slug');
-                                $options = [];
-                                if ($active->has('fedex')) {
-                                    $options['fedex'] = 'FedEx';
-                                }
-                                if ($active->has('ups')) {
-                                    $options['ups'] = 'UPS';
-                                }
-                                if ($active->has('fedex') && $active->has('ups')) {
-                                    $options['fedex_ups'] = 'FedEx → UPS (fallback chain)';
-                                    $options['ups_fedex'] = 'UPS → FedEx (fallback chain)';
-                                }
-
-                                return $options;
-                            })
+                            ->options(fn (): array => $this->validationEngineOptions())
                             ->default('fedex')
                             ->required()
                             ->live()
-                            ->helperText('Single carrier, or a fallback chain: cache first, then each carrier in order — the first usable correction wins.'),
+                            ->helperText('Which carrier API to validate against. Checks the local invoice cache first, then that carrier.'),
                         Checkbox::make('auto_validate')
                             ->label('Automatically start validation after import')
                             ->default(true)
@@ -237,8 +244,7 @@ class BatchProcessing extends Page implements HasSchemas
                         Checkbox::make('check_both_sources')
                             ->label('Check both sources (Invoice DB + Carrier API)')
                             ->default(true)
-                            ->visible(fn ($get): bool => ! str_contains((string) $get('validation_engine'), '_'))
-                            ->helperText('Validate against both; addresses where they disagree are flagged Needs Review for a manual pick. Not used by fallback chains.'),
+                            ->helperText('Validate against both; addresses where they disagree are flagged Needs Review for a manual pick.'),
                         Checkbox::make('include_transit_times')
                             ->label('Include Time in Transit')
                             ->default(false)
