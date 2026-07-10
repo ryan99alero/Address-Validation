@@ -24,6 +24,7 @@ class CompareAddressCorrectionApis extends Command
         {--per-carrier=50 : bad addresses from each of UPS and FedEx invoices}
         {--units=20 : of the total, how many must involve a secondary unit (Suite/Bldg/Apt)}
         {--sleep=250 : ms between API calls}
+        {--skip-smarty : exclude Smarty (avoids spending its paid per-lookup quota)}
         {--select-only : show the selected sample only, make no API calls}';
 
     protected $description = 'Compare Smarty vs UPS vs FedEx address-correction APIs against real invoice corrections';
@@ -53,10 +54,12 @@ class CompareAddressCorrectionApis extends Command
         }
 
         $carriers = [
-            'smarty' => (new SmartyCarrier)->setCarrier(Carrier::where('slug', 'smarty')->firstOrFail()),
             'fedex' => (new FedExCarrier)->setCarrier(Carrier::where('slug', 'fedex')->firstOrFail()),
             'ups' => (new UpsCarrier)->setCarrier(Carrier::where('slug', 'ups')->firstOrFail()),
         ];
+        if (! $this->option('skip-smarty')) {
+            $carriers = ['smarty' => (new SmartyCarrier)->setCarrier(Carrier::where('slug', 'smarty')->firstOrFail())] + $carriers;
+        }
         $sleepUs = (int) $this->option('sleep') * 1000;
 
         $rows = [];
@@ -77,12 +80,22 @@ class CompareAddressCorrectionApis extends Command
                 'invoice_correction' => $this->fmt($line->corrected_address_1, $line->corrected_address_2, $line->corrected_city, $line->corrected_state, $line->corrected_postal),
             ];
 
+            $results = [];
             foreach ($carriers as $name => $carrier) {
                 $r = $this->runCarrier($carrier, $line, $sleepUs);
+                $results[$name] = $r;
                 $row[$name] = $r['ok'] ? $this->fmt($r['a1'], $r['a2'], $r['city'], $r['state'], $r['postal']) : 'ERR: '.$r['err'];
-                $row[$name.'_match'] = ! $r['ok'] ? 'ERR'
-                    : ($this->canon($r['a1'], $r['a2'], $r['city'], $r['state'], $r['postal']) === $truth ? 'FULL'
-                        : (($truthZip !== '' && $this->zip5($r['postal']) === $truthZip) ? 'ZIP' : 'NO'));
+                $row[$name.'_match'] = $this->scoreMatch($r, $truth, $truthZip);
+            }
+
+            // Simulate the production fallback chains from the SAME per-carrier calls
+            // (no extra API cost): the first carrier that returns a usable result
+            // (ok + STATUS_VALID + an address line) claims the address; otherwise the
+            // next carrier's result is used, mirroring validateBatchWithEngine().
+            foreach (['fedex_ups' => ['fedex', 'ups'], 'ups_fedex' => ['ups', 'fedex']] as $engine => $order) {
+                $chosen = $this->chooseChainResult($results, $order);
+                $row[$engine.'_match'] = $this->scoreMatch($chosen['result'], $truth, $truthZip);
+                $row[$engine.'_used'] = $chosen['used'];
             }
 
             $rows[] = $row;
@@ -100,7 +113,7 @@ class CompareAddressCorrectionApis extends Command
         return self::SUCCESS;
     }
 
-    /** @return array{ok:bool,err:?string,a1:?string,a2:?string,city:?string,state:?string,postal:?string} */
+    /** @return array{ok:bool,err:?string,status:?string,a1:?string,a2:?string,city:?string,state:?string,postal:?string} */
     private function runCarrier(object $carrier, object $line, int $sleepUs): array
     {
         $address = Address::create([
@@ -116,10 +129,10 @@ class CompareAddressCorrectionApis extends Command
         try {
             $carrier->validateAddress($address);
             $address->refresh();
-            $result = ['ok' => true, 'err' => null, 'a1' => $address->output_address_1, 'a2' => $address->output_address_2,
+            $result = ['ok' => true, 'err' => null, 'status' => $address->validation_status, 'a1' => $address->output_address_1, 'a2' => $address->output_address_2,
                 'city' => $address->output_city, 'state' => $address->output_state, 'postal' => $address->output_postal];
         } catch (\Throwable $e) {
-            $result = ['ok' => false, 'err' => substr($e->getMessage(), 0, 100), 'a1' => null, 'a2' => null, 'city' => null, 'state' => null, 'postal' => null];
+            $result = ['ok' => false, 'err' => substr($e->getMessage(), 0, 100), 'status' => null, 'a1' => null, 'a2' => null, 'city' => null, 'state' => null, 'postal' => null];
         } finally {
             $address->delete();
         }
@@ -127,6 +140,49 @@ class CompareAddressCorrectionApis extends Command
         usleep($sleepUs);
 
         return $result;
+    }
+
+    /**
+     * Score one carrier result against the invoice truth: FULL (reproduced the
+     * correction), ZIP (matched zip5 only), NO (returned something else), ERR.
+     *
+     * @param  array{ok:bool,a1:?string,a2:?string,city:?string,state:?string,postal:?string}  $r
+     */
+    private function scoreMatch(array $r, string $truth, string $truthZip): string
+    {
+        if (! $r['ok']) {
+            return 'ERR';
+        }
+
+        if ($this->canon($r['a1'], $r['a2'], $r['city'], $r['state'], $r['postal']) === $truth) {
+            return 'FULL';
+        }
+
+        return ($truthZip !== '' && $this->zip5($r['postal']) === $truthZip) ? 'ZIP' : 'NO';
+    }
+
+    /**
+     * Simulate a fallback chain over already-collected per-carrier results: the
+     * first carrier that returned a usable result (ok + STATUS_VALID + an address
+     * line) claims it; otherwise the last carrier's result stands. Mirrors
+     * AddressValidationService::validateBatchWithEngine().
+     *
+     * @param  array<string, array<string, mixed>>  $results
+     * @param  array<int, string>  $order
+     * @return array{result: array<string, mixed>, used: string}
+     */
+    private function chooseChainResult(array $results, array $order): array
+    {
+        foreach ($order as $slug) {
+            $r = $results[$slug];
+            if ($r['ok'] && ($r['status'] ?? null) === Address::STATUS_VALID && filled($r['a1'])) {
+                return ['result' => $r, 'used' => $slug];
+            }
+        }
+
+        $last = $order[count($order) - 1];
+
+        return ['result' => $results[$last], 'used' => $last];
     }
 
     private function select(int $perCarrier, int $units): Collection
@@ -181,15 +237,29 @@ class CompareAddressCorrectionApis extends Command
             }
             $n = count($set);
             $this->newLine();
-            $this->line("<comment>{$label} (n={$n})</comment> — FULL = reproduced the invoice correction; ZIP = matched zip5 only");
+            $this->line("<comment>{$label} (n={$n})</comment> — FULL = reproduced the invoice correction; ZIP = matched zip5 only; Fell-through = chain used its 2nd carrier");
+            $sample = $set[array_key_first($set)];
+            $engines = array_values(array_filter(
+                ['smarty', 'fedex', 'ups', 'fedex_ups', 'ups_fedex'],
+                fn ($c) => array_key_exists($c.'_match', $sample)
+            ));
+
             $stats = [];
-            foreach (['smarty', 'fedex', 'ups'] as $c) {
-                $full = count(array_filter($set, fn ($r) => $r[$c.'_match'] === 'FULL'));
-                $zip = count(array_filter($set, fn ($r) => $r[$c.'_match'] === 'ZIP'));
-                $err = count(array_filter($set, fn ($r) => $r[$c.'_match'] === 'ERR'));
-                $stats[] = [strtoupper($c), $full.' ('.round($full / $n * 100).'%)', $zip, $err];
+            foreach ($engines as $c) {
+                $full = count(array_filter($set, fn ($r) => ($r[$c.'_match'] ?? null) === 'FULL'));
+                $zip = count(array_filter($set, fn ($r) => ($r[$c.'_match'] ?? null) === 'ZIP'));
+                $err = count(array_filter($set, fn ($r) => ($r[$c.'_match'] ?? null) === 'ERR'));
+
+                // For chains: how often the second carrier was actually used.
+                $fellThrough = '';
+                if (str_contains($c, '_')) {
+                    $second = explode('_', $c)[1];
+                    $fellThrough = (string) count(array_filter($set, fn ($r) => ($r[$c.'_used'] ?? null) === $second));
+                }
+
+                $stats[] = [strtoupper($c), $full.' ('.round($full / $n * 100).'%)', $zip, $err, $fellThrough];
             }
-            $this->table(['API', 'FULL match', 'ZIP-only', 'ERR'], $stats);
+            $this->table(['Engine', 'FULL match', 'ZIP-only', 'ERR', 'Fell-through'], $stats);
         }
     }
 
