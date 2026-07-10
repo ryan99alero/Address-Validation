@@ -63,6 +63,7 @@ class ImportBatch extends Model
         'mapping_template_id',
         'field_mappings',
         'carrier_id',
+        'validation_engine',
         'include_transit_times',
         'check_both_sources',
         'transit_carrier_id',

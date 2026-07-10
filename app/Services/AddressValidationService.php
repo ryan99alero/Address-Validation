@@ -95,15 +95,7 @@ class AddressValidationService
         $validatedAddress = $service->validateAddress($address);
 
         // Update source to carrier API
-        $validationSource = match ($carrierSlug) {
-            'ups' => Address::SOURCE_UPS_API,
-            'fedex' => Address::SOURCE_FEDEX_API,
-            'usps' => Address::SOURCE_USPS_API,
-            'smarty' => Address::SOURCE_SMARTY_API,
-            default => Address::SOURCE_UPS_API,
-        };
-
-        $validatedAddress->update(['validation_source' => $validationSource]);
+        $validatedAddress->update(['validation_source' => $this->sourceForSlug($carrierSlug)]);
 
         return $validatedAddress;
     }
@@ -180,31 +172,7 @@ class AddressValidationService
         $misses = $addresses;
 
         if ($this->useLocalCache) {
-            $lookupInput = collect($addresses)
-                ->filter(fn (Address $address): bool => ! empty($address->input_address_1) && ! empty($address->input_postal))
-                ->map(fn (Address $address): array => [
-                    'address_1' => $address->input_address_1,
-                    'city' => $address->input_city,
-                    'state' => $address->input_state,
-                    'postal' => $address->input_postal,
-                    'country' => $address->input_country ?? 'US',
-                ]);
-
-            $lookup = AddressVariant::lookupBatch($lookupInput);
-
-            $misses = [];
-            foreach ($addresses as $key => $address) {
-                if (isset($lookup['hits'][$key])) {
-                    $address->applyValidationResult(
-                        $this->correctedToResult($lookup['hits'][$key]),
-                        $carrier->id,
-                        Address::SOURCE_LOCAL_CACHE
-                    );
-                    $results[$key] = $address;
-                } else {
-                    $misses[$key] = $address;
-                }
-            }
+            [$results, $misses] = $this->partitionByCache($addresses, $carrier);
         }
 
         // Anything not found locally goes to the carrier API.
@@ -220,6 +188,145 @@ class AddressValidationService
         ksort($results);
 
         return array_values($results);
+    }
+
+    /**
+     * Map an engine key to its ordered carrier pipeline. A single carrier slug
+     * yields a one-element pipeline (unchanged behavior); a chain like 'fedex_ups'
+     * yields ['fedex', 'ups'].
+     *
+     * @return array<int, string>
+     */
+    public function enginePipeline(string $engine): array
+    {
+        return match ($engine) {
+            'fedex_ups' => ['fedex', 'ups'],
+            'ups_fedex' => ['ups', 'fedex'],
+            default => [$engine],
+        };
+    }
+
+    /**
+     * Validate a batch using an engine that may be a single carrier slug
+     * ('fedex', 'ups') or a fallback chain ('fedex_ups', 'ups_fedex').
+     *
+     * Single carrier → identical to validateBatch() (honors $checkBoth). Chain →
+     * cache-first (shared), then each carrier in order; the first carrier that
+     * returns a usable (STATUS_VALID) result claims the address and it is not sent
+     * to later carriers. This is a fallback chain, NOT a DB-vs-API reconcile, so
+     * $checkBoth does not apply to chains.
+     *
+     * @param  array<Address>  $addresses
+     * @return array<Address>
+     */
+    public function validateBatchWithEngine(array $addresses, string $engine, bool $checkBoth = false): array
+    {
+        $pipeline = $this->enginePipeline($engine);
+
+        if (count($pipeline) === 1) {
+            return $this->validateBatch($addresses, $pipeline[0], $checkBoth);
+        }
+
+        $carriers = array_map(
+            fn (string $slug): Carrier => Carrier::where('slug', $slug)->where('is_active', true)->firstOrFail(),
+            $pipeline
+        );
+
+        $results = [];
+        $misses = $addresses;
+
+        // Cache-first (carrier-agnostic); stamp the primary carrier on hits.
+        if ($this->useLocalCache) {
+            [$hits, $misses] = $this->partitionByCache($misses, $carriers[0]);
+            $results += $hits;
+        }
+
+        // Run each carrier in order; a usable result removes the address from the pool.
+        foreach ($carriers as $carrier) {
+            if (empty($misses)) {
+                break;
+            }
+
+            $service = $this->createCarrierService($carrier);
+            $apiResults = array_values($service->validateBatch(array_values($misses)));
+            $source = $this->sourceForSlug($carrier->slug);
+
+            $stillMiss = [];
+            foreach (array_keys($misses) as $i => $key) {
+                $result = $apiResults[$i] ?? $misses[$key];
+
+                if ($result->validation_status === Address::STATUS_VALID && $result->output_address_1 !== null) {
+                    $result->update(['validation_source' => $source]);
+                    $results[$key] = $result;
+                } else {
+                    $stillMiss[$key] = $misses[$key];
+                }
+            }
+
+            $misses = $stillMiss;
+        }
+
+        // Anything still unresolved keeps whatever the last carrier left on it.
+        foreach ($misses as $key => $address) {
+            $results[$key] = $address->fresh() ?? $address;
+        }
+
+        ksort($results);
+
+        return array_values($results);
+    }
+
+    /**
+     * Resolve the batch's local-cache hits (applying them to the addresses) and
+     * return [hits, misses] keyed by the original array keys.
+     *
+     * @param  array<Address>  $addresses
+     * @return array{0: array<int|string, Address>, 1: array<int|string, Address>}
+     */
+    protected function partitionByCache(array $addresses, Carrier $carrier): array
+    {
+        $lookupInput = collect($addresses)
+            ->filter(fn (Address $address): bool => ! empty($address->input_address_1) && ! empty($address->input_postal))
+            ->map(fn (Address $address): array => [
+                'address_1' => $address->input_address_1,
+                'city' => $address->input_city,
+                'state' => $address->input_state,
+                'postal' => $address->input_postal,
+                'country' => $address->input_country ?? 'US',
+            ]);
+
+        $lookup = AddressVariant::lookupBatch($lookupInput);
+
+        $hits = [];
+        $misses = [];
+        foreach ($addresses as $key => $address) {
+            if (isset($lookup['hits'][$key])) {
+                $address->applyValidationResult(
+                    $this->correctedToResult($lookup['hits'][$key]),
+                    $carrier->id,
+                    Address::SOURCE_LOCAL_CACHE
+                );
+                $hits[$key] = $address;
+            } else {
+                $misses[$key] = $address;
+            }
+        }
+
+        return [$hits, $misses];
+    }
+
+    /**
+     * Map a carrier slug to its Address validation-source constant.
+     */
+    protected function sourceForSlug(string $slug): string
+    {
+        return match ($slug) {
+            'ups' => Address::SOURCE_UPS_API,
+            'fedex' => Address::SOURCE_FEDEX_API,
+            'usps' => Address::SOURCE_USPS_API,
+            'smarty' => Address::SOURCE_SMARTY_API,
+            default => Address::SOURCE_UPS_API,
+        };
     }
 
     /**

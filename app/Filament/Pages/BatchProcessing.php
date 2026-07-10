@@ -90,8 +90,7 @@ class BatchProcessing extends Page implements HasSchemas
     public function mount(): void
     {
         $this->uploadForm->fill([
-            'carrier_id' => Carrier::where('slug', 'fedex')->where('is_active', true)->first()?->id
-                ?? Carrier::where('is_active', true)->first()?->id,
+            'validation_engine' => Carrier::where('slug', 'fedex')->where('is_active', true)->exists() ? 'fedex' : 'ups',
             'auto_validate' => true,
             'check_both_sources' => true,
         ]);
@@ -163,11 +162,28 @@ class BatchProcessing extends Page implements HasSchemas
                             ->label('Import Name')
                             ->placeholder('Leave blank to use filename')
                             ->helperText('Optional: Give this import a custom name for easy identification'),
-                        Select::make('carrier_id')
-                            ->label('Validation API')
-                            ->options(Carrier::where('is_active', true)->pluck('name', 'id'))
+                        Select::make('validation_engine')
+                            ->label('Validation Engine')
+                            ->options(function (): array {
+                                $active = Carrier::where('is_active', true)->pluck('name', 'slug');
+                                $options = [];
+                                if ($active->has('fedex')) {
+                                    $options['fedex'] = 'FedEx';
+                                }
+                                if ($active->has('ups')) {
+                                    $options['ups'] = 'UPS';
+                                }
+                                if ($active->has('fedex') && $active->has('ups')) {
+                                    $options['fedex_ups'] = 'FedEx → UPS (fallback chain)';
+                                    $options['ups_fedex'] = 'UPS → FedEx (fallback chain)';
+                                }
+
+                                return $options;
+                            })
+                            ->default('fedex')
                             ->required()
-                            ->helperText('Select the API to use for address validation'),
+                            ->live()
+                            ->helperText('Single carrier, or a fallback chain: cache first, then each carrier in order — the first usable correction wins.'),
                         Checkbox::make('auto_validate')
                             ->label('Automatically start validation after import')
                             ->default(true)
@@ -175,7 +191,8 @@ class BatchProcessing extends Page implements HasSchemas
                         Checkbox::make('check_both_sources')
                             ->label('Check both sources (Invoice DB + Carrier API)')
                             ->default(true)
-                            ->helperText('Validate against both; addresses where they disagree are flagged Needs Review for a manual pick'),
+                            ->visible(fn ($get): bool => ! str_contains((string) $get('validation_engine'), '_'))
+                            ->helperText('Validate against both; addresses where they disagree are flagged Needs Review for a manual pick. Not used by fallback chains.'),
                         Checkbox::make('include_transit_times')
                             ->label('Include Time in Transit')
                             ->default(false)
@@ -398,6 +415,13 @@ class BatchProcessing extends Page implements HasSchemas
             // Count rows efficiently without loading all data into memory
             $totalRows = $importService->countRows($file);
 
+            // The engine may be a single carrier or a fallback chain; carrier_id stores
+            // the PRIMARY carrier (first in the chain) so chunk-sizing, transit and other
+            // Carrier-model lookups keep working. validation_engine drives the loop.
+            $engine = $data['validation_engine'] ?? 'fedex';
+            $primarySlug = explode('_', $engine)[0];
+            $primaryCarrier = Carrier::where('slug', $primarySlug)->where('is_active', true)->first();
+
             $importName = $data['import_name'] ?? null;
             $this->batch = ImportBatch::create([
                 'name' => $importName ?: pathinfo($this->originalFilename, PATHINFO_FILENAME),
@@ -405,7 +429,8 @@ class BatchProcessing extends Page implements HasSchemas
                 'file_path' => $filePath,
                 'status' => ImportBatch::STATUS_MAPPING,
                 'total_rows' => $totalRows,
-                'carrier_id' => $data['carrier_id'],
+                'carrier_id' => $primaryCarrier?->id,
+                'validation_engine' => $engine,
                 'include_transit_times' => $data['include_transit_times'] ?? false,
                 'check_both_sources' => $data['check_both_sources'] ?? false,
                 'transit_carrier_id' => $data['transit_carrier_id'] ?? null,
@@ -650,8 +675,7 @@ class BatchProcessing extends Page implements HasSchemas
         $this->lastProcessedFile = null;
 
         $this->uploadForm->fill([
-            'carrier_id' => Carrier::where('slug', 'fedex')->where('is_active', true)->first()?->id
-                ?? Carrier::where('is_active', true)->first()?->id,
+            'validation_engine' => Carrier::where('slug', 'fedex')->where('is_active', true)->exists() ? 'fedex' : 'ups',
             'auto_validate' => true,
             'check_both_sources' => true,
         ]);

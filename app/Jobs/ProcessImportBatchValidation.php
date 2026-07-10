@@ -107,10 +107,12 @@ class ProcessImportBatchValidation implements ShouldQueue
             }
 
             try {
-                // Use native batch validation (FedEx/Smarty) or concurrent (UPS)
-                $corrections = $validationService->validateBatch(
+                // Engine may be a single carrier or a fallback chain (fedex_ups / ups_fedex).
+                // Falls back to the batch's carrier slug for older batches with no engine set.
+                $engine = $this->batch->validation_engine ?: $carrier->slug;
+                $corrections = $validationService->validateBatchWithEngine(
                     $chunk->all(),
-                    $carrier->slug,
+                    $engine,
                     (bool) $this->batch->check_both_sources,
                 );
 
