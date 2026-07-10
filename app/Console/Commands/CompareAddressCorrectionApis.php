@@ -98,6 +98,15 @@ class CompareAddressCorrectionApis extends Command
                 $row[$engine.'_used'] = $chosen['used'];
             }
 
+            // Best-of-both: the theoretical ceiling of stacking done RIGHT (a perfect
+            // picker takes whichever carrier reproduced the correction). If this beats
+            // the best single carrier, stacking has value — but needs a reconcile, not
+            // the fallthrough chain above.
+            $matches = array_map(fn ($s) => $row[$s.'_match'] ?? 'ERR', array_keys($carriers));
+            $row['best_of_both_match'] = in_array('FULL', $matches, true) ? 'FULL'
+                : (in_array('ZIP', $matches, true) ? 'ZIP'
+                    : (in_array('NO', $matches, true) ? 'NO' : 'ERR'));
+
             $rows[] = $row;
             $bar->advance();
         }
@@ -240,7 +249,7 @@ class CompareAddressCorrectionApis extends Command
             $this->line("<comment>{$label} (n={$n})</comment> — FULL = reproduced the invoice correction; ZIP = matched zip5 only; Fell-through = chain used its 2nd carrier");
             $sample = $set[array_key_first($set)];
             $engines = array_values(array_filter(
-                ['smarty', 'fedex', 'ups', 'fedex_ups', 'ups_fedex'],
+                ['smarty', 'fedex', 'ups', 'fedex_ups', 'ups_fedex', 'best_of_both'],
                 fn ($c) => array_key_exists($c.'_match', $sample)
             ));
 
@@ -250,9 +259,9 @@ class CompareAddressCorrectionApis extends Command
                 $zip = count(array_filter($set, fn ($r) => ($r[$c.'_match'] ?? null) === 'ZIP'));
                 $err = count(array_filter($set, fn ($r) => ($r[$c.'_match'] ?? null) === 'ERR'));
 
-                // For chains: how often the second carrier was actually used.
+                // For the two real chains: how often the second carrier was used.
                 $fellThrough = '';
-                if (str_contains($c, '_')) {
+                if (in_array($c, ['fedex_ups', 'ups_fedex'], true)) {
                     $second = explode('_', $c)[1];
                     $fellThrough = (string) count(array_filter($set, fn ($r) => ($r[$c.'_used'] ?? null) === $second));
                 }
