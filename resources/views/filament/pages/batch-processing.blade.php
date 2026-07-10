@@ -18,6 +18,11 @@
         </x-filament::tabs.item>
     </x-filament::tabs>
 
+    {{-- Collapsible how-it-works guide --}}
+    <div style="margin-top: 16px;">
+        @include('filament.partials.guide-panel', ['guide' => $this->viewGuide()])
+    </div>
+
     {{-- Tab Content --}}
     <div style="margin-top: 24px;" wire:key="batch-tab-{{ $activeTab }}">
         {{-- ==================== IMPORT TAB ==================== --}}

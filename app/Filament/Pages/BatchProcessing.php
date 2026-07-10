@@ -137,6 +137,52 @@ class BatchProcessing extends Page implements HasSchemas
         $this->activeTab = $tab;
     }
 
+    /**
+     * In-page how-it-works guide for the Batch Processing tabs. Structure matches
+     * the flexible guide-panel partial (heading/intro/rule/sections/note).
+     *
+     * @return array<string, mixed>
+     */
+    public function viewGuide(): array
+    {
+        return [
+            'heading' => 'How Batch Processing works',
+            'description' => 'Validation engines, transit times, BestWay, reverse scheduling — and where the results land',
+            'intro' => 'Import a spreadsheet, map its columns, and validate every address. Optionally fetch transit times, optimize the service (BestWay), and reverse-schedule ship dates. Then download the results from the Export tab.',
+            'rule' => [
+                'label' => 'To see transit / BestWay / ship-date results in your download',
+                'text' => 'those columns are only appended when you ask for them. If the batch was run with Time in Transit or BestWay, the Export tab auto-ticks "Include service / transit results" — otherwise tick it yourself. A plain export contains only your original columns.',
+            ],
+            'sections' => [
+                [
+                    'title' => 'Validation engines (Import tab)',
+                    'items' => [
+                        ['name' => 'FedEx / UPS (single carrier)', 'means' => 'Checks the local invoice-correction cache first, then that one carrier\'s API for anything not found.', 'how' => 'cache → carrier'],
+                        ['name' => 'FedEx → UPS / UPS → FedEx (fallback chain)', 'means' => 'Cache first, then the carriers in order — the first one that returns a usable correction claims the address, so the second only sees what the first could not resolve. This is a fallback chain, not a two-source reconcile.', 'how' => 'cache → carrier A → carrier B'],
+                        ['name' => 'Check both sources', 'means' => 'Single-carrier only: validates against the invoice cache AND the carrier, flagging disagreements as Needs Review for a manual pick. Not used by fallback chains.'],
+                    ],
+                ],
+                [
+                    'title' => 'Transit & service optimization',
+                    'items' => [
+                        ['name' => 'Time in Transit', 'means' => 'Fetches each service\'s delivery date, transit days and distance for every address, from your origin ZIP.'],
+                        ['name' => 'BestWay', 'means' => 'Re-maps each address\'s Ship Via Code to the cheapest service that still meets the Required On-Site Date (preserving the original code so you can see what changed).'],
+                        ['name' => 'Reverse scheduling', 'means' => 'For addresses with a Required On-Site Date, works backward to the latest ship date + cheapest service that still arrives on time. Duration-based and holiday-naive — a planning aid, not a booking guarantee.', 'how' => 'ship date = required date − transit business days'],
+                    ],
+                ],
+                [
+                    'title' => 'Export tab',
+                    'items' => [
+                        ['name' => 'Base format', 'means' => 'Re-use your import field mapping, or a saved Export Template (ePace / WorldShip / FedEx / custom).'],
+                        ['name' => 'Include service / transit results', 'means' => 'Appends the validation, transit, BestWay and reverse-schedule columns (including a "What Changed" summary) after your normal columns. Auto-enabled when the batch computed them.'],
+                        ['name' => 'Filters', 'means' => 'Limit the export by validation status (valid / invalid / …) and by source (invoice cache vs carrier API).'],
+                    ],
+                ],
+            ],
+            'note' => 'Results are computed during import (background job); the Export tab reads what was already calculated.',
+        ];
+    }
+
     // ===== IMPORT FORM =====
     public function uploadForm(Schema $schema): Schema
     {
