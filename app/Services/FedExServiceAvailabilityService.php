@@ -190,9 +190,17 @@ class FedExServiceAvailabilityService
             $shipDate = now();
         }
 
+        // FedEx delivery/residential flag drives Ground vs Home Delivery and can
+        // shift commit dates; use the validated value, falling back to the imported one.
+        $isResidential = (bool) ($address->is_residential ?? $address->input_is_residential ?? false);
+
         return [
             'requestedShipment' => [
-                'shipDatestamp' => $shipDate->format('Y-m-d'),
+                // NOTE: FedEx key is camel-cased "shipDateStamp" (case-sensitive). A
+                // misspelling is silently ignored and transit is computed from TODAY
+                // instead of the requested ship date.
+                'shipDateStamp' => $shipDate->format('Y-m-d'),
+                'pickupType' => 'USE_SCHEDULED_PICKUP',
                 'shipper' => [
                     'address' => $shipperAddress,
                 ],
@@ -201,6 +209,7 @@ class FedExServiceAvailabilityService
                         'address' => [
                             'postalCode' => $destinationPostalCode,
                             'countryCode' => $destinationCountryCode,
+                            'residential' => $isResidential,
                         ],
                     ],
                 ],
