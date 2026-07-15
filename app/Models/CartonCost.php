@@ -19,6 +19,7 @@ class CartonCost extends Model
         'ship_date',
         'pace_job_number',
         'pace_customer_id',
+        'is_third_party',
         'synced_at',
         'recouped_at',
     ];
@@ -31,6 +32,7 @@ class CartonCost extends Model
         return [
             'ship_cost' => 'decimal:2',
             'ship_date' => 'date',
+            'is_third_party' => 'boolean',
             'synced_at' => 'datetime',
             'recouped_at' => 'datetime',
         ];

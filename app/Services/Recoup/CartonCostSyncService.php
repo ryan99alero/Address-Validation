@@ -39,6 +39,9 @@ class CartonCostSyncService
         'ship_date' => '@actualDate',
         'pace_job_number' => 'shipment/job/@job',
         'pace_customer_id' => 'shipment/job/@customer',
+        // Third-party billing is a shipment-level flag; read it off the carton's
+        // master JobShipment (same traversal as job/customer).
+        'is_third_party' => 'shipment/@thirdPartyCharges',
     ];
 
     /**
@@ -84,6 +87,7 @@ class CartonCostSyncService
                 'ship_date' => $shipDate,
                 'pace_job_number' => $row['pace_job_number'] ?? null,
                 'pace_customer_id' => $row['pace_customer_id'] ?? null,
+                'is_third_party' => $this->interpretThirdParty($row['is_third_party'] ?? null),
                 'synced_at' => $now,
                 'updated_at' => $now,
                 'created_at' => $now,
@@ -98,7 +102,7 @@ class CartonCostSyncService
             CartonCost::upsert(
                 $chunk,
                 ['tracking_number'],
-                ['ship_cost', 'ship_date', 'pace_job_number', 'pace_customer_id', 'synced_at', 'updated_at'],
+                ['ship_cost', 'ship_date', 'pace_job_number', 'pace_customer_id', 'is_third_party', 'synced_at', 'updated_at'],
             );
         }
 
@@ -214,7 +218,7 @@ class CartonCostSyncService
      * into a carton_costs row.
      *
      * @param  array<string, mixed>  $vo
-     * @return array{tracking_number:?string, ship_cost:mixed, ship_date:?string, pace_job_number:?string, pace_customer_id:?string}
+     * @return array{tracking_number:?string, ship_cost:mixed, ship_date:?string, pace_job_number:?string, pace_customer_id:?string, is_third_party:mixed}
      */
     public function mapCartonRow(array $vo): array
     {
@@ -229,7 +233,36 @@ class CartonCostSyncService
             'ship_date' => $shipDate,
             'pace_job_number' => $vo['pace_job_number'] ?? null,
             'pace_customer_id' => $vo['pace_customer_id'] ?? null,
+            'is_third_party' => $vo['is_third_party'] ?? null,
         ];
+    }
+
+    /**
+     * Interpret Pace's thirdPartyCharges value into a boolean, or null when unknown
+     * (empty/unrecognized) so the caller can fall back to the base-charge heuristic.
+     * Tolerant of boolean, "true"/"false", "Y"/"N", 1/0, or a non-zero dollar amount.
+     */
+    protected function interpretThirdParty(mixed $value): ?bool
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        $s = strtolower(trim((string) $value));
+        if (in_array($s, ['1', 'true', 'yes', 'y', 't'], true)) {
+            return true;
+        }
+        if (in_array($s, ['0', 'false', 'no', 'n', 'f'], true)) {
+            return false;
+        }
+        if (is_numeric($s)) {
+            return (float) $s !== 0.0; // a non-zero third-party charge total ⇒ third-party
+        }
+
+        return null;
     }
 
     protected function resolvePaceClient(): ?PaceApiClient
