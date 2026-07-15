@@ -25,32 +25,26 @@ class CarrierRollupService
         // heuristic simply never matches a base charge.
         $baseCategoryId = (int) (DB::table('charge_categories')->where('name', 'Base Transportation')->value('id') ?? 0);
 
-        DB::transaction(function () use ($baseCategoryId): void {
+        // Precompute per-tracking billing type into an INDEXED temp table (Pace flag
+        // first, else the base-charge heuristic). Joining an unindexed derived
+        // subquery against the 3.4M-row charges table is O(n×m) — minutes long; an
+        // indexed temp table makes the aggregation join an index lookup. Built
+        // outside the swap transaction (temp tables are session-scoped).
+        $this->buildTrackingBillingTemp($baseCategoryId);
+
+        DB::transaction(function (): void {
             DB::table('carrier_charge_rollup')->delete();
-            // Per-tracking billing type resolved set-based (Pace flag first, else the
-            // base-charge heuristic), then the rollup groups by it. NULL tracking
-            // (account-level fees) stays unclassified (is_third_party NULL).
-            DB::statement("
+            // NULL tracking (account-level fees) has no temp row → is_third_party NULL.
+            DB::statement('
                 INSERT INTO carrier_charge_rollup
                     (carrier_id, charge_category_id, is_third_party, year, charge_count, total_amount, distinct_ships, created_at, updated_at)
-                SELECT cc.carrier_id, cc.charge_category_id, tp.is_third_party, YEAR(cc.invoice_date), COUNT(*),
+                SELECT cc.carrier_id, cc.charge_category_id, tmp.is_third_party, YEAR(cc.invoice_date), COUNT(*),
                        COALESCE(SUM(cc.amount), 0), COUNT(DISTINCT cc.tracking_number), NOW(), NOW()
                 FROM carrier_charges cc
-                LEFT JOIN (
-                    SELECT t.tracking_number,
-                           CASE
-                               WHEN k.is_third_party IS NOT NULL THEN k.is_third_party
-                               WHEN b.tracking_number IS NOT NULL THEN 0
-                               ELSE 1
-                           END AS is_third_party
-                    FROM (SELECT DISTINCT tracking_number FROM carrier_charges WHERE tracking_number IS NOT NULL AND tracking_number <> '') t
-                    LEFT JOIN carton_costs k ON k.tracking_number = t.tracking_number
-                    LEFT JOIN (SELECT DISTINCT tracking_number FROM carrier_charges WHERE charge_category_id = {$baseCategoryId}) b
-                        ON b.tracking_number = t.tracking_number
-                ) tp ON tp.tracking_number = cc.tracking_number
+                LEFT JOIN tmp_tracking_billing tmp ON tmp.tracking_number = cc.tracking_number
                 WHERE cc.invoice_date IS NOT NULL
-                GROUP BY cc.carrier_id, cc.charge_category_id, tp.is_third_party, YEAR(cc.invoice_date)
-            ");
+                GROUP BY cc.carrier_id, cc.charge_category_id, tmp.is_third_party, YEAR(cc.invoice_date)
+            ');
 
             DB::table('carrier_ship_rollup')->delete();
             DB::statement('
@@ -66,6 +60,38 @@ class CarrierRollupService
                 GROUP BY cc.carrier_id, YEAR(cc.invoice_date)
             ');
         });
+
+        DB::statement('DROP TEMPORARY TABLE IF EXISTS tmp_tracking_billing');
+    }
+
+    /**
+     * Build an indexed temp table mapping tracking_number → is_third_party. Pace's
+     * carton flag wins where known; otherwise the base-charge heuristic (a tracking
+     * with no Base Transportation charge is third-party). The PRIMARY KEY makes the
+     * later join to carrier_charges an index lookup rather than a full-scan.
+     */
+    protected function buildTrackingBillingTemp(int $baseCategoryId): void
+    {
+        DB::statement('DROP TEMPORARY TABLE IF EXISTS tmp_tracking_billing');
+        DB::statement('
+            CREATE TEMPORARY TABLE tmp_tracking_billing (
+                tracking_number VARCHAR(64) NOT NULL PRIMARY KEY,
+                is_third_party TINYINT(1) NULL
+            )
+        ');
+        DB::statement("
+            INSERT INTO tmp_tracking_billing (tracking_number, is_third_party)
+            SELECT t.tracking_number,
+                   CASE
+                       WHEN k.is_third_party IS NOT NULL THEN k.is_third_party
+                       WHEN b.tracking_number IS NOT NULL THEN 0
+                       ELSE 1
+                   END
+            FROM (SELECT DISTINCT tracking_number FROM carrier_charges WHERE tracking_number IS NOT NULL AND tracking_number <> '') t
+            LEFT JOIN carton_costs k ON k.tracking_number = t.tracking_number
+            LEFT JOIN (SELECT DISTINCT tracking_number FROM carrier_charges WHERE charge_category_id = {$baseCategoryId}) b
+                ON b.tracking_number = t.tracking_number
+        ");
     }
 
     /**
