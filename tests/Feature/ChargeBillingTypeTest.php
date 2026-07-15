@@ -22,7 +22,7 @@ beforeEach(function () {
     $this->fuel = ChargeCategory::create(['name' => 'Fuel Surcharge']);
 });
 
-function charge(string $tracking, int $categoryId, float $amount = 10): void
+function billingCharge(string $tracking, int $categoryId, float $amount = 10): void
 {
     CarrierCharge::create([
         'carrier_invoice_id' => test()->invoice->id, 'carrier_id' => test()->carrier->id,
@@ -39,19 +39,19 @@ function paceCarton(string $tracking, ?bool $thirdParty): void
 it('classifies charges: Pace flag wins, base-charge heuristic fills the gap', function () {
     // Pace says THIRD-PARTY even though a base charge is present (Pace overrides heuristic).
     paceCarton('PACE_TP', true);
-    charge('PACE_TP', $this->base->id);
-    charge('PACE_TP', $this->fuel->id);
+    billingCharge('PACE_TP', $this->base->id);
+    billingCharge('PACE_TP', $this->fuel->id);
 
     // Pace says ON-ACCOUNT even though there's no base charge (Pace overrides heuristic).
     paceCarton('PACE_ACCT', false);
-    charge('PACE_ACCT', $this->fuel->id);
+    billingCharge('PACE_ACCT', $this->fuel->id);
 
     // No Pace flag → heuristic: no base charge ⇒ third-party.
-    charge('HEUR_TP', $this->fuel->id);
+    billingCharge('HEUR_TP', $this->fuel->id);
 
     // No Pace flag → heuristic: has base charge ⇒ on-account.
-    charge('HEUR_ACCT', $this->base->id);
-    charge('HEUR_ACCT', $this->fuel->id);
+    billingCharge('HEUR_ACCT', $this->base->id);
+    billingCharge('HEUR_ACCT', $this->fuel->id);
 
     $thirdParty = CarrierCharge::thirdParty()->distinct()->pluck('tracking_number')->sort()->values()->all();
     $onAccount = CarrierCharge::onAccount()->distinct()->pluck('tracking_number')->sort()->values()->all();
@@ -69,7 +69,7 @@ it('works carrier-agnostically (FedEx tracking with no Pace + no base = third-pa
 });
 
 it('excludes account-level fees with no tracking number from both buckets', function () {
-    charge('', $this->fuel->id); // empty tracking = account-level fee
+    billingCharge('', $this->fuel->id); // empty tracking = account-level fee
     CarrierCharge::where('tracking_number', '')->update(['tracking_number' => null]);
 
     expect(CarrierCharge::thirdParty()->count())->toBe(0)
