@@ -60,12 +60,18 @@ class FedExShipmentDeriveService
     }
 
     /**
-     * Fill the base/fee cost split on an invoice's EXISTING (non-derived, i.e. UPS
-     * PDF) shipments from its charges, matched by tracking. Returns rows updated.
+     * Fill the per-shipment cost (total + base/fee split) on an invoice's EXISTING
+     * (non-derived, i.e. UPS PDF) shipments from its charges. Matched by
+     * carrier_shipment_id — NOT tracking — because a single UPS tracking spans several
+     * shipment rows (outbound + address-correction + shipping-charge-correction sections);
+     * keying by tracking would give every row the tracking's full total and triple-count.
+     * printed_total is set to the shipment's actual charge sum so the Per-Shipment Costs
+     * view reconciles to the invoice's charges (the PDF's printed Total is null for most
+     * blocks). Returns rows updated.
      */
     public function enrichCostsForInvoice(CarrierInvoice $invoice): int
     {
-        $agg = $this->aggregateByTracking($invoice->id)->keyBy('tracking_number');
+        $agg = $this->aggregateByShipment($invoice->id)->keyBy('carrier_shipment_id');
         if ($agg->isEmpty()) {
             return 0;
         }
@@ -73,14 +79,14 @@ class FedExShipmentDeriveService
         $updated = 0;
         $invoice->shipments()
             ->where('source_type', '!=', self::SOURCE)
-            ->whereNotNull('tracking_number')
             ->chunkById(500, function ($shipments) use ($agg, &$updated): void {
                 foreach ($shipments as $shipment) {
-                    $a = $agg->get($shipment->tracking_number);
+                    $a = $agg->get($shipment->id);
                     if (! $a) {
                         continue;
                     }
                     $shipment->forceFill([
+                        'printed_total' => $a->total_cost,
                         'base_amount' => $a->base_amount,
                         'fee_amount' => $a->fee_amount,
                         'fee_abbrevs' => $a->fee_abbrevs,
@@ -90,6 +96,30 @@ class FedExShipmentDeriveService
             });
 
         return $updated;
+    }
+
+    /**
+     * Aggregate an invoice's charges into one row per carrier_shipment_id (the precise
+     * per-shipment grain). total_cost is every charge on the shipment; base/fee split it.
+     *
+     * @return Collection<int, object>
+     */
+    protected function aggregateByShipment(int $invoiceId): Collection
+    {
+        $baseCategoryId = (int) (ChargeCategory::query()->where('name', 'Base Transportation')->value('id') ?? 0);
+        $discountCategoryId = (int) (ChargeCategory::query()->where('name', 'Discount / Credit')->value('id') ?? 0);
+
+        return DB::table('carrier_charges as cc')
+            ->leftJoin('charge_categories as cat', 'cat.id', '=', 'cc.charge_category_id')
+            ->where('cc.carrier_invoice_id', $invoiceId)
+            ->whereNotNull('cc.carrier_shipment_id')
+            ->groupBy('cc.carrier_shipment_id')
+            ->selectRaw('cc.carrier_shipment_id')
+            ->selectRaw('SUM(cc.amount) as total_cost')
+            ->selectRaw('SUM(CASE WHEN cc.charge_category_id = ? THEN cc.amount ELSE 0 END) as base_amount', [$baseCategoryId])
+            ->selectRaw('SUM(CASE WHEN cc.charge_category_id IN (?, ?) THEN 0 ELSE cc.amount END) as fee_amount', [$baseCategoryId, $discountCategoryId])
+            ->selectRaw('GROUP_CONCAT(DISTINCT CASE WHEN cc.charge_category_id NOT IN (?, ?) THEN cat.abbreviation END) as fee_abbrevs', [$baseCategoryId, $discountCategoryId])
+            ->get();
     }
 
     /**

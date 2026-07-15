@@ -55,23 +55,45 @@ it('derives one shipment per tracking with total + billing type from the charges
         ->and($t2->is_third_party)->toBeTrue();
 });
 
-it('enriches existing (UPS PDF) shipments with the cost split, without duplicating', function () {
-    CarrierShipment::insert([
+it('enriches existing (UPS PDF) shipments with the total + cost split, without duplicating', function () {
+    $u1 = CarrierShipment::create([
         'carrier_invoice_id' => $this->invoice->id, 'carrier_id' => $this->carrier->id,
         'tracking_number' => 'U1', 'source_type' => 'pdf', 'is_third_party' => false, 'printed_total' => 15,
-        'created_at' => now(), 'updated_at' => now(),
     ]);
-    fdxCharge('U1', $this->base->id, 12);
-    fdxCharge('U1', $this->fuel->id, 3);
+    fdxCharge('U1', $this->base->id, 12, ['carrier_shipment_id' => $u1->id]);
+    fdxCharge('U1', $this->fuel->id, 3, ['carrier_shipment_id' => $u1->id]);
 
     $updated = app(FedExShipmentDeriveService::class)->enrichCostsForInvoice($this->invoice);
 
-    $u1 = CarrierShipment::where('tracking_number', 'U1')->first();
+    $u1->refresh();
     expect($updated)->toBe(1)
+        ->and((float) $u1->printed_total)->toBe(15.0) // total = sum of charges (12 + 3)
         ->and((float) $u1->base_amount)->toBe(12.0)
         ->and((float) $u1->fee_amount)->toBe(3.0)
         ->and($u1->fee_abbrevs)->toBe('FUEL')
         ->and(CarrierShipment::where('tracking_number', 'U1')->count())->toBe(1); // no new row
+});
+
+it('splits cost per shipment-row, not per tracking (a UPS tracking spans several sections)', function () {
+    // Same tracking, two shipment rows (outbound + a correction section). Charges link to
+    // their own row via carrier_shipment_id — enrich must NOT give each row the tracking total.
+    $outbound = CarrierShipment::create([
+        'carrier_invoice_id' => $this->invoice->id, 'carrier_id' => $this->carrier->id,
+        'tracking_number' => 'DUP', 'section' => 'outbound', 'source_type' => 'pdf', 'is_third_party' => false,
+    ]);
+    $correction = CarrierShipment::create([
+        'carrier_invoice_id' => $this->invoice->id, 'carrier_id' => $this->carrier->id,
+        'tracking_number' => 'DUP', 'section' => 'shipping_charge_correction', 'source_type' => 'pdf', 'is_third_party' => false,
+    ]);
+    fdxCharge('DUP', $this->base->id, 20, ['carrier_shipment_id' => $outbound->id]);
+    fdxCharge('DUP', $this->fuel->id, 5, ['carrier_shipment_id' => $outbound->id]);
+    fdxCharge('DUP', $this->fuel->id, 31, ['carrier_shipment_id' => $correction->id]);
+
+    app(FedExShipmentDeriveService::class)->enrichCostsForInvoice($this->invoice);
+
+    expect((float) $outbound->refresh()->printed_total)->toBe(25.0)   // 20 + 5
+        ->and((float) $correction->refresh()->printed_total)->toBe(31.0) // NOT 56 (the tracking total)
+        ->and((float) CarrierShipment::where('tracking_number', 'DUP')->sum('printed_total'))->toBe(56.0);
 });
 
 it('is idempotent and never touches non-derived (UPS PDF) shipments', function () {

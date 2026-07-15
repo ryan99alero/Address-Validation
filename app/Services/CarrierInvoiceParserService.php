@@ -1386,6 +1386,15 @@ class CarrierInvoiceParserService
 
         $this->persistUpsPdf($invoice, $parsed, $grandTotal);
 
+        // Fill each shipment's cost (total + base/fee split) from the charges just
+        // persisted, so the Per-Shipment Costs view totals the real per-shipment cost
+        // (not the PDF's mostly-null printed Total). Best-effort — never fail the import.
+        try {
+            app(FedExShipmentDeriveService::class)->enrichCostsForInvoice($invoice);
+        } catch (\Throwable $e) {
+            Log::warning('UPS shipment cost enrich failed', ['invoice_id' => $invoice->id, 'error' => $e->getMessage()]);
+        }
+
         // Feed the address-correction cache from the same PDF (reuses the tested parser).
         $corrections = (new UpsPdfInvoiceParser)->parse($text)['corrections'];
         if ($corrections !== []) {
