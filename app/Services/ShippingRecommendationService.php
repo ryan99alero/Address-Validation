@@ -540,8 +540,10 @@ class ShippingRecommendationService
         $accountNumber = $original?->account_number;
 
         $candidates = $transitTimes
-            ->map(function (TransitTime $t) use ($address, $required, $floor, $plantId, $paymentType, $accountNumber) {
-                $duration = $t->transitBusinessDays($address->requested_ship_date);
+            ->map(function (TransitTime $t) use ($required, $floor, $plantId, $paymentType, $accountNumber) {
+                // Duration is anchored on the transit fetch date (FedEx ignores a
+                // future ship date), then inverted from the required date below.
+                $duration = $t->transitBusinessDays();
                 if ($duration === null) {
                     return null;
                 }

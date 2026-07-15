@@ -208,8 +208,11 @@ class TransitTime extends Model
      * carrier's maximum transit time; falls back to counting weekdays between the
      * anchor ship date and delivery_date. Returns null when nothing is known.
      *
-     * $shipDate anchors the fallback count on the actual probe ship date; when
-     * omitted it uses the loaded address's requested_ship_date, else calculated_at.
+     * Anchored on calculated_at (the fetch date). FedEx's availability/transit
+     * endpoint IGNORES a future shipDateStamp and always returns delivery dates
+     * relative to when it was called, so the fetch date is the correct anchor for
+     * turning a commit date into a business-day duration. $shipDate is only a last
+     * resort when calculated_at is missing.
      */
     public function transitBusinessDays(?CarbonInterface $shipDate = null): ?int
     {
@@ -226,10 +229,7 @@ class TransitTime extends Model
             return null;
         }
 
-        $anchor = $shipDate
-            ?? ($this->relationLoaded('address') ? $this->address?->requested_ship_date : null)
-            ?? $this->calculated_at
-            ?? now();
+        $anchor = $this->calculated_at ?? $shipDate ?? now();
 
         // Count weekdays between the ship date and delivery. Reassign on addDay()
         // because our date casts are CarbonImmutable (addDay() returns a new
