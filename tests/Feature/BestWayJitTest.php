@@ -114,6 +114,30 @@ it('computes transit duration from delivery_date when no max transit time is set
         ->and($a->bestway_optimized)->toBeTrue();
 });
 
+it('anchors transit duration on the sent ship date, not the fetch date (holiday-aware)', function () {
+    // Fetched 7/15 but quoted for a Fri 9/04 ship (before Labor Day Mon 9/07); FedEx now
+    // honors the future date and returned a holiday-aware delivery of Tue 9/08. The
+    // duration must be measured from the SHIP date, not the fetch date.
+    $tt = new TransitTime([
+        'delivery_date' => '2026-09-08',
+        'ship_date' => '2026-09-04',
+        'calculated_at' => '2026-07-15',
+    ]);
+
+    // Fri 9/4 → Tue 9/8 = 2 weekdays (Mon 9/7 + Tue 9/8), NOT the ~40 the fetch date gives.
+    expect($tt->transitBusinessDays())->toBe(2);
+});
+
+it('falls back to calculated_at for legacy rows with no stored ship_date', function () {
+    $tt = new TransitTime([
+        'delivery_date' => '2026-07-13',
+        'ship_date' => null,
+        'calculated_at' => '2026-07-10', // Friday
+    ]);
+
+    expect($tt->transitBusinessDays())->toBe(1); // 7/10 Fri → 7/13 Mon = 1 weekday
+});
+
 it('flags addresses where no same-account service can arrive in time (never silently ships late)', function () {
     $c = $this->carrier;
     // Only Ground (our account, too slow) and Express Saver (different account) exist.

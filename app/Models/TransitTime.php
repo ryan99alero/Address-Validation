@@ -34,6 +34,7 @@ class TransitTime extends Model
         'delivery_date',
         'delivery_time',
         'delivery_day_of_week',
+        'ship_date',
         'cutoff_time',
         'distance_value',
         'distance_units',
@@ -48,6 +49,7 @@ class TransitTime extends Model
     {
         return [
             'delivery_date' => 'date',
+            'ship_date' => 'date',
             'delivery_time' => 'datetime:H:i:s',
             'cutoff_time' => 'datetime:H:i:s',
             'distance_value' => 'decimal:2',
@@ -208,11 +210,11 @@ class TransitTime extends Model
      * carrier's maximum transit time; falls back to counting weekdays between the
      * anchor ship date and delivery_date. Returns null when nothing is known.
      *
-     * Anchored on calculated_at (the fetch date). FedEx's availability/transit
-     * endpoint IGNORES a future shipDateStamp and always returns delivery dates
-     * relative to when it was called, so the fetch date is the correct anchor for
-     * turning a commit date into a business-day duration. $shipDate is only a last
-     * resort when calculated_at is missing.
+     * Anchored on ship_date — the date sent to FedEx as shipDatestamp. FedEx honors a
+     * future ship date and returns a holiday/weekend-aware delivery relative to it, so the
+     * duration must be counted from the ship date, not the fetch date. Falls back to a
+     * passed $shipDate, then calculated_at (legacy rows quoted before ship_date was stored,
+     * when the mis-cased key made FedEx compute from "today").
      */
     public function transitBusinessDays(?CarbonInterface $shipDate = null): ?int
     {
@@ -229,7 +231,7 @@ class TransitTime extends Model
             return null;
         }
 
-        $anchor = $this->calculated_at ?? $shipDate ?? now();
+        $anchor = $this->ship_date ?? $shipDate ?? $this->calculated_at ?? now();
 
         // Count weekdays between the ship date and delivery. Reassign on addDay()
         // because our date casts are CarbonImmutable (addDay() returns a new

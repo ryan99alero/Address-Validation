@@ -7,6 +7,7 @@ use App\Models\Carrier;
 use App\Models\CompanySetting;
 use App\Models\TransitTime;
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Exception;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Collection;
@@ -182,13 +183,7 @@ class FedExServiceAvailabilityService
         $destinationPostalCode = $address->output_postal ?? $address->input_postal;
         $destinationCountryCode = $address->output_country ?? $address->input_country ?? 'US';
 
-        // Use requested ship date or today
-        $shipDate = $address->requested_ship_date ?? now();
-
-        // Ensure ship date is not in the past
-        if ($shipDate->isPast() && ! $shipDate->isToday()) {
-            $shipDate = now();
-        }
+        $shipDate = $this->effectiveShipDate($address);
 
         // FedEx delivery/residential flag drives Ground vs Home Delivery and can
         // shift commit dates; use the validated value, falling back to the imported one.
@@ -360,11 +355,30 @@ class FedExServiceAvailabilityService
                 'distance_value' => $distance['value'] ?? null,
                 'distance_units' => $distance['units'] ?? null,
                 'raw_response' => $detail,
+                // The ship date FedEx anchored this delivery on — the right base for
+                // measuring transit duration (FedEx now honors a future ship date).
+                'ship_date' => $this->effectiveShipDate($address)->toDateString(),
                 'calculated_at' => now(),
             ]
         );
 
         return $transitTime;
+    }
+
+    /**
+     * The ship date actually sent to FedEx: the address's requested ship date, floored at
+     * today (never quote a past ship date). Shared so the stored TransitTime.ship_date
+     * always matches the shipDatestamp in the request payload.
+     */
+    protected function effectiveShipDate(Address $address): CarbonInterface
+    {
+        $shipDate = $address->requested_ship_date ?? now();
+
+        if ($shipDate->isPast() && ! $shipDate->isToday()) {
+            $shipDate = now();
+        }
+
+        return $shipDate;
     }
 
     /**

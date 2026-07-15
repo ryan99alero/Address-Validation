@@ -541,8 +541,9 @@ class ShippingRecommendationService
 
         $candidates = $transitTimes
             ->map(function (TransitTime $t) use ($required, $floor, $plantId, $paymentType, $accountNumber) {
-                // Duration is anchored on the transit fetch date (FedEx ignores a
-                // future ship date), then inverted from the required date below.
+                // Duration is measured from the ship date FedEx quoted against (stored on
+                // the transit row, holiday/weekend-aware), then inverted from the required
+                // date below to ship as late as possible.
                 $duration = $t->transitBusinessDays();
                 if ($duration === null) {
                     return null;
