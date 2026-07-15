@@ -827,7 +827,7 @@ class CarrierInvoiceParserService
                 'corrected_country' => 'US',
                 'charge_code' => 'ADC',
                 'charge_description' => 'Address Correction',
-                'charge_amount' => 0.0,
+                'charge_amount' => round((float) ($correction['charge_amount'] ?? 0), 2),
             ]);
 
             $count++;

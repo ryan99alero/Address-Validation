@@ -35,12 +35,15 @@ class UpsPdfInvoiceParser
     /**
      * Extract each Recorded -> Corrected pair with its tracking number.
      *
-     * @return array<int, array{tracking_number: string, recorded: array<string,?string>, corrected: array<string,?string>}>
+     * @return array<int, array{tracking_number: string, charge_amount: float, recorded: array<string,?string>, corrected: array<string,?string>}>
      */
     public function extractCorrections(string $text): array
     {
-        // tracking … Recorded: <addr> Corrected: <addr> (stop at next tracking / page break / section end)
-        $pattern = '/(1Z[0-9A-Z]{16})(?:(?!1Z[0-9A-Z]{16}).)*?\bRecorded:\s*(.+?)\s+Corrected:\s*(.+?)'
+        // tracking <charge segment> Recorded: <addr> Corrected: <addr> (stop at next
+        // tracking / page break / section end). The charge segment carries the fee columns
+        // ("Ground 1 25.25 -5.05 20.20 …"), captured so we can surface the address-correction
+        // fee on the line instead of showing $0.
+        $pattern = '/(1Z[0-9A-Z]{16})((?:(?!1Z[0-9A-Z]{16}).)*?)\bRecorded:\s*(.+?)\s+Corrected:\s*(.+?)'
             .'(?=\s+1Z[0-9A-Z]{16}|\s*<I>|\s+Message Codes|\s+Total\b|$)/s';
 
         if (! preg_match_all($pattern, $text, $matches, PREG_SET_ORDER)) {
@@ -51,12 +54,29 @@ class UpsPdfInvoiceParser
         foreach ($matches as $m) {
             $corrections[] = [
                 'tracking_number' => $m[1],
-                'recorded' => $this->parseAddress($m[2]),
-                'corrected' => $this->parseAddress($m[3]),
+                'charge_amount' => $this->correctionFee($m[2]),
+                'recorded' => $this->parseAddress($m[3]),
+                'corrected' => $this->parseAddress($m[4]),
             ];
         }
 
         return $corrections;
+    }
+
+    /**
+     * The address-correction fee = the Billed Charge on the correction line: the third
+     * token of the first "Published Incentive Billed" triple ("25.25 -5.05 20.20" → 20.20).
+     * The segment is bounded before "1st ref:" so reference numbers can't be misread as money.
+     */
+    private function correctionFee(string $segment): float
+    {
+        $segment = preg_split('/\b1st ref:/', $segment)[0] ?? $segment;
+        $amt = '-?\d{1,3}(?:,\d{3})*\.\d{2}';
+        if (preg_match('/('.$amt.')\s+('.$amt.')\s+('.$amt.')/', $segment, $m)) {
+            return round((float) str_replace(',', '', $m[3]), 2);
+        }
+
+        return 0.0;
     }
 
     /**

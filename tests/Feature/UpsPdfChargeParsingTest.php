@@ -73,6 +73,36 @@ test('parser captures dims, third-party zero-amount, and pickup date', function 
     expect($scc['message_codes'])->toBe(['w']);
 });
 
+test('SCC surcharge-correction block is itemized to its named fees, not a single lump', function () {
+    // A Shipping Charge Correction that RE-BILLS a missed surcharge (real invoice
+    // 691317286, tracking 1Z6913170392401439): $31.00 Additional Handling - Non-corrugated
+    // + $5.04 Fuel = $36.04. The old parser captured only the $36.04 lump; it must now
+    // itemize so the specific fee + its category surface, while still reconciling to $36.04.
+    $text = implode(' ', [
+        'Invoice Date July 11, 2026 Invoice Number 0000691317286 Account Number 691317',
+        'Summary of Charges Charges this period $ 36.04',
+        'Outbound Shipping API Pickup Date Tracking Number Service ZIP Code Zone Weight Published Charge Incentive Credit Billed Charge',
+        'Shipping Charge Corrections Pickup Date Tracking Number Original Service/ Corrected Service ZIP Code Zone Weight Published Charge Incentive Credit Billed Charge Adjustment Amount',
+        '07/11 1Z6913170392401439 Ground 80461 4 Additional Handling - Non-corrugated 4 31.00 31.00 Fuel Surcharge 7.75 -2.71 5.04 36.04',
+        '1st ref: 7111577 2nd ref: M254464 Sender : RAND GRAPHICS Receiver: STORE MANAGER Message Codes : w',
+        'Total Shipping Charge Corrections 36.04',
+    ]);
+
+    $r = (new UpsPdfChargeParser)->parse($text);
+    $scc = collect($r['shipments'])->firstWhere('tracking_number', '1Z6913170392401439');
+    $charges = collect($scc['charges']);
+
+    // Itemized into its two real fees — no opaque "Shipping Charge Correction" lump.
+    expect($charges)->toHaveCount(2);
+    expect($charges->firstWhere('description', 'Additional Handling - Non-corrugated')['amount'])->toBe(31.00);
+    expect($charges->firstWhere('description', 'Fuel Surcharge')['amount'])->toBe(5.04);
+    expect($charges->pluck('description'))->not->toContain('Shipping Charge Correction');
+
+    // Service backfilled from the correction line; section still reconciles to the payable.
+    expect($scc['service'])->toBe('Ground');
+    expect($r['reconciliation']['sections']['shipping_charge_correction'])->toBe(36.04);
+});
+
 test('importUpsPdf persists shipments, charges, and reconciliation flag', function () {
     $carrier = Carrier::factory()->create(['slug' => 'ups']);
 

@@ -30,6 +30,15 @@ test('extracts every Recorded/Corrected pair with its tracking number', function
     expect($corrections[1]['tracking_number'])->toBe('1Z6913170390774175');
 });
 
+test('captures the address-correction billed fee (not $0) from the correction line', function () {
+    $corrections = (new UpsPdfInvoiceParser)->extractCorrections(upsCorrectionText());
+
+    // Billed Charge column of the correction line = the $20.20 flat fee (ignoring the
+    // fuel surcharge and the "1st ref:" reference number that also look like amounts).
+    expect($corrections[0]['charge_amount'])->toBe(20.20);
+    expect($corrections[1]['charge_amount'])->toBe(20.20);
+});
+
 test('parses the corrected address fields', function () {
     $corrections = (new UpsPdfInvoiceParser)->extractCorrections(upsCorrectionText());
     $corrected = $corrections[0]['corrected'];

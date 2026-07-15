@@ -378,15 +378,86 @@ class UpsPdfChargeParser
                 $adjustment += (float) str_replace(',', '', $a);
             }
         }
-        if ($adjustment !== 0.0) {
-            $shipment['charges'][] = [
-                'description' => 'Shipping Charge Correction',
-                'published' => null,
-                'incentive' => null,
-                'billed' => round($adjustment, 2),
-                'amount' => round($adjustment, 2),
-            ];
+        if ($adjustment === 0.0) {
+            return;
         }
+
+        // Surcharge-correction blocks (a missed fee re-billed later — e.g. "Additional
+        // Handling - Non-corrugated") carry NAMED surcharge lines with their own
+        // Published/Billed columns instead of a DIM re-rate. Itemize them so the specific
+        // fee and its own category surface — but ONLY when the itemized billed amounts
+        // reconcile to the block payable, so the invoice total can never drift. Otherwise
+        // fall back to the single lump "Shipping Charge Correction" line.
+        $items = $this->sccSurchargeItems($shipment, $head);
+        if ($items !== [] && abs(round(array_sum(array_column($items, 'amount')), 2) - round($adjustment, 2)) < 0.01) {
+            foreach ($items as $item) {
+                $shipment['charges'][] = $item;
+            }
+
+            return;
+        }
+
+        $shipment['charges'][] = [
+            'description' => 'Shipping Charge Correction',
+            'published' => null,
+            'incentive' => null,
+            'billed' => round($adjustment, 2),
+            'amount' => round($adjustment, 2),
+        ];
+    }
+
+    /**
+     * Itemize a surcharge-correction SCC block. Its shape differs from a DIM re-rate: it
+     * opens "<service> <ZIP> <count>" with NO amounts on the base part (the transport
+     * wasn't re-rated — a surcharge was added), then lists named surcharge lines
+     * "<desc> [count] <Published>[ <Incentive>] <Billed>" and a trailing block total.
+     * Returns charge rows (same shape as addCharge); empty if the block isn't this shape.
+     * Backfills service/ZIP on the shipment when it matches.
+     *
+     * @param  array<string, mixed>  $shipment
+     * @return array<int, array<string, mixed>>
+     */
+    private function sccSurchargeItems(array &$shipment, string $head): array
+    {
+        $amt = self::AMT;
+
+        // Opening "<service words> <5-digit ZIP> <count> <Letter…>" with no amount before
+        // the first surcharge name — the discriminator from a DIM re-rate, which rates the
+        // base line (decimal weight + amounts) right after the ZIP/zone.
+        if (! preg_match('/^\s*([A-Za-z][A-Za-z \/]*?)\s+(\d{5})\s+\d{1,3}\s+(?=[A-Za-z])/', $head, $pm)) {
+            return [];
+        }
+        $rest = substr($head, strlen($pm[0]));
+
+        $items = [];
+        if (preg_match_all('/([A-Za-z][A-Za-z0-9 \-\/&.()]*?)\s+('.$amt.'(?:\s+'.$amt.'){0,2})(?=\s|$)/', $rest, $ms, PREG_SET_ORDER)) {
+            foreach ($ms as $sm) {
+                // Drop a trailing package-count integer the lazy desc absorbed ("… Non-corrugated 4").
+                $desc = trim(preg_replace('/\s+\d+$/', '', trim($sm[1])));
+                if ($desc === '' || strcasecmp($desc, 'Total') === 0) {
+                    continue;
+                }
+                $nums = array_map(fn ($a) => (float) str_replace(',', '', $a), preg_split('/\s+/', trim($sm[2])));
+                $billed = end($nums);
+                if ($billed === 0.0) {
+                    continue;
+                }
+                $items[] = [
+                    'description' => $desc,
+                    'published' => $nums[0] ?? null,
+                    'incentive' => count($nums) === 3 ? $nums[1] : null,
+                    'billed' => $billed,
+                    'amount' => round($billed, 2),
+                ];
+            }
+        }
+
+        if ($items !== []) {
+            $shipment['service'] ??= trim($pm[1]);
+            $shipment['zip'] ??= $pm[2];
+        }
+
+        return $items;
     }
 
     /**
