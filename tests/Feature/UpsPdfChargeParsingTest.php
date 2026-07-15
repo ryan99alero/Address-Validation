@@ -269,4 +269,12 @@ test('importUpsPdf reconciles the real UPS invoice end to end', function () {
     expect($invoice->new_corrections)->toBeGreaterThan(0); // "New Mappings"
     expect((float) $invoice->total_correction_charges)->toBe(4411.77); // "Total Charges"
     expect($invoice->filename)->not->toBeNull();
+
+    // Every correction line carries its billed fee (not $0).
+    expect($invoice->correctionLines()->where('charge_amount', '>', 0)->count())->toBe(8);
+
+    // Re-import is idempotent for correction lines too (no duplication).
+    app(CarrierInvoiceParserService::class)->importFile($carrier->id, $pdf);
+    $invoice->refresh();
+    expect($invoice->correctionLines()->count())->toBe(8);
 })->group('slow');

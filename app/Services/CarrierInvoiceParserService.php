@@ -1389,6 +1389,10 @@ class CarrierInvoiceParserService
         // Feed the address-correction cache from the same PDF (reuses the tested parser).
         $corrections = (new UpsPdfInvoiceParser)->parse($text)['corrections'];
         if ($corrections !== []) {
+            // Idempotent re-import: clear prior address-correction lines for this invoice
+            // before rebuilding, so a re-parse doesn't duplicate them (charges/shipments are
+            // already cleared in persistUpsPdf; correction lines live in a separate table).
+            CarrierInvoiceLine::where('carrier_invoice_id', $invoice->id)->where('charge_code', 'ADC')->delete();
             $this->buildCorrectionLines($invoice, $corrections);
         }
 
