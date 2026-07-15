@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\CarrierChargeRollup;
-use App\Models\CarrierShipRollup;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -21,17 +20,37 @@ class CarrierRollupService
 
     public function rebuild(): void
     {
-        DB::transaction(function (): void {
+        // Base Transportation category drives the third-party heuristic (a tracking
+        // with no base charge is third-party). 0 = "no such category" so the
+        // heuristic simply never matches a base charge.
+        $baseCategoryId = (int) (DB::table('charge_categories')->where('name', 'Base Transportation')->value('id') ?? 0);
+
+        DB::transaction(function () use ($baseCategoryId): void {
             DB::table('carrier_charge_rollup')->delete();
-            DB::statement('
+            // Per-tracking billing type resolved set-based (Pace flag first, else the
+            // base-charge heuristic), then the rollup groups by it. NULL tracking
+            // (account-level fees) stays unclassified (is_third_party NULL).
+            DB::statement("
                 INSERT INTO carrier_charge_rollup
-                    (carrier_id, charge_category_id, year, charge_count, total_amount, distinct_ships, created_at, updated_at)
-                SELECT carrier_id, charge_category_id, YEAR(invoice_date), COUNT(*),
-                       COALESCE(SUM(amount), 0), COUNT(DISTINCT tracking_number), NOW(), NOW()
-                FROM carrier_charges
-                WHERE invoice_date IS NOT NULL
-                GROUP BY carrier_id, charge_category_id, YEAR(invoice_date)
-            ');
+                    (carrier_id, charge_category_id, is_third_party, year, charge_count, total_amount, distinct_ships, created_at, updated_at)
+                SELECT cc.carrier_id, cc.charge_category_id, tp.is_third_party, YEAR(cc.invoice_date), COUNT(*),
+                       COALESCE(SUM(cc.amount), 0), COUNT(DISTINCT cc.tracking_number), NOW(), NOW()
+                FROM carrier_charges cc
+                LEFT JOIN (
+                    SELECT t.tracking_number,
+                           CASE
+                               WHEN k.is_third_party IS NOT NULL THEN k.is_third_party
+                               WHEN b.tracking_number IS NOT NULL THEN 0
+                               ELSE 1
+                           END AS is_third_party
+                    FROM (SELECT DISTINCT tracking_number FROM carrier_charges WHERE tracking_number IS NOT NULL AND tracking_number <> '') t
+                    LEFT JOIN carton_costs k ON k.tracking_number = t.tracking_number
+                    LEFT JOIN (SELECT DISTINCT tracking_number FROM carrier_charges WHERE charge_category_id = {$baseCategoryId}) b
+                        ON b.tracking_number = t.tracking_number
+                ) tp ON tp.tracking_number = cc.tracking_number
+                WHERE cc.invoice_date IS NOT NULL
+                GROUP BY cc.carrier_id, cc.charge_category_id, tp.is_third_party, YEAR(cc.invoice_date)
+            ");
 
             DB::table('carrier_ship_rollup')->delete();
             DB::statement('

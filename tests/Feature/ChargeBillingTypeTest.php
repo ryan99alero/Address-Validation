@@ -1,7 +1,9 @@
 <?php
 
+use App\Filament\Pages\CarrierFeeSummary;
 use App\Models\Carrier;
 use App\Models\CarrierCharge;
+use App\Models\CarrierChargeRollup;
 use App\Models\CarrierInvoice;
 use App\Models\CartonCost;
 use App\Models\ChargeCategory;
@@ -72,6 +74,23 @@ it('excludes account-level fees with no tracking number from both buckets', func
 
     expect(CarrierCharge::thirdParty()->count())->toBe(0)
         ->and(CarrierCharge::onAccount()->count())->toBe(0);
+});
+
+it('splits the Carrier Fee Summary rollup by billing type', function () {
+    CarrierChargeRollup::create([
+        'carrier_id' => $this->carrier->id, 'charge_category_id' => $this->fuel->id, 'is_third_party' => true,
+        'year' => 2026, 'charge_count' => 10, 'total_amount' => 100, 'distinct_ships' => 5,
+    ]);
+    CarrierChargeRollup::create([
+        'carrier_id' => $this->carrier->id, 'charge_category_id' => $this->fuel->id, 'is_third_party' => false,
+        'year' => 2026, 'charge_count' => 20, 'total_amount' => 500, 'distinct_ships' => 8,
+    ]);
+
+    $total = fn (array $filters): float => (float) collect(CarrierFeeSummary::computeData($filters))->sum('total');
+
+    expect($total(['scope' => 'all']))->toBe(600.0)                                    // both
+        ->and($total(['scope' => 'all', 'billing_type' => 'third_party']))->toBe(100.0) // TP only
+        ->and($total(['scope' => 'all', 'billing_type' => 'on_account']))->toBe(500.0); // on-account only
 });
 
 it('interprets Pace thirdPartyCharges values into a boolean on sync', function () {

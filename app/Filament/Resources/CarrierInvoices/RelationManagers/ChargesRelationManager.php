@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CarrierInvoices\RelationManagers;
 
+use App\Filament\Filters\BillingTypeFilter;
 use App\Models\ChargeCategory;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\Summarizers\Sum;
@@ -62,6 +63,7 @@ class ChargesRelationManager extends RelationManager
             ->defaultGroup('tracking_number')
             ->defaultSort('amount', 'desc')
             ->filters([
+                BillingTypeFilter::make(),
                 SelectFilter::make('charge_category_id')
                     ->label('Category')
                     ->options(ChargeCategory::orderBy('name')->pluck('name', 'id'))

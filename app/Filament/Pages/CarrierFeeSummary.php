@@ -39,6 +39,7 @@ class CarrierFeeSummary extends Page implements HasTable
             'year_to' => $year['year_to'] ?? null,
             'scope' => $this->getTableFilterState('scope')['value'] ?? 'fees',
             'basis' => $this->getTableFilterState('basis')['value'] ?? 'nominal',
+            'billing_type' => $this->getTableFilterState('billing_type')['value'] ?? null,
         ];
     }
 
@@ -100,6 +101,12 @@ class CarrierFeeSummary extends Page implements HasTable
                     ])
                     ->columns(2)
                     ->indicateUsing(fn (array $data): ?string => $this->yearIndicator($data)),
+                SelectFilter::make('billing_type')
+                    ->label('Billing')
+                    ->options([
+                        'third_party' => '3rd Party',
+                        'on_account' => 'On Account',
+                    ]),
                 SelectFilter::make('scope')
                     ->label('Scope')
                     ->options([
@@ -130,6 +137,7 @@ class CarrierFeeSummary extends Page implements HasTable
         $from = $filters['year_from'] ?? null;
         $to = $filters['year_to'] ?? null;
         $scope = $filters['scope'] ?? 'fees';
+        $billingType = $filters['billing_type'] ?? null;
         $real = ($filters['basis'] ?? 'nominal') === 'real';
         $weigh = fn (int $year, float $amount): float => $real ? $amount * InflationIndex::factor($year) : $amount;
 
@@ -140,6 +148,8 @@ class CarrierFeeSummary extends Page implements HasTable
             ->when($carrierId, fn ($q) => $q->where('carrier_charge_rollup.carrier_id', $carrierId))
             ->when($from, fn ($q) => $q->where('year', '>=', $from))
             ->when($to, fn ($q) => $q->where('year', '<=', $to))
+            ->when($billingType === 'third_party', fn ($q) => $q->where('carrier_charge_rollup.is_third_party', true))
+            ->when($billingType === 'on_account', fn ($q) => $q->where('carrier_charge_rollup.is_third_party', false))
             ->when($scope === 'fees', fn ($q) => $q->where(function ($w): void {
                 $w->whereNull('cat.name')->orWhere('cat.name', '!=', 'Base Transportation');
             }))

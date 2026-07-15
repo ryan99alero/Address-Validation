@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CarrierCharges\Tables;
 
+use App\Filament\Filters\BillingTypeFilter;
 use App\Filament\Resources\CarrierInvoices\CarrierInvoiceResource;
 use App\Models\CarrierCharge;
 use App\Models\ChargeCategory;
@@ -63,6 +64,7 @@ class CarrierChargesTable
                 SelectFilter::make('carrier_id')
                     ->label('Carrier')
                     ->relationship('carrier', 'name'),
+                BillingTypeFilter::make(),
                 SelectFilter::make('charge_category_id')
                     ->label('Category')
                     ->options(fn () => ChargeCategory::orderBy('name')->pluck('name', 'id')),

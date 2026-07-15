@@ -15,6 +15,7 @@ class CarrierChargeRollup extends Model
     protected $fillable = [
         'carrier_id',
         'charge_category_id',
+        'is_third_party',
         'year',
         'charge_count',
         'total_amount',
@@ -24,6 +25,7 @@ class CarrierChargeRollup extends Model
     protected function casts(): array
     {
         return [
+            'is_third_party' => 'boolean',
             'year' => 'integer',
             'charge_count' => 'integer',
             'total_amount' => 'decimal:2',
