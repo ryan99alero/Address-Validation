@@ -12,6 +12,7 @@ use App\Models\CarrierShipment;
 use App\Services\Invoices\ChargeCategoryResolver;
 use App\Services\Invoices\ChargeDriverResolver;
 use App\Services\Invoices\FedExInvoiceParser;
+use App\Services\Invoices\FedExShipmentDeriveService;
 use App\Services\Invoices\InvoiceIdentity;
 use App\Services\Invoices\PdfTextExtractor;
 use App\Services\Invoices\UpsPdfChargeParser;
@@ -68,6 +69,16 @@ class CarrierInvoiceParserService
             // For FedEx, try to backfill missing original addresses from shipping DB
             if (strtolower($carrier->slug) === 'fedex') {
                 $this->backfillFedExOriginalAddresses($invoice);
+
+                // FedEx has no printed per-shipment section, so derive per-shipment
+                // rows from the charges just imported (total, service, billing type)
+                // — the Per-Shipment Costs view is empty otherwise. Best-effort: a
+                // derivation error must never fail the import.
+                try {
+                    app(FedExShipmentDeriveService::class)->deriveForInvoice($invoice);
+                } catch (\Throwable $e) {
+                    Log::warning('FedEx shipment derivation failed', ['invoice_id' => $invoice->id, 'error' => $e->getMessage()]);
+                }
             }
 
             // Link all correction lines to the address cache
