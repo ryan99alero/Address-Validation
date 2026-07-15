@@ -4,51 +4,35 @@ namespace App\Services\Invoices;
 
 use App\Models\CarrierInvoice;
 use App\Models\ChargeCategory;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
- * FedEx invoices carry no printed per-shipment section (unlike UPS PDFs), so no
- * carrier_shipments rows are extracted at parse time and the Per-Shipment Costs
- * view renders empty. This derives one carrier_shipments row per tracking by
- * aggregating the invoice's own charges — total, service, weight, zone, and
- * billing type — mirroring what UPS gets from the PDF.
+ * Populates per-shipment cost data on carrier_shipments from the invoice's charges.
  *
- * Only ever writes/removes rows for THIS invoice tagged source_type='derived',
- * so UPS PDF-extracted shipments are never touched. Rows carry carrier_invoice_id
- * and cascade-delete with the invoice.
+ *  - deriveForInvoice()  — FedEx has no printed per-shipment section, so we CREATE one
+ *    carrier_shipments row per tracking (total, service, weight, zone, base/fee split,
+ *    billing type). Rows are tagged source_type='derived' so UPS PDF-extracted rows are
+ *    never touched; they carry carrier_invoice_id and cascade-delete with the invoice.
+ *  - enrichCostsForInvoice() — UPS shipments already exist from the PDF; UPDATE them with
+ *    the base/fee split from charges so the same columns are populated for both carriers.
  */
 class FedExShipmentDeriveService
 {
     public const SOURCE = 'derived';
 
     /**
-     * Rebuild the derived per-shipment rows for one invoice. Idempotent.
+     * (Re)create derived per-shipment rows for a FedEx invoice. Idempotent.
      */
     public function deriveForInvoice(CarrierInvoice $invoice): int
     {
-        $baseCategoryId = (int) (ChargeCategory::query()->where('name', 'Base Transportation')->value('id') ?? 0);
-
         DB::table('carrier_shipments')
             ->where('carrier_invoice_id', $invoice->id)
             ->where('source_type', self::SOURCE)
             ->delete();
 
         $now = now();
-        $rows = DB::table('carrier_charges')
-            ->where('carrier_invoice_id', $invoice->id)
-            ->whereNotNull('tracking_number')
-            ->where('tracking_number', '<>', '')
-            ->groupBy('tracking_number')
-            ->selectRaw('tracking_number')
-            ->selectRaw('MAX(service) as service')
-            ->selectRaw('MAX(zone) as zone')
-            ->selectRaw('MAX(weight) as billed_weight')
-            ->selectRaw('MAX(ship_date) as ship_date')
-            ->selectRaw('SUM(amount) as printed_total')
-            // Heuristic: a tracking with no Base Transportation charge is third-party
-            // (the carrier billed the transport elsewhere).
-            ->selectRaw('SUM(CASE WHEN charge_category_id = ? THEN 1 ELSE 0 END) as base_count', [$baseCategoryId])
-            ->get()
+        $rows = $this->aggregateByTracking($invoice->id)
             ->map(fn ($r): array => [
                 'carrier_invoice_id' => $invoice->id,
                 'carrier_id' => $invoice->carrier_id,
@@ -58,6 +42,9 @@ class FedExShipmentDeriveService
                 'billed_weight' => $r->billed_weight,
                 'ship_date' => $r->ship_date,
                 'printed_total' => $r->printed_total,
+                'base_amount' => $r->base_amount,
+                'fee_amount' => $r->fee_amount,
+                'fee_abbrevs' => $r->fee_abbrevs,
                 'is_third_party' => $r->base_count > 0 ? 0 : 1,
                 'source_type' => self::SOURCE,
                 'created_at' => $now,
@@ -70,5 +57,68 @@ class FedExShipmentDeriveService
         }
 
         return count($rows);
+    }
+
+    /**
+     * Fill the base/fee cost split on an invoice's EXISTING (non-derived, i.e. UPS
+     * PDF) shipments from its charges, matched by tracking. Returns rows updated.
+     */
+    public function enrichCostsForInvoice(CarrierInvoice $invoice): int
+    {
+        $agg = $this->aggregateByTracking($invoice->id)->keyBy('tracking_number');
+        if ($agg->isEmpty()) {
+            return 0;
+        }
+
+        $updated = 0;
+        $invoice->shipments()
+            ->where('source_type', '!=', self::SOURCE)
+            ->whereNotNull('tracking_number')
+            ->chunkById(500, function ($shipments) use ($agg, &$updated): void {
+                foreach ($shipments as $shipment) {
+                    $a = $agg->get($shipment->tracking_number);
+                    if (! $a) {
+                        continue;
+                    }
+                    $shipment->forceFill([
+                        'base_amount' => $a->base_amount,
+                        'fee_amount' => $a->fee_amount,
+                        'fee_abbrevs' => $a->fee_abbrevs,
+                    ])->save();
+                    $updated++;
+                }
+            });
+
+        return $updated;
+    }
+
+    /**
+     * Aggregate an invoice's charges into one row per tracking number.
+     *
+     * @return Collection<int, object>
+     */
+    protected function aggregateByTracking(int $invoiceId): Collection
+    {
+        $baseCategoryId = (int) (ChargeCategory::query()->where('name', 'Base Transportation')->value('id') ?? 0);
+        $discountCategoryId = (int) (ChargeCategory::query()->where('name', 'Discount / Credit')->value('id') ?? 0);
+
+        return DB::table('carrier_charges as cc')
+            ->leftJoin('charge_categories as cat', 'cat.id', '=', 'cc.charge_category_id')
+            ->where('cc.carrier_invoice_id', $invoiceId)
+            ->whereNotNull('cc.tracking_number')
+            ->where('cc.tracking_number', '<>', '')
+            ->groupBy('cc.tracking_number')
+            ->selectRaw('cc.tracking_number')
+            ->selectRaw('MAX(cc.service) as service')
+            ->selectRaw('MAX(cc.zone) as zone')
+            ->selectRaw('MAX(cc.weight) as billed_weight')
+            ->selectRaw('MAX(cc.ship_date) as ship_date')
+            ->selectRaw('SUM(cc.amount) as printed_total')
+            ->selectRaw('SUM(CASE WHEN cc.charge_category_id = ? THEN cc.amount ELSE 0 END) as base_amount', [$baseCategoryId])
+            ->selectRaw('SUM(CASE WHEN cc.charge_category_id IN (?, ?) THEN 0 ELSE cc.amount END) as fee_amount', [$baseCategoryId, $discountCategoryId])
+            ->selectRaw('GROUP_CONCAT(DISTINCT CASE WHEN cc.charge_category_id NOT IN (?, ?) THEN cat.abbreviation END) as fee_abbrevs', [$baseCategoryId, $discountCategoryId])
+            // Heuristic: a tracking with no Base Transportation charge is third-party.
+            ->selectRaw('SUM(CASE WHEN cc.charge_category_id = ? THEN 1 ELSE 0 END) as base_count', [$baseCategoryId])
+            ->get();
     }
 }

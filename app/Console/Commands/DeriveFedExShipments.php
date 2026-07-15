@@ -7,46 +7,50 @@ use App\Services\Invoices\FedExShipmentDeriveService;
 use Illuminate\Console\Command;
 
 /**
- * Backfills derived per-shipment rows (carrier_shipments) for FedEx invoices from
- * their charges, so the Per-Shipment Costs view renders. Safe to re-run.
+ * Backfills per-shipment cost data on carrier_shipments from charges:
+ *  - FedEx invoices → derive the (missing) shipment rows.
+ *  - UPS invoices   → enrich existing PDF shipment rows with the base/fee split.
+ * Safe to re-run.
  */
 class DeriveFedExShipments extends Command
 {
-    protected $signature = 'shipments:derive-fedex
-        {--invoice= : a single carrier_invoices.id to (re)derive}
-        {--only-missing : skip invoices that already have derived shipments}';
+    protected $signature = 'shipments:backfill-costs
+        {--carrier=all : fedex | ups | all}
+        {--invoice= : a single carrier_invoices.id}';
 
-    protected $description = 'Derive carrier_shipments for FedEx invoices from their charges';
+    protected $description = 'Backfill per-shipment cost data on carrier_shipments from charges';
 
     public function handle(FedExShipmentDeriveService $service): int
     {
-        $query = CarrierInvoice::query()
-            ->whereHas('carrier', fn ($q) => $q->where('slug', 'fedex'));
-
-        if ($invoiceId = $this->option('invoice')) {
-            $query->whereKey($invoiceId);
-        }
-
-        if ($this->option('only-missing')) {
-            $query->whereDoesntHave('shipments', fn ($q) => $q->where('source_type', FedExShipmentDeriveService::SOURCE));
-        }
-
-        $total = $query->count();
-        $this->info("Deriving shipments for {$total} FedEx invoice(s)…");
-        $bar = $this->output->createProgressBar($total);
-        $bar->start();
-
-        $shipments = 0;
-        $query->orderBy('id')->chunkById(200, function ($invoices) use ($service, &$shipments, $bar): void {
-            foreach ($invoices as $invoice) {
-                $shipments += $service->deriveForInvoice($invoice);
-                $bar->advance();
+        foreach (['fedex', 'ups'] as $slug) {
+            if (! in_array($this->option('carrier'), [$slug, 'all'], true)) {
+                continue;
             }
-        });
 
-        $bar->finish();
-        $this->newLine(2);
-        $this->info("Done. {$shipments} shipment rows derived.");
+            $query = CarrierInvoice::query()->whereHas('carrier', fn ($q) => $q->where('slug', $slug));
+            if ($invoiceId = $this->option('invoice')) {
+                $query->whereKey($invoiceId);
+            }
+
+            $total = $query->count();
+            $this->info(strtoupper($slug).": {$total} invoice(s)…");
+            $bar = $this->output->createProgressBar($total);
+            $bar->start();
+
+            $affected = 0;
+            $query->orderBy('id')->chunkById(200, function ($invoices) use ($service, $slug, &$affected, $bar): void {
+                foreach ($invoices as $invoice) {
+                    $affected += $slug === 'fedex'
+                        ? $service->deriveForInvoice($invoice)
+                        : $service->enrichCostsForInvoice($invoice);
+                    $bar->advance();
+                }
+            });
+
+            $bar->finish();
+            $this->newLine(2);
+            $this->info(strtoupper($slug).' done: '.($slug === 'fedex' ? "{$affected} rows derived" : "{$affected} rows enriched").'.');
+        }
 
         return self::SUCCESS;
     }

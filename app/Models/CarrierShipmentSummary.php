@@ -2,17 +2,31 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * Pre-aggregated per-shipment cost row (carrier × tracking × invoice-date),
- * built from carrier_charges by ShipmentSummaryService.
+ * RETIRED. Superseded by CarrierShipment (carrier_shipments now carries the
+ * per-shipment cost split for both carriers). This model is guarded to throw on
+ * any read so a lingering consumer surfaces before the table is dropped. The
+ * table is still written by ShipmentSummaryService (raw query builder, unaffected
+ * by the guard) so data is preserved for a clean revert.
  */
 class CarrierShipmentSummary extends Model
 {
     protected $table = 'carrier_shipment_summary';
+
+    protected static function booted(): void
+    {
+        static::addGlobalScope('retired', function (Builder $builder): void {
+            throw new \RuntimeException(
+                'CarrierShipmentSummary is retired — read carrier_shipments (CarrierShipment) instead. '
+                .'This guard exists to surface any remaining consumer before the table is dropped.'
+            );
+        });
+    }
 
     protected $fillable = [
         'carrier_id',

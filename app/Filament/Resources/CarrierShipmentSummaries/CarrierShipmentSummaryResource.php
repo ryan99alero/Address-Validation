@@ -6,7 +6,7 @@ use App\Filament\Resources\CarrierShipmentSummaries\Pages\ListCarrierShipmentSum
 use App\Filament\Resources\CarrierShipmentSummaries\Pages\ViewCarrierShipmentSummary;
 use App\Filament\Resources\CarrierShipmentSummaries\RelationManagers\ChargesRelationManager;
 use App\Filament\Resources\CarrierShipmentSummaries\Tables\CarrierShipmentSummariesTable;
-use App\Models\CarrierShipmentSummary;
+use App\Models\CarrierShipment;
 use BackedEnum;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
@@ -18,7 +18,7 @@ use UnitEnum;
 
 class CarrierShipmentSummaryResource extends Resource
 {
-    protected static ?string $model = CarrierShipmentSummary::class;
+    protected static ?string $model = CarrierShipment::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTruck;
 
@@ -49,13 +49,13 @@ class CarrierShipmentSummaryResource extends Resource
             Section::make('Shipment')
                 ->columns(4)
                 ->schema([
-                    TextEntry::make('invoice_date')->label('Invoice Date')->date('M j, Y'),
+                    TextEntry::make('ship_date')->label('Ship Date')->date('M j, Y')->placeholder('—'),
                     TextEntry::make('tracking_number')->label('Tracking #')->copyable(),
                     TextEntry::make('carrier.name')->label('Carrier')->badge(),
                     TextEntry::make('service')->label('Service')->badge()->placeholder('—'),
                     TextEntry::make('base_amount')->label('Base / Initial')->money('USD'),
                     TextEntry::make('fee_amount')->label('Fees')->money('USD'),
-                    TextEntry::make('total_amount')->label('Total')->money('USD')->weight('bold'),
+                    TextEntry::make('printed_total')->label('Total')->money('USD')->weight('bold'),
                     TextEntry::make('fee_abbrevs')->label('Fees applied')->placeholder('—'),
                 ]),
         ]);

@@ -16,8 +16,8 @@ beforeEach(function () {
         'carrier_id' => $this->carrier->id, 'invoice_number' => 'F1',
         'invoice_date' => '2026-05-07', 'filename' => 'f.csv',
     ]);
-    $this->base = ChargeCategory::create(['name' => 'Base Transportation']);
-    $this->fuel = ChargeCategory::create(['name' => 'Fuel Surcharge']);
+    $this->base = ChargeCategory::create(['name' => 'Base Transportation', 'abbreviation' => 'BASE']);
+    $this->fuel = ChargeCategory::create(['name' => 'Fuel Surcharge', 'abbreviation' => 'FUEL']);
 });
 
 function fdxCharge(string $tracking, int $categoryId, float $amount, array $extra = []): void
@@ -42,6 +42,9 @@ it('derives one shipment per tracking with total + billing type from the charges
 
     $t1 = CarrierShipment::where('tracking_number', 'T1')->first();
     expect((float) $t1->printed_total)->toBe(12.0)
+        ->and((float) $t1->base_amount)->toBe(10.0)
+        ->and((float) $t1->fee_amount)->toBe(2.0)
+        ->and($t1->fee_abbrevs)->toBe('FUEL')
         ->and($t1->is_third_party)->toBeFalse()
         ->and($t1->service)->toBe('FedEx Ground')
         ->and((float) $t1->billed_weight)->toBe(5.0)
@@ -50,6 +53,25 @@ it('derives one shipment per tracking with total + billing type from the charges
     $t2 = CarrierShipment::where('tracking_number', 'T2')->first();
     expect((float) $t2->printed_total)->toBe(3.0)
         ->and($t2->is_third_party)->toBeTrue();
+});
+
+it('enriches existing (UPS PDF) shipments with the cost split, without duplicating', function () {
+    CarrierShipment::insert([
+        'carrier_invoice_id' => $this->invoice->id, 'carrier_id' => $this->carrier->id,
+        'tracking_number' => 'U1', 'source_type' => 'pdf', 'is_third_party' => false, 'printed_total' => 15,
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+    fdxCharge('U1', $this->base->id, 12);
+    fdxCharge('U1', $this->fuel->id, 3);
+
+    $updated = app(FedExShipmentDeriveService::class)->enrichCostsForInvoice($this->invoice);
+
+    $u1 = CarrierShipment::where('tracking_number', 'U1')->first();
+    expect($updated)->toBe(1)
+        ->and((float) $u1->base_amount)->toBe(12.0)
+        ->and((float) $u1->fee_amount)->toBe(3.0)
+        ->and($u1->fee_abbrevs)->toBe('FUEL')
+        ->and(CarrierShipment::where('tracking_number', 'U1')->count())->toBe(1); // no new row
 });
 
 it('is idempotent and never touches non-derived (UPS PDF) shipments', function () {

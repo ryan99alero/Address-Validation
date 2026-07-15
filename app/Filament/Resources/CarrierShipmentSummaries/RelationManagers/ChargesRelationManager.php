@@ -6,23 +6,19 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\Summarizers\Sum;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
 
 class ChargesRelationManager extends RelationManager
 {
-    protected static string $relationship = 'charges';
+    // Matched by tracking within the invoice (works for FedEx-derived shipments,
+    // which aren't linked to charges by carrier_shipment_id).
+    protected static string $relationship = 'invoiceCharges';
 
     protected static ?string $title = 'Charge Detail';
 
     public function table(Table $table): Table
     {
-        $owner = $this->getOwnerRecord();
-
         return $table
             ->description('Every individual charge billed against this shipment.')
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query
-                ->where('carrier_id', $owner->carrier_id)
-                ->whereDate('invoice_date', $owner->invoice_date))
             ->columns([
                 TextColumn::make('raw_charge_description')
                     ->label('Charge / Adjustment')

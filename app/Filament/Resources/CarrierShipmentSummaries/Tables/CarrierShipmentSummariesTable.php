@@ -2,7 +2,7 @@
 
 namespace App\Filament\Resources\CarrierShipmentSummaries\Tables;
 
-use App\Models\CarrierShipmentSummary;
+use App\Models\CarrierShipment;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Tables\Columns\Summarizers\Sum;
@@ -17,11 +17,12 @@ class CarrierShipmentSummariesTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->defaultSort('invoice_date', 'desc')
+            ->defaultSort('ship_date', 'desc')
             ->columns([
-                TextColumn::make('invoice_date')
-                    ->label('Date')
+                TextColumn::make('ship_date')
+                    ->label('Ship Date')
                     ->date('M j, Y')
+                    ->placeholder('—')
                     ->sortable(),
                 TextColumn::make('tracking_number')
                     ->label('Tracking #')
@@ -52,7 +53,7 @@ class CarrierShipmentSummariesTable
                     ->label('Fees Applied')
                     ->placeholder('—')
                     ->wrap(),
-                TextColumn::make('total_amount')
+                TextColumn::make('printed_total')
                     ->label('Total')
                     ->money('USD')
                     ->alignEnd()
@@ -66,21 +67,24 @@ class CarrierShipmentSummariesTable
                     ->relationship('carrier', 'name'),
                 SelectFilter::make('service')
                     ->label('Service')
-                    ->options(fn (): array => CarrierShipmentSummary::query()
+                    ->options(fn (): array => CarrierShipment::query()
                         ->whereNotNull('service')
                         ->distinct()
                         ->orderBy('service')
                         ->pluck('service', 'service')
                         ->all()),
-                Filter::make('invoice_date')
+                SelectFilter::make('is_third_party')
+                    ->label('Billing')
+                    ->options([1 => '3rd Party', 0 => 'On Account']),
+                Filter::make('ship_date')
                     ->schema([
                         DatePicker::make('from')->label('From'),
                         DatePicker::make('until')->label('Until'),
                     ])
                     ->columns(2)
                     ->query(fn (Builder $query, array $data): Builder => $query
-                        ->when($data['from'] ?? null, fn (Builder $q, $d): Builder => $q->whereDate('invoice_date', '>=', $d))
-                        ->when($data['until'] ?? null, fn (Builder $q, $d): Builder => $q->whereDate('invoice_date', '<=', $d))),
+                        ->when($data['from'] ?? null, fn (Builder $q, $d): Builder => $q->whereDate('ship_date', '>=', $d))
+                        ->when($data['until'] ?? null, fn (Builder $q, $d): Builder => $q->whereDate('ship_date', '<=', $d))),
                 Filter::make('has_fees')
                     ->label('Has extra fees')
                     ->toggle()

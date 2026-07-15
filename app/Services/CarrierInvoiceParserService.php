@@ -81,6 +81,16 @@ class CarrierInvoiceParserService
                 }
             }
 
+            // UPS shipments come from the PDF; fill their base/fee cost split from the
+            // charges so carrier_shipments carries the same per-shipment cost data.
+            if (strtolower($carrier->slug) === 'ups') {
+                try {
+                    app(FedExShipmentDeriveService::class)->enrichCostsForInvoice($invoice);
+                } catch (\Throwable $e) {
+                    Log::warning('UPS shipment cost enrich failed', ['invoice_id' => $invoice->id, 'error' => $e->getMessage()]);
+                }
+            }
+
             // Link all correction lines to the address cache
             $newCorrections = $this->linkCorrectionsToCache($invoice);
             $result['new_corrections'] = $newCorrections;
