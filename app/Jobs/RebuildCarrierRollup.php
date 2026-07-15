@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Services\CarrierRollupService;
-use App\Services\ShipmentSummaryService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -19,7 +18,7 @@ class RebuildCarrierRollup implements ShouldBeUnique, ShouldQueue
 
     public int $uniqueFor = 600;
 
-    /** The full rebuild (charges + shipment summary) runs minutes, not the default 60s. */
+    /** The full charge rollup rebuild runs minutes, not the default 60s. */
     public int $timeout = 900;
 
     public function uniqueId(): string
@@ -27,9 +26,8 @@ class RebuildCarrierRollup implements ShouldBeUnique, ShouldQueue
         return 'carrier-rollup';
     }
 
-    public function handle(CarrierRollupService $rollups, ShipmentSummaryService $shipments): void
+    public function handle(CarrierRollupService $rollups): void
     {
         $rollups->rebuild();
-        $shipments->rebuild();
     }
 }

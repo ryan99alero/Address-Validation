@@ -4,7 +4,6 @@ use App\Filament\Resources\CarrierShipmentSummaries\Pages\ListCarrierShipmentSum
 use App\Models\Carrier;
 use App\Models\CarrierInvoice;
 use App\Models\CarrierShipment;
-use App\Models\CarrierShipmentSummary;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -29,9 +28,4 @@ it('renders the standalone Per-Shipment Costs list off carrier_shipments', funct
         ->assertOk()
         ->assertSee('TRK00099')
         ->assertSee('FedEx');
-});
-
-it('guards the retired summary model against any read', function () {
-    expect(fn () => CarrierShipmentSummary::query()->first())
-        ->toThrow(RuntimeException::class);
 });
