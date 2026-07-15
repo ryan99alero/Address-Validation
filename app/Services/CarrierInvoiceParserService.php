@@ -1329,9 +1329,64 @@ class CarrierInvoiceParserService
         }
         fclose($handle);
 
+        // Link the just-imported CSV charges to their shipment rows (if the PDF has already
+        // provided them) and fill the per-shipment cost split, so the Per-Shipment Costs view
+        // reconciles. When the PDF hasn't arrived yet this is a no-op; importUpsPdf runs the
+        // same step once it creates the shipments.
+        foreach ($invoices as $invoice) {
+            $this->linkCsvChargesToShipments($invoice);
+            try {
+                app(FedExShipmentDeriveService::class)->enrichCostsForInvoice($invoice);
+            } catch (\Throwable $e) {
+                Log::warning('UPS CSV shipment cost enrich failed', ['invoice_id' => $invoice->id, 'error' => $e->getMessage()]);
+            }
+        }
+
         // CSV prints no single grand total, so reconcile against the file's own charge rows:
         // confirms we stored every charge line we read (an import-completeness check).
         return $this->finalizeInvoices($invoices, $fileTotals);
+    }
+
+    /**
+     * Attach an invoice's unlinked charges (i.e. CSV-sourced — CSV has no per-shipment
+     * structure) to a shipment row by tracking number, so per-shipment cost can be
+     * computed. A tracking can span several shipment rows (outbound + correction sections);
+     * CSV can't tell them apart, so the whole tracking's charges go to the PRIMARY row
+     * (outbound preferred, then inbound, then lowest id). The tracking total stays exact;
+     * only the per-section split is approximate for CSV invoices. Returns charges linked.
+     */
+    protected function linkCsvChargesToShipments(CarrierInvoice $invoice): int
+    {
+        $trackings = CarrierCharge::query()
+            ->where('carrier_invoice_id', $invoice->id)
+            ->whereNull('carrier_shipment_id')
+            ->whereNotNull('tracking_number')
+            ->where('tracking_number', '<>', '')
+            ->distinct()
+            ->pluck('tracking_number');
+
+        if ($trackings->isEmpty()) {
+            return 0;
+        }
+
+        $primary = $invoice->shipments()
+            ->whereIn('tracking_number', $trackings)
+            ->orderByRaw("CASE WHEN section = 'outbound' THEN 0 WHEN section = 'inbound' THEN 1 ELSE 2 END")
+            ->orderBy('id')
+            ->get(['id', 'tracking_number'])
+            ->groupBy('tracking_number')
+            ->map(fn ($group) => $group->first()->id);
+
+        $linked = 0;
+        foreach ($primary as $tracking => $shipmentId) {
+            $linked += CarrierCharge::query()
+                ->where('carrier_invoice_id', $invoice->id)
+                ->whereNull('carrier_shipment_id')
+                ->where('tracking_number', $tracking)
+                ->update(['carrier_shipment_id' => $shipmentId]);
+        }
+
+        return $linked;
     }
 
     /**
@@ -1386,10 +1441,12 @@ class CarrierInvoiceParserService
 
         $this->persistUpsPdf($invoice, $parsed, $grandTotal);
 
-        // Fill each shipment's cost (total + base/fee split) from the charges just
-        // persisted, so the Per-Shipment Costs view totals the real per-shipment cost
-        // (not the PDF's mostly-null printed Total). Best-effort — never fail the import.
+        // Fill each shipment's cost (total + base/fee split) from its charges so the
+        // Per-Shipment Costs view totals the real per-shipment cost (not the PDF's mostly-null
+        // printed Total). When the charges are CSV-sourced (CSV owns them), link them to these
+        // just-created shipment rows first. Best-effort — never fail the import.
         try {
+            $this->linkCsvChargesToShipments($invoice);
             app(FedExShipmentDeriveService::class)->enrichCostsForInvoice($invoice);
         } catch (\Throwable $e) {
             Log::warning('UPS shipment cost enrich failed', ['invoice_id' => $invoice->id, 'error' => $e->getMessage()]);

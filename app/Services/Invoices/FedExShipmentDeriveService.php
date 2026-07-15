@@ -76,6 +76,14 @@ class FedExShipmentDeriveService
             return 0;
         }
 
+        // Reset cost on every non-derived shipment first. A UPS tracking spans several rows
+        // (outbound + correction sections); when charges are CSV-sourced their whole cost is
+        // attributed to the tracking's primary row, so the sibling rows must drop any stale
+        // printed_total or the tracking would double-count.
+        $invoice->shipments()
+            ->where('source_type', '!=', self::SOURCE)
+            ->update(['printed_total' => 0, 'base_amount' => 0, 'fee_amount' => 0, 'fee_abbrevs' => null]);
+
         $updated = 0;
         $invoice->shipments()
             ->where('source_type', '!=', self::SOURCE)
