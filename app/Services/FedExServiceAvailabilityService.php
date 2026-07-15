@@ -196,10 +196,10 @@ class FedExServiceAvailabilityService
 
         return [
             'requestedShipment' => [
-                // NOTE: FedEx key is camel-cased "shipDateStamp" (case-sensitive). A
-                // misspelling is silently ignored and transit is computed from TODAY
-                // instead of the requested ship date.
-                'shipDateStamp' => $shipDate->format('Y-m-d'),
+                // NOTE: FedEx key is "shipDatestamp" (lower-case "stamp", case-sensitive),
+                // value ISO "YYYY-MM-DD". The wrong casing is silently ignored and transit
+                // is computed from TODAY instead of the requested ship date.
+                'shipDatestamp' => $shipDate->format('Y-m-d'),
                 'pickupType' => 'USE_SCHEDULED_PICKUP',
                 'shipper' => [
                     'address' => $shipperAddress,

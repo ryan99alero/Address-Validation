@@ -24,10 +24,11 @@ it('sends the ship date under the case-sensitive FedEx key and honors the reques
 
     $shipment = buildFedexPayload($address)['requestedShipment'];
 
-    // Correct key is "shipDateStamp" (camelCase); the old "shipDatestamp" was ignored by FedEx.
-    expect($shipment)->toHaveKey('shipDateStamp')
-        ->and($shipment)->not->toHaveKey('shipDatestamp')
-        ->and($shipment['shipDateStamp'])->toBe('2026-07-15');
+    // Correct key is "shipDatestamp" (lower-case "stamp"); the camelCase "shipDateStamp"
+    // was silently ignored by FedEx, so transit computed from today instead of this date.
+    expect($shipment)->toHaveKey('shipDatestamp')
+        ->and($shipment)->not->toHaveKey('shipDateStamp')
+        ->and($shipment['shipDatestamp'])->toBe('2026-07-15');
 });
 
 it('includes pickupType, both carrier codes, and the recipient residential flag', function () {
