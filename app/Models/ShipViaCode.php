@@ -133,6 +133,8 @@ class ShipViaCode extends Model
         'payment_type',
         'account_number',
         'account_owner',
+        'carrier_account_id',
+        'third_party_account_id',
         'is_active',
     ];
 
@@ -393,6 +395,38 @@ class ShipViaCode extends Model
     public function carrier(): BelongsTo
     {
         return $this->belongsTo(Carrier::class);
+    }
+
+    /**
+     * The account billed on a sender-paid code (normally ours).
+     *
+     * @return BelongsTo<CarrierAccount, $this>
+     */
+    public function carrierAccount(): BelongsTo
+    {
+        return $this->belongsTo(CarrierAccount::class, 'carrier_account_id');
+    }
+
+    /**
+     * "3rd Party account usage" — the account billed on a third-party code (normally the
+     * customer's own account).
+     *
+     * @return BelongsTo<CarrierAccount, $this>
+     */
+    public function thirdPartyAccount(): BelongsTo
+    {
+        return $this->belongsTo(CarrierAccount::class, 'third_party_account_id');
+    }
+
+    /**
+     * The account that actually pays for this code, by payment type — the basis for BestWay's
+     * "same payer" pooling. Null until backfilled / assigned.
+     */
+    public function billedAccount(): ?CarrierAccount
+    {
+        return $this->payment_type === self::PAYMENT_THIRD_PARTY
+            ? $this->thirdPartyAccount
+            : $this->carrierAccount;
     }
 
     // Scopes
