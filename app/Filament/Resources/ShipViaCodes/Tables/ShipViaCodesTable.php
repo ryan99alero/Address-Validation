@@ -59,6 +59,20 @@ class ShipViaCodesTable
                     ->searchable()
                     ->limit(30)
                     ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('plant_id')
+                    ->label('Plant')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('account_number')
+                    ->label('Account')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('account_owner')
+                    ->label('Owner')
+                    ->badge()
+                    ->placeholder('—')
+                    ->searchable()
+                    ->toggleable(),
                 IconColumn::make('is_active')
                     ->label('Active')
                     ->boolean()

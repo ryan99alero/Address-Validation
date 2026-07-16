@@ -103,6 +103,12 @@ class ShipViaCodeForm
                             ->placeholder('e.g., 472023872')
                             ->visible(fn (callable $get) => $get('payment_type') === ShipViaCode::PAYMENT_SENDER)
                             ->helperText('Carrier account number when billing sender'),
+                        TextInput::make('account_owner')
+                            ->label('Account Owner')
+                            ->maxLength(50)
+                            ->placeholder('e.g., RAND or a client name')
+                            ->visible(fn (callable $get) => $get('payment_type') === ShipViaCode::PAYMENT_SENDER)
+                            ->helperText('Who the account belongs to. BestWay pools all of one owner\'s accounts on a plant into a single service ladder, and never crosses to another owner. Leave blank to lock to the exact account.'),
                     ]),
             ]);
     }

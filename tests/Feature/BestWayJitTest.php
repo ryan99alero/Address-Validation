@@ -18,13 +18,32 @@ beforeEach(function () {
 
 afterEach(fn () => Carbon::setTestNow());
 
-function svcode(Carrier $c, string $code, string $type, string $account): void
+function svcode(Carrier $c, string $code, string $type, string $account, ?string $owner = null): void
 {
     ShipViaCode::factory()->create([
         'carrier_id' => $c->id, 'code' => $code, 'service_type' => $type,
         'plant_id' => 'PLANT002', 'payment_type' => ShipViaCode::PAYMENT_SENDER,
-        'account_number' => $account, 'is_active' => true,
+        'account_number' => $account, 'account_owner' => $owner, 'is_active' => true,
     ]);
+}
+
+/** Address on Ground code G1 with a two-tier transit ladder (Ground 4-day + Overnight 1-day). */
+function ownerJitAddress(Carrier $c): Address
+{
+    $a = Address::factory()->create([
+        'requested_ship_date' => '2026-07-10',
+        'required_on_site_date' => '2026-07-15',
+        'ship_via_code' => 'G1',
+        'validation_status' => 'valid',
+    ]);
+    foreach ([['FEDEX_GROUND', 'FOUR_DAYS'], ['STANDARD_OVERNIGHT', 'ONE_DAY']] as [$type, $days]) {
+        TransitTime::factory()->create([
+            'address_id' => $a->id, 'carrier_id' => $c->id, 'service_type' => $type,
+            'service_name' => $type, 'maximum_transit_time' => $days, 'delivery_date' => now()->addDays(30),
+        ]);
+    }
+
+    return $a->load('transitTimes');
 }
 
 function jitAddress(Carrier $c): Address
@@ -112,6 +131,38 @@ it('computes transit duration from delivery_date when no max transit time is set
         ->and((int) $a->ship_via_days)->toBe(1)
         ->and($a->recommended_ship_date->format('Y-m-d'))->toBe('2026-07-14')
         ->and($a->bestway_optimized)->toBeTrue();
+});
+
+it('pools own accounts by owner: crosses to another OWN account for the on-time service', function () {
+    $c = $this->carrier;
+    // Plant002 reality: Ground on our Ground account, Overnight on our SEPARATE Priority
+    // account — both owned by RAND. BestWay must treat them as one ladder.
+    svcode($c, 'G1', 'FEDEX_GROUND', 'ACCT_GROUND', 'RAND');
+    svcode($c, 'OV', 'STANDARD_OVERNIGHT', 'ACCT_PRIORITY', 'RAND');
+
+    $this->svc->applyBestWayOptimization(ownerJitAddress($c));
+    $a = Address::where('ship_via_code', 'OV')->first();
+
+    // Ground (4-day) would ship 7/9 — before the 7/10 floor — so it crosses to the Priority
+    // account's Overnight. Same owner, so billing still lands on RAND.
+    expect($a)->not->toBeNull()
+        ->and($a->bestway_optimized)->toBeTrue();
+});
+
+it('never crosses to a different owner — a client account stays off-limits', function () {
+    $c = $this->carrier;
+    svcode($c, 'G1', 'FEDEX_GROUND', 'ACCT_GROUND', 'RAND');
+    // The only on-time overnight sits on a CLIENT-owned account — never ship on their dime.
+    svcode($c, 'OVC', 'STANDARD_OVERNIGHT', 'CLIENT_ACCT', 'CLIENT_ACME');
+
+    $a = ownerJitAddress($c);
+    $this->svc->applyBestWayOptimization($a);
+    $a->refresh();
+
+    // No RAND-owned service arrives in time → flagged, not silently shipped on the client.
+    expect($a->ship_via_code)->toBe('G1')
+        ->and($a->bestway_optimized)->toBeFalse()
+        ->and($a->ship_via_meets_deadline)->toBeFalse();
 });
 
 it('anchors transit duration on the sent ship date, not the fetch date (holiday-aware)', function () {

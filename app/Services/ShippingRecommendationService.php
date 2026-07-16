@@ -538,9 +538,10 @@ class ShippingRecommendationService
         $plantId = $plantOverride ?: $original?->plant_id;
         $paymentType = $original?->payment_type;
         $accountNumber = $original?->account_number;
+        $accountOwner = $original?->account_owner;
 
         $candidates = $transitTimes
-            ->map(function (TransitTime $t) use ($required, $floor, $plantId, $paymentType, $accountNumber) {
+            ->map(function (TransitTime $t) use ($required, $floor, $plantId, $paymentType, $accountNumber, $accountOwner) {
                 // Duration is measured from the ship date FedEx quoted against (stored on
                 // the transit row, holiday/weekend-aware), then inverted from the required
                 // date below to ship as late as possible.
@@ -554,9 +555,9 @@ class ShippingRecommendationService
                     return null; // would have to ship before the earliest ship date
                 }
 
-                $code = ShipViaCode::findMatchingForBestWay($t->service_type, $plantId, $paymentType, $accountNumber);
+                $code = ShipViaCode::findMatchingForBestWay($t->service_type, $plantId, $paymentType, $accountNumber, $accountOwner);
                 if (! $code) {
-                    return null; // no code on the same plant + account — never jump
+                    return null; // no code on the same plant + owner/account — never jump payers
                 }
 
                 return ['transit' => $t, 'service_type' => $t->service_type, 'code' => $code->code, 'ship_date' => $shipDate];

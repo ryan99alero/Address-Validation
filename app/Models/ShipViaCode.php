@@ -132,6 +132,7 @@ class ShipViaCode extends Model
         'plant_id',
         'payment_type',
         'account_number',
+        'account_owner',
         'is_active',
     ];
 
@@ -339,7 +340,8 @@ class ShipViaCode extends Model
         string $serviceType,
         ?string $plantId,
         ?string $paymentType,
-        ?string $accountNumber = null
+        ?string $accountNumber = null,
+        ?string $accountOwner = null
     ): ?self {
         $query = static::where('service_type', $serviceType)
             ->where('is_active', true);
@@ -358,12 +360,19 @@ class ShipViaCode extends Model
             $query->whereNull('payment_type');
         }
 
-        // Match account_number only if payment_type is sender
-        if ($paymentType === self::PAYMENT_SENDER && $accountNumber !== null) {
-            $query->where('account_number', $accountNumber);
+        // Sender-paid billing must stay with the same PAYER. When the account is tagged with
+        // an owner, pool across all of that owner's accounts on the plant (e.g. a plant's
+        // separate Ground and Priority accounts form one ladder) — never crossing to another
+        // owner. Untagged accounts fall back to the exact-account lock (safe default).
+        if ($paymentType === self::PAYMENT_SENDER) {
+            if ($accountOwner !== null && $accountOwner !== '') {
+                $query->where('account_owner', $accountOwner);
+            } elseif ($accountNumber !== null) {
+                $query->where('account_number', $accountNumber);
+            }
         }
 
-        return $query->first();
+        return $query->orderBy('account_number')->first();
     }
 
     /**
