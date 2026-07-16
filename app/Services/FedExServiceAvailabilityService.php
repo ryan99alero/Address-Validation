@@ -53,6 +53,63 @@ class FedExServiceAvailabilityService
     }
 
     /**
+     * Reverse-validation call: re-quote transit for a SPECIFIC ship date and return FedEx's
+     * committed delivery date for one service. Used to confirm a BestWay JIT ship date lands
+     * on time (holiday-aware) rather than trusting the inverted estimate. Does NOT persist —
+     * it's a check, not a stored quote. Returns null if the service isn't offered / on error.
+     */
+    public function getDeliveryDateForShipDate(
+        Address $address,
+        string $serviceType,
+        CarbonInterface $shipDate,
+        ?string $originPostalCode = null,
+        ?string $originCountryCode = null
+    ): ?CarbonInterface {
+        if (! $originPostalCode) {
+            $company = CompanySetting::instance();
+            $originPostalCode = $company->postal_code;
+            $originCountryCode = $originCountryCode ?? $company->country_code ?? 'US';
+        }
+        if (! $originPostalCode) {
+            return null;
+        }
+
+        try {
+            $response = Http::withToken($this->getAccessToken())
+                ->timeout($this->carrier->timeout_seconds)
+                ->acceptJson()
+                ->post(
+                    $this->carrier->getBaseUrl().'/availability/v1/transittimes',
+                    $this->buildPayloadForAddress(
+                        $address,
+                        $this->buildShipperAddress($originPostalCode, $originCountryCode ?? 'US'),
+                        $shipDate
+                    )
+                );
+
+            if (! $response->successful()) {
+                Log::warning('FedEx reverse-validate call failed', ['status' => $response->status(), 'body' => $response->body()]);
+
+                return null;
+            }
+
+            foreach (($response->json('output.transitTimes') ?? []) as $group) {
+                foreach (($group['transitTimeDetails'] ?? []) as $detail) {
+                    if (($detail['serviceType'] ?? null) === $serviceType) {
+                        $day = $detail['commit']['dateDetail']['day'] ?? null;
+
+                        return $day ? Carbon::parse($day) : null;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            Log::warning('FedEx reverse-validate exception', ['error' => $e->getMessage()]);
+        }
+
+        return null;
+    }
+
+    /**
      * Get transit times for multiple addresses (sequential - for small batches).
      *
      * @param  Collection<int, Address>  $addresses
@@ -177,13 +234,13 @@ class FedExServiceAvailabilityService
      * @param  array<string, string>  $shipperAddress
      * @return array<string, mixed>
      */
-    protected function buildPayloadForAddress(Address $address, array $shipperAddress): array
+    protected function buildPayloadForAddress(Address $address, array $shipperAddress, ?CarbonInterface $shipDateOverride = null): array
     {
         // Use validated output address if available, otherwise original input (denormalized schema)
         $destinationPostalCode = $address->output_postal ?? $address->input_postal;
         $destinationCountryCode = $address->output_country ?? $address->input_country ?? 'US';
 
-        $shipDate = $this->effectiveShipDate($address);
+        $shipDate = $shipDateOverride ?? $this->effectiveShipDate($address);
 
         // FedEx delivery/residential flag drives Ground vs Home Delivery and can
         // shift commit dates; use the validated value, falling back to the imported one.

@@ -594,6 +594,8 @@ class ShippingRecommendationService
             $address->ship_via_meets_deadline = false;
             $address->recommended_ship_date = null;
             $address->recommended_ship_service = null;
+            $address->bestway_service_type = null;
+            $address->arrival_verified = null;
 
             return 'no_service';
         }
@@ -612,6 +614,10 @@ class ShippingRecommendationService
         $address->ship_via_meets_deadline = true;
         $address->recommended_ship_date = $jit['ship_date'];
         $address->recommended_ship_service = $address->ship_via_service;
+        $address->bestway_service_type = $jit['service_type'];
+        // Not yet FedEx-confirmed; the arrival above is the inferred required date. A
+        // reverse-validation pass (when enabled) re-quotes the ship date and sets this.
+        $address->arrival_verified = null;
         $address->suggested_service = null;
         $address->suggested_delivery_date = null;
         $address->bestway_optimized = true;
@@ -641,6 +647,70 @@ class ShippingRecommendationService
         $address->save();
 
         return $outcome === 'optimized';
+    }
+
+    /**
+     * Reverse-validate one BestWay-optimized address with a SECOND FedEx call: re-quote the
+     * chosen service at the computed ship date and confirm FedEx's committed delivery is on
+     * time (holiday/weekend-aware) rather than trusting the inverted estimate. Sets the real
+     * ship_via_date + arrival_verified; flags a slip (never hides a late arrival). Only runs
+     * for FUTURE-dated optimized shipments — a today-dated ship already reflects the quote.
+     *
+     * @return 'confirmed'|'slipped'|'unverifiable'|'skipped'
+     */
+    public function reverseValidateArrival(Address $address, FedExServiceAvailabilityService $fedex): string
+    {
+        if (! $address->bestway_optimized || ! $address->bestway_service_type
+            || ! $address->recommended_ship_date || ! $address->required_on_site_date) {
+            return 'skipped';
+        }
+
+        $shipDate = $address->recommended_ship_date->startOfDay();
+        if ($shipDate->lte(now()->startOfDay())) {
+            return 'skipped'; // today/past ship date already reflects the live quote
+        }
+
+        $delivery = $fedex->getDeliveryDateForShipDate($address, $address->bestway_service_type, $shipDate);
+        if (! $delivery) {
+            $address->arrival_verified = null;
+            $address->save();
+
+            return 'unverifiable';
+        }
+
+        $onTime = $delivery->startOfDay()->lte($address->required_on_site_date->startOfDay());
+
+        $address->ship_via_date = $delivery;   // FedEx's real committed arrival — the honest date
+        $address->arrival_verified = $onTime;
+        if (! $onTime) {
+            $address->ship_via_meets_deadline = false; // holiday/weekend pushed it late — flag it
+        }
+        $address->save();
+
+        return $onTime ? 'confirmed' : 'slipped';
+    }
+
+    /**
+     * Reverse-validate a batch of addresses (one FedEx call each). Sequential — each is a
+     * distinct ship date, so the calls can't be pooled.
+     *
+     * @param  Collection<int, Address>  $addresses
+     * @return array{checked: int, confirmed: int, slipped: int, unverifiable: int}
+     */
+    public function reverseValidateArrivalBatch(Collection $addresses, FedExServiceAvailabilityService $fedex): array
+    {
+        $counts = ['checked' => 0, 'confirmed' => 0, 'slipped' => 0, 'unverifiable' => 0];
+
+        foreach ($addresses as $address) {
+            $outcome = $this->reverseValidateArrival($address, $fedex);
+            if ($outcome === 'skipped') {
+                continue;
+            }
+            $counts['checked']++;
+            $counts[$outcome]++;
+        }
+
+        return $counts;
     }
 
     /**

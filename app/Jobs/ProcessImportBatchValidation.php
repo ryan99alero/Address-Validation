@@ -388,6 +388,47 @@ class ProcessImportBatchValidation implements ShouldQueue
             'no_viable_service' => $result['no_viable_service'],
             'no_matching_code' => $result['no_matching_code'] ?? 0,
         ]);
+
+        if ($this->batch->reverse_validate_future_date) {
+            $this->reverseValidateFutureDates();
+        }
+    }
+
+    /**
+     * Opt-in second pass: for BestWay-optimized shipments with a FUTURE ship date, re-quote
+     * FedEx at that ship date to confirm the committed (holiday-aware) delivery is on time,
+     * setting the real arrival + arrival_verified. One extra API call per future-dated
+     * shipment — that's why it's gated behind the batch toggle. FedEx only for now.
+     */
+    protected function reverseValidateFutureDates(): void
+    {
+        $transitCarrier = $this->batch->transit_carrier_id
+            ? Carrier::where('id', $this->batch->transit_carrier_id)->where('is_active', true)->first()
+            : null;
+
+        if (! $transitCarrier || $transitCarrier->slug !== 'fedex') {
+            return;
+        }
+
+        $addresses = $this->batch->addresses()
+            ->where('bestway_optimized', true)
+            ->whereNotNull('recommended_ship_date')
+            ->whereDate('recommended_ship_date', '>', now()->toDateString())
+            ->get();
+
+        if ($addresses->isEmpty()) {
+            return;
+        }
+
+        $counts = (new ShippingRecommendationService)->reverseValidateArrivalBatch(
+            $addresses,
+            new FedExServiceAvailabilityService($transitCarrier)
+        );
+
+        Log::info('ProcessImportBatchValidation: Reverse-validated future ship dates', array_merge(
+            ['batch_id' => $this->batch->id],
+            $counts
+        ));
     }
 
     public function failed(\Throwable $exception): void

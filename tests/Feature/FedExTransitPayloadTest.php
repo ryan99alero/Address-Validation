@@ -18,8 +18,10 @@ function buildFedexPayload(Address $address): array
 }
 
 it('sends the ship date under the case-sensitive FedEx key and honors the requested ship date', function () {
+    // A genuinely future ship date (relative to now, so the test never floors it to today).
+    $future = now()->addDays(30)->toDateString();
     $address = Address::factory()->create([
-        'input_postal' => '04652', 'requested_ship_date' => '2026-07-15', 'is_residential' => true,
+        'input_postal' => '04652', 'requested_ship_date' => $future, 'is_residential' => true,
     ]);
 
     $shipment = buildFedexPayload($address)['requestedShipment'];
@@ -28,7 +30,7 @@ it('sends the ship date under the case-sensitive FedEx key and honors the reques
     // was silently ignored by FedEx, so transit computed from today instead of this date.
     expect($shipment)->toHaveKey('shipDatestamp')
         ->and($shipment)->not->toHaveKey('shipDateStamp')
-        ->and($shipment['shipDatestamp'])->toBe('2026-07-15');
+        ->and($shipment['shipDatestamp'])->toBe($future);
 });
 
 it('includes pickupType, both carrier codes, and the recipient residential flag', function () {

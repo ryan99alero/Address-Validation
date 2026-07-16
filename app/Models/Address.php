@@ -109,6 +109,7 @@ class Address extends Model
             'ship_via_meets_deadline' => 'boolean',
             'can_meet_required_date' => 'boolean',
             'bestway_optimized' => 'boolean',
+            'arrival_verified' => 'boolean',
             'is_residential' => 'boolean',
             'input_is_residential' => 'boolean',
             'confidence_score' => 'decimal:2',

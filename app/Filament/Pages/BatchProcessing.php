@@ -305,6 +305,11 @@ class BatchProcessing extends Page implements HasSchemas
                             ->native(true)
                             ->visible(fn ($get) => $get('include_transit_times') && $get('find_best_service'))
                             ->helperText('Deliver-by deadline. A Required On-Site Date column in the file overrides this per row.'),
+                        Checkbox::make('reverse_validate_future_date')
+                            ->label('Reverse-Validate Future Ship Date (extra API call)')
+                            ->default(false)
+                            ->visible(fn ($get) => $get('include_transit_times') && $get('find_best_service'))
+                            ->helperText('For future-dated shipments, re-quote the carrier at the chosen ship date to confirm the real (holiday-aware) delivery date instead of the inferred one. Flags any that would arrive late. Costs one extra API call per future-dated shipment.'),
                     ]),
             ])
             ->statePath('uploadData');
@@ -489,6 +494,7 @@ class BatchProcessing extends Page implements HasSchemas
                 'origin_postal_code' => $data['origin_postal_code'] ?? null,
                 'origin_country_code' => 'US',
                 'find_best_service' => $data['find_best_service'] ?? false,
+                'reverse_validate_future_date' => $data['reverse_validate_future_date'] ?? false,
                 'default_on_site_date' => $data['default_on_site_date'] ?? null,
                 'default_ship_date' => $data['default_ship_date'] ?? null,
                 'bestway_plant_id' => $data['bestway_plant_id'] ?? null,
