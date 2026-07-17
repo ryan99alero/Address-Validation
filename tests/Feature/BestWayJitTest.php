@@ -1,7 +1,9 @@
 <?php
 
+use App\Models\AccountOwner;
 use App\Models\Address;
 use App\Models\Carrier;
+use App\Models\CarrierAccount;
 use App\Models\ShipViaCode;
 use App\Models\TransitTime;
 use App\Services\ShippingRecommendationService;
@@ -133,27 +135,41 @@ it('computes transit duration from delivery_date when no max transit time is set
         ->and($a->bestway_optimized)->toBeTrue();
 });
 
+/** Ship-via code linked to a structured carrier account (Phase 3 pools by the account's owner). */
+function acctCode(Carrier $c, string $code, string $type, CarrierAccount $account): void
+{
+    ShipViaCode::factory()->create([
+        'carrier_id' => $c->id, 'code' => $code, 'service_type' => $type,
+        'plant_id' => 'PLANT002', 'payment_type' => ShipViaCode::PAYMENT_SENDER,
+        'carrier_account_id' => $account->id, 'account_number' => $account->account_number, 'is_active' => true,
+    ]);
+}
+
 it('pools own accounts by owner: crosses to another OWN account for the on-time service', function () {
     $c = $this->carrier;
-    // Plant002 reality: Ground on our Ground account, Overnight on our SEPARATE Priority
-    // account — both owned by RAND. BestWay must treat them as one ladder.
-    svcode($c, 'G1', 'FEDEX_GROUND', 'ACCT_GROUND', 'RAND');
-    svcode($c, 'OV', 'STANDARD_OVERNIGHT', 'ACCT_PRIORITY', 'RAND');
+    // Plant002 reality: Ground and Overnight on SEPARATE accounts, both owned by RAND.
+    $rand = AccountOwner::create(['name' => 'RAND', 'type' => AccountOwner::TYPE_COMPANY]);
+    $ground = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCT_GROUND', 'nickname' => 'Ground', 'account_owner_id' => $rand->id]);
+    $priority = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCT_PRIORITY', 'nickname' => 'Priority', 'account_owner_id' => $rand->id]);
+    acctCode($c, 'G1', 'FEDEX_GROUND', $ground);
+    acctCode($c, 'OV', 'STANDARD_OVERNIGHT', $priority);
 
     $this->svc->applyBestWayOptimization(ownerJitAddress($c));
     $a = Address::where('ship_via_code', 'OV')->first();
 
-    // Ground (4-day) would ship 7/9 — before the 7/10 floor — so it crosses to the Priority
-    // account's Overnight. Same owner, so billing still lands on RAND.
+    // Ground (4-day) ships too early → crosses to the Priority account's Overnight. Same owner.
     expect($a)->not->toBeNull()
         ->and($a->bestway_optimized)->toBeTrue();
 });
 
 it('never crosses to a different owner — a client account stays off-limits', function () {
     $c = $this->carrier;
-    svcode($c, 'G1', 'FEDEX_GROUND', 'ACCT_GROUND', 'RAND');
-    // The only on-time overnight sits on a CLIENT-owned account — never ship on their dime.
-    svcode($c, 'OVC', 'STANDARD_OVERNIGHT', 'CLIENT_ACCT', 'CLIENT_ACME');
+    $rand = AccountOwner::create(['name' => 'RAND', 'type' => AccountOwner::TYPE_COMPANY]);
+    $acme = AccountOwner::create(['name' => 'Acme', 'type' => AccountOwner::TYPE_CUSTOMER]);
+    $ground = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCT_GROUND', 'nickname' => 'Ground', 'account_owner_id' => $rand->id]);
+    $client = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'CLIENT_ACCT', 'nickname' => 'Client', 'account_owner_id' => $acme->id]);
+    acctCode($c, 'G1', 'FEDEX_GROUND', $ground);
+    acctCode($c, 'OVC', 'STANDARD_OVERNIGHT', $client); // only on-time overnight is the client's
 
     $a = ownerJitAddress($c);
     $this->svc->applyBestWayOptimization($a);
@@ -163,6 +179,22 @@ it('never crosses to a different owner — a client account stays off-limits', f
     expect($a->ship_via_code)->toBe('G1')
         ->and($a->bestway_optimized)->toBeFalse()
         ->and($a->ship_via_meets_deadline)->toBeFalse();
+});
+
+it('locks an owner-unassigned account to itself — never pools null owners', function () {
+    $c = $this->carrier;
+    // Two linked accounts with NO owner yet (the backfill worklist state). Must not pool.
+    $a1 = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'A1', 'nickname' => 'A1']);
+    $a2 = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'A2', 'nickname' => 'A2']);
+    acctCode($c, 'G1', 'FEDEX_GROUND', $a1);
+    acctCode($c, 'OV', 'STANDARD_OVERNIGHT', $a2);
+
+    $a = ownerJitAddress($c);
+    $this->svc->applyBestWayOptimization($a);
+    $a->refresh();
+
+    // G1's account has no owner → locks to A1; Overnight is on A2 → excluded → not optimized.
+    expect($a->bestway_optimized)->toBeFalse();
 });
 
 it('anchors transit duration on the sent ship date, not the fetch date (holiday-aware)', function () {

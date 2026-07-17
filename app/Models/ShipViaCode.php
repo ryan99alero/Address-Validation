@@ -351,16 +351,13 @@ class ShipViaCode extends Model
      * but for a different service type.
      *
      * @param  string  $serviceType  The target service type (e.g., FEDEX_GROUND)
-     * @param  string|null  $plantId  Plant identifier to match
-     * @param  string|null  $paymentType  Payment type to match (sender or third_party)
-     * @param  string|null  $accountNumber  Account number to match (for sender payment type)
+     * @param  string|null  $plantId  Plant to match (resolved: batch override or the code's plant)
+     * @param  self|null  $original  The address's original code — source of payment type + payer
      */
     public static function findMatchingForBestWay(
         string $serviceType,
         ?string $plantId,
-        ?string $paymentType,
-        ?string $accountNumber = null,
-        ?string $accountOwner = null
+        ?self $original = null
     ): ?self {
         $query = static::where('service_type', $serviceType)
             ->where('is_active', true);
@@ -372,23 +369,35 @@ class ShipViaCode extends Model
             $query->whereNull('plant_id');
         }
 
-        // Match payment_type
+        $paymentType = $original?->payment_type;
+
+        // Match payment_type — a shipment never switches billing method (sender vs third-party).
         if ($paymentType !== null) {
             $query->where('payment_type', $paymentType);
         } else {
             $query->whereNull('payment_type');
         }
 
-        // Sender-paid billing must stay with the same PAYER. When the account is tagged with
-        // an owner, pool across all of that owner's accounts on the plant (e.g. a plant's
-        // separate Ground and Priority accounts form one ladder) — never crossing to another
-        // owner. Untagged accounts fall back to the exact-account lock (safe default).
-        if ($paymentType === self::PAYMENT_SENDER) {
-            if ($accountOwner !== null && $accountOwner !== '') {
-                $query->where('account_owner', $accountOwner);
-            } elseif ($accountNumber !== null) {
-                $query->where('account_number', $accountNumber);
-            }
+        // Billing must stay with the same PAYER (FK-first). The billed account is the
+        // carrier_account for sender-paid, or the third_party_account for third-party.
+        //  1. Account has an OWNER → pool across all of that owner's accounts on the plant
+        //     (e.g. a plant's separate Ground + Priority accounts form one ladder), never
+        //     crossing to another owner.
+        //  2. Account linked but owner unassigned → lock to that exact account (never pool
+        //     unowned accounts together — two clients' unowned accounts must not cross).
+        //  3. No linked account (legacy row) → the pre-migration exact account_number string
+        //     match, verbatim, so untouched data behaves identically.
+        $isThirdParty = $paymentType === self::PAYMENT_THIRD_PARTY;
+        $relation = $isThirdParty ? 'thirdPartyAccount' : 'carrierAccount';
+        $column = $isThirdParty ? 'third_party_account_id' : 'carrier_account_id';
+        $billed = $original ? ($isThirdParty ? $original->thirdPartyAccount : $original->carrierAccount) : null;
+
+        if ($billed && $billed->account_owner_id !== null) {
+            $query->whereHas($relation, fn ($q) => $q->where('account_owner_id', $billed->account_owner_id));
+        } elseif ($billed) {
+            $query->where($column, $billed->id);
+        } elseif ($paymentType === self::PAYMENT_SENDER && filled($original?->account_number)) {
+            $query->where('account_number', $original->account_number);
         }
 
         return $query->orderBy('account_number')->first();

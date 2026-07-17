@@ -535,13 +535,12 @@ class ShippingRecommendationService
         $original = $address->relationLoaded('shipViaCodeRecord')
             ? $address->shipViaCodeRecord
             : ShipViaCode::lookup($address->ship_via_code);
+        // The payer is derived from the original code's billed account (owner), so load them.
+        $original?->loadMissing(['carrierAccount', 'thirdPartyAccount']);
         $plantId = $plantOverride ?: $original?->plant_id;
-        $paymentType = $original?->payment_type;
-        $accountNumber = $original?->account_number;
-        $accountOwner = $original?->account_owner;
 
         $candidates = $transitTimes
-            ->map(function (TransitTime $t) use ($required, $floor, $plantId, $paymentType, $accountNumber, $accountOwner) {
+            ->map(function (TransitTime $t) use ($required, $floor, $plantId, $original) {
                 // Duration is measured from the ship date FedEx quoted against (stored on
                 // the transit row, holiday/weekend-aware), then inverted from the required
                 // date below to ship as late as possible.
@@ -555,7 +554,7 @@ class ShippingRecommendationService
                     return null; // would have to ship before the earliest ship date
                 }
 
-                $code = ShipViaCode::findMatchingForBestWay($t->service_type, $plantId, $paymentType, $accountNumber, $accountOwner);
+                $code = ShipViaCode::findMatchingForBestWay($t->service_type, $plantId, $original);
                 if (! $code) {
                     return null; // no code on the same plant + owner/account — never jump payers
                 }
