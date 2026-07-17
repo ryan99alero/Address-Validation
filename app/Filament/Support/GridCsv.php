@@ -3,6 +3,7 @@
 namespace App\Filament\Support;
 
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\FileUpload;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Builder;
@@ -19,6 +20,24 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class GridCsv
 {
     private const IMPORT_ROW_CAP = 20000;
+
+    /**
+     * Import + Export grouped into a single dropdown button (a menu), sat at the table header
+     * alongside the Filters / column-manager triggers. Auto-hides on non-Eloquent grids
+     * (its child actions do). Placed via header actions — a resource's own toolbarActions()
+     * runs last and would reset a global toolbar push, but header actions survive.
+     */
+    public static function menu(): ActionGroup
+    {
+        return ActionGroup::make([
+            static::importAction(),
+            static::exportAction(),
+        ])
+            ->label('Import / Export')
+            ->icon('heroicon-m-arrows-up-down')
+            ->color('gray')
+            ->button();
+    }
 
     public static function exportAction(): Action
     {
