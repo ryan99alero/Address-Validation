@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources\SqlConnections\Tables;
 
-use App\Filament\Support\GridCsv;
 use App\Models\SqlConnection;
 use App\Services\ShippingDatabaseService;
 use Filament\Actions\Action;
@@ -59,7 +58,7 @@ class SqlConnectionsTable
                 EditAction::make(),
                 DeleteAction::make(),
             ])
-            ->toolbarActions([GridCsv::menu(),
+            ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

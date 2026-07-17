@@ -3,12 +3,13 @@
 namespace App\Filament\Support;
 
 use Filament\Actions\Action;
-use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\FileUpload;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Schema;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
+use Livewire\Livewire;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -22,20 +23,54 @@ class GridCsv
     private const IMPORT_ROW_CAP = 20000;
 
     /**
-     * Import + Export grouped into a single dropdown button (a menu), sat at the table header
-     * alongside the Filters / column-manager triggers. Auto-hides on non-Eloquent grids
-     * (its child actions do). Placed via header actions — a resource's own toolbarActions()
-     * runs last and would reset a global toolbar push, but header actions survive.
+     * The import + export actions registered (hidden) on every grid so they're mountable.
+     * They render nothing themselves; the visible trigger is rendered inline in the toolbar
+     * by renderTrigger() (via a render hook). Registered as header actions because those
+     * survive a resource's toolbarActions() reset — and hidden, so no header row appears.
+     * mountAction() doesn't check visibility, so a hidden action still mounts.
+     *
+     * @return array<int, Action>
      */
-    public static function menu(): ActionGroup
+    public static function registeredActions(): array
     {
-        return ActionGroup::make([
-            static::importAction(),
-            static::exportAction(),
-        ])
-            ->tooltip('Import / Export')
-            ->icon('heroicon-m-arrows-right-left')
-            ->color('gray');
+        return [
+            static::importAction()->hidden(),
+            static::exportAction()->hidden(),
+        ];
+    }
+
+    /**
+     * The visible Import/Export icon dropdown, rendered inline in the toolbar right cluster
+     * (next to the Filters / column-manager triggers) via a render hook. Its items mount the
+     * hidden actions registered above. Empty on non-Eloquent grids.
+     */
+    public static function renderTrigger(): string
+    {
+        $livewire = Livewire::current();
+        if (! $livewire || static::eloquentQuery($livewire) === null) {
+            return '';
+        }
+
+        return Blade::render(<<<'BLADE'
+            <x-filament::dropdown placement="bottom-end">
+                <x-slot name="trigger">
+                    <x-filament::icon-button
+                        icon="heroicon-m-arrows-right-left"
+                        color="gray"
+                        label="Import / Export"
+                        tooltip="Import / Export"
+                    />
+                </x-slot>
+                <x-filament::dropdown.list>
+                    <x-filament::dropdown.list.item icon="heroicon-m-arrow-up-tray" wire:click="mountTableAction('importCsv')">
+                        Import CSV
+                    </x-filament::dropdown.list.item>
+                    <x-filament::dropdown.list.item icon="heroicon-m-arrow-down-tray" wire:click="mountTableAction('exportCsv')">
+                        Export CSV
+                    </x-filament::dropdown.list.item>
+                </x-filament::dropdown.list>
+            </x-filament::dropdown>
+        BLADE);
     }
 
     public static function exportAction(): Action

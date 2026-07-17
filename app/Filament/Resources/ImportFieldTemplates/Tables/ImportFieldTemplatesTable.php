@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources\ImportFieldTemplates\Tables;
 
-use App\Filament\Support\GridCsv;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -38,7 +37,7 @@ class ImportFieldTemplatesTable
             ->recordActions([
                 EditAction::make(),
             ])
-            ->toolbarActions([GridCsv::menu(),
+            ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

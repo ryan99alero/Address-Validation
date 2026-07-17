@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources\IntegrationConnections\Tables;
 
-use App\Filament\Support\GridCsv;
 use App\Models\IntegrationConnection;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
@@ -54,7 +53,7 @@ class IntegrationConnectionsTable
                 EditAction::make(),
                 DeleteAction::make(),
             ])
-            ->toolbarActions([GridCsv::menu(),
+            ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

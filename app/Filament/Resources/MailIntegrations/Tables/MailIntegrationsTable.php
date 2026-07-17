@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources\MailIntegrations\Tables;
 
-use App\Filament\Support\GridCsv;
 use App\Models\MailIntegration;
 use App\Services\Mail\InvoiceMailFetchService;
 use App\Services\Mail\InvoiceMailProcessService;
@@ -170,7 +169,7 @@ class MailIntegrationsTable
                     }),
                 EditAction::make(),
             ])
-            ->toolbarActions([GridCsv::menu(),
+            ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

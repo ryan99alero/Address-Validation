@@ -6,7 +6,9 @@ use App\Filament\Support\GridCsv;
 use App\Listeners\SpawnWorkerOnJobQueued;
 use App\Models\IntegrationConnection;
 use Carbon\CarbonImmutable;
+use Filament\Support\Facades\FilamentView;
 use Filament\Tables\Table;
+use Filament\Tables\View\TablesRenderHook;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Queue\Events\JobQueued;
 use Illuminate\Support\Facades\Cache;
@@ -36,16 +38,19 @@ class AppServiceProvider extends ServiceProvider
         $this->registerEventListeners();
         $this->registerRateLimiters();
 
-        // Add a small CSV Import/Export icon dropdown to every Filament grid's toolbar, inline
-        // with the Filters / column-manager triggers. This global push survives for tables that
-        // DON'T set their own toolbarActions (most read-only grids, relation managers). Tables
-        // that DO set toolbarActions reset the array — those inject GridCsv::menu() directly in
-        // their table class instead. Eloquent-only (GridCsv guards non-query tables).
+        // CSV Import/Export on every Filament grid, as a small icon dropdown inline in the
+        // toolbar's right cluster (next to the Filters / column-manager triggers). The actions
+        // are registered HIDDEN as header actions (survive a resource's toolbarActions() reset;
+        // hidden → no header row; still mountable — mountAction ignores visibility). The visible
+        // trigger is rendered by a render hook right after the column-manager trigger.
         Table::configureUsing(function (Table $table): void {
-            $table->pushToolbarActions([
-                GridCsv::menu(),
-            ]);
+            $table->pushHeaderActions(GridCsv::registeredActions());
         });
+
+        FilamentView::registerRenderHook(
+            TablesRenderHook::TOOLBAR_END,
+            fn (): string => GridCsv::renderTrigger(),
+        );
     }
 
     /**

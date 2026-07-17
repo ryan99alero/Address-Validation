@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources\CarrierAccounts\Tables;
 
-use App\Filament\Support\GridCsv;
 use App\Models\AccountOwner;
 use App\Models\CarrierAccount;
 use Filament\Actions\BulkActionGroup;
@@ -77,7 +76,7 @@ class CarrierAccountsTable
                 EditAction::make(),
                 DeleteAction::make(),
             ])
-            ->toolbarActions([GridCsv::menu(),
+            ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

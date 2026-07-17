@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources\ShipViaCodes\Tables;
 
-use App\Filament\Support\GridCsv;
 use App\Models\AccountOwner;
 use App\Models\Plant;
 use Filament\Actions\BulkActionGroup;
@@ -114,7 +113,7 @@ class ShipViaCodesTable
             ->recordActions([
                 EditAction::make(),
             ])
-            ->toolbarActions([GridCsv::menu(),
+            ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

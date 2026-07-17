@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\ImportBatches\Tables;
 
 use App\Filament\Resources\Addresses\AddressResource;
-use App\Filament\Support\GridCsv;
 use App\Models\ImportBatch;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
@@ -134,7 +133,7 @@ class ImportBatchesTable
                     ->visible(fn (ImportBatch $record): bool => $record->isCompleted()),
                 EditAction::make(),
             ])
-            ->toolbarActions([GridCsv::menu(),
+            ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),
