@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\ShipViaCodes\Tables;
 
+use App\Models\AccountOwner;
+use App\Models\Plant;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -86,6 +88,23 @@ class ShipViaCodesTable
                 SelectFilter::make('carrier_id')
                     ->label('Carrier')
                     ->relationship('carrier', 'name'),
+                SelectFilter::make('plant_id')
+                    ->label('Plant')
+                    ->options(fn (): array => Plant::options()),
+                SelectFilter::make('carrier_account_id')
+                    ->label('Billing Account')
+                    ->relationship('carrierAccount', 'nickname')
+                    ->searchable()
+                    ->preload(),
+                SelectFilter::make('account_owner')
+                    ->label('Account Owner')
+                    ->options(fn (): array => AccountOwner::orderBy('name')->pluck('name', 'id')->all())
+                    ->query(fn ($query, array $data) => $query->when(
+                        $data['value'] ?? null,
+                        fn ($q, $ownerId) => $q->where(fn ($q) => $q
+                            ->whereHas('carrierAccount', fn ($q) => $q->where('account_owner_id', $ownerId))
+                            ->orWhereHas('thirdPartyAccount', fn ($q) => $q->where('account_owner_id', $ownerId))),
+                    )),
                 TernaryFilter::make('is_active')
                     ->label('Active')
                     ->trueLabel('Active only')

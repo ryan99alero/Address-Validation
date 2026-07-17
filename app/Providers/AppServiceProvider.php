@@ -2,9 +2,11 @@
 
 namespace App\Providers;
 
+use App\Filament\Support\GridCsv;
 use App\Listeners\SpawnWorkerOnJobQueued;
 use App\Models\IntegrationConnection;
 use Carbon\CarbonImmutable;
+use Filament\Tables\Table;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Queue\Events\JobQueued;
 use Illuminate\Support\Facades\Cache;
@@ -33,6 +35,16 @@ class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
         $this->registerEventListeners();
         $this->registerRateLimiters();
+
+        // Add CSV Import/Export header actions to every Filament grid (Eloquent-backed tables
+        // only — GridCsv guards non-query tables). pushHeaderActions appends without clobbering
+        // any actions a table sets itself.
+        Table::configureUsing(function (Table $table): void {
+            $table->pushHeaderActions([
+                GridCsv::importAction(),
+                GridCsv::exportAction(),
+            ]);
+        });
     }
 
     /**
