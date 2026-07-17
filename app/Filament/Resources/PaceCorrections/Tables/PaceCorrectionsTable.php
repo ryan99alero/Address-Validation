@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PaceCorrections\Tables;
 
 use App\Filament\Exports\PaceCorrectionExporter;
+use App\Filament\Support\GridCsv;
 use App\Models\Carrier;
 use App\Support\AddressComparison;
 use Filament\Actions\ExportBulkAction;
@@ -107,7 +108,7 @@ class PaceCorrectionsTable
                             ->when($data['until'] ?? null, fn (Builder $q, $date): Builder => $q->whereDate('created_at', '<=', $date));
                     }),
             ])
-            ->toolbarActions([
+            ->toolbarActions([GridCsv::menu(),
                 ExportBulkAction::make()
                     ->label('Export to Excel')
                     ->exporter(PaceCorrectionExporter::class),

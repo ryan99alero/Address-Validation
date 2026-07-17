@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\FolderIntegrations\Tables;
 
+use App\Filament\Support\GridCsv;
 use App\Jobs\ProcessFolderIntegration;
 use App\Models\FolderIntegration;
 use App\Services\Invoices\SmbInvoiceReader;
@@ -111,7 +112,7 @@ class FolderIntegrationsTable
                     }),
                 EditAction::make(),
             ])
-            ->toolbarActions([
+            ->toolbarActions([GridCsv::menu(),
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

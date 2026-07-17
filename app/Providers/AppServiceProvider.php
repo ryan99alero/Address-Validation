@@ -36,13 +36,13 @@ class AppServiceProvider extends ServiceProvider
         $this->registerEventListeners();
         $this->registerRateLimiters();
 
-        // Add a CSV Import/Export dropdown (single menu button) to every Filament grid's
-        // header, alongside the Filters / column-manager triggers. Eloquent-backed tables
-        // only — GridCsv guards non-query tables. Header actions are used (not toolbar): a
-        // resource's own ->toolbarActions() runs last and would reset a global toolbar push,
-        // whereas resources don't set header actions, so pushHeaderActions survives.
+        // Add a small CSV Import/Export icon dropdown to every Filament grid's toolbar, inline
+        // with the Filters / column-manager triggers. This global push survives for tables that
+        // DON'T set their own toolbarActions (most read-only grids, relation managers). Tables
+        // that DO set toolbarActions reset the array — those inject GridCsv::menu() directly in
+        // their table class instead. Eloquent-only (GridCsv guards non-query tables).
         Table::configureUsing(function (Table $table): void {
-            $table->pushHeaderActions([
+            $table->pushToolbarActions([
                 GridCsv::menu(),
             ]);
         });

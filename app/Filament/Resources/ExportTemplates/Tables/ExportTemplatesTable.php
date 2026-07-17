@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ExportTemplates\Tables;
 
+use App\Filament\Support\GridCsv;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -41,7 +42,7 @@ class ExportTemplatesTable
             ->recordActions([
                 EditAction::make(),
             ])
-            ->toolbarActions([
+            ->toolbarActions([GridCsv::menu(),
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

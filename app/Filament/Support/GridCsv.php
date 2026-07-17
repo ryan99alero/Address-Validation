@@ -33,10 +33,9 @@ class GridCsv
             static::importAction(),
             static::exportAction(),
         ])
-            ->label('Import / Export')
-            ->icon('heroicon-m-arrows-up-down')
-            ->color('gray')
-            ->button();
+            ->tooltip('Import / Export')
+            ->icon('heroicon-m-arrows-right-left')
+            ->color('gray');
     }
 
     public static function exportAction(): Action

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\CarrierInvoices\Tables;
 
 use App\Filament\Resources\CarrierInvoices\CarrierInvoiceResource;
+use App\Filament\Support\GridCsv;
 use App\Models\Carrier;
 use App\Models\CarrierInvoice;
 use Filament\Actions\BulkActionGroup;
@@ -104,7 +105,7 @@ class CarrierInvoicesTable
                 ViewAction::make()
                     ->url(fn (CarrierInvoice $record) => CarrierInvoiceResource::getUrl('view', ['record' => $record])),
             ])
-            ->toolbarActions([
+            ->toolbarActions([GridCsv::menu(),
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

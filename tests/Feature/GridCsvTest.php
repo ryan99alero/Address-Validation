@@ -15,7 +15,13 @@ beforeEach(function () {
 });
 
 it('adds Import/Export header actions to grids without breaking render', function () {
-    foreach ([ListCarrierAccounts::class, ListPlants::class, ListShipViaCodes::class] as $page) {
+    $pages = [
+        ListCarrierAccounts::class, // resets toolbarActions → injected in the table class
+        ListPlants::class,
+        ListShipViaCodes::class,
+        \App\Filament\Resources\Carriers\Pages\ListCarriers::class, // no toolbarActions → global push
+    ];
+    foreach ($pages as $page) {
         Livewire::test($page)
             ->assertOk()
             ->assertTableActionExists('exportCsv')

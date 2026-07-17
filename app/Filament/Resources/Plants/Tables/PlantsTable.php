@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Plants\Tables;
 
+use App\Filament\Support\GridCsv;
 use App\Models\Plant;
 use App\Models\ShipViaCode;
 use Filament\Actions\BulkActionGroup;
@@ -40,7 +41,7 @@ class PlantsTable
             ->recordActions([
                 EditAction::make(),
             ])
-            ->toolbarActions([
+            ->toolbarActions([GridCsv::menu(),
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),

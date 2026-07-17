@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Addresses\Tables;
 
+use App\Filament\Support\GridCsv;
 use App\Models\Address;
 use App\Models\Carrier;
 use App\Support\AddressComparison;
@@ -265,7 +266,7 @@ class AddressesTable
                 ViewAction::make(),
                 EditAction::make(),
             ])
-            ->toolbarActions([
+            ->toolbarActions([GridCsv::menu(),
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                 ]),
