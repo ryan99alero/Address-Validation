@@ -3,10 +3,13 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Concerns\AdminOnly;
+use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
+use App\Models\CarrierAccount;
 use App\Models\CompanySetting;
 use App\Services\DynamicFieldService;
 use BackedEnum;
 use Carbon\Carbon;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -18,6 +21,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\HtmlString;
 use UnitEnum;
 
 class CompanySetup extends Page implements HasSchemas
@@ -56,8 +60,6 @@ class CompanySetup extends Page implements HasSchemas
             'state' => $settings->state,
             'postal_code' => $settings->postal_code,
             'country_code' => $settings->country_code ?? 'US',
-            'ups_account_number' => $settings->ups_account_number,
-            'fedex_account_number' => $settings->fedex_account_number,
             'extra_field_count' => $settings->extra_field_count ?? 20,
             'current_extra_field_count' => $dynamicFieldService->getCurrentExtraFieldCount(),
             'pace_correction_retention_days' => $settings->pace_correction_retention_days ?? 0,
@@ -126,20 +128,19 @@ class CompanySetup extends Page implements HasSchemas
                             ->required(),
                     ]),
 
-                Section::make('Carrier Account Numbers')
-                    ->description('Optional: Your carrier account numbers for shipping integrations.')
-                    ->columns(2)
-                    ->collapsible()
-                    ->collapsed()
+                Section::make('Carrier Accounts')
+                    ->description('Your (and clients\') carrier billing accounts are managed as first-class records — BestWay pools shipping by account owner.')
                     ->schema([
-                        TextInput::make('ups_account_number')
-                            ->label('UPS Account Number')
-                            ->maxLength(50)
-                            ->helperText('6-character shipper number'),
-                        TextInput::make('fedex_account_number')
-                            ->label('FedEx Account Number')
-                            ->maxLength(50)
-                            ->helperText('9-digit account number'),
+                        Placeholder::make('carrier_accounts_summary')
+                            ->hiddenLabel()
+                            ->content(fn (): HtmlString => new HtmlString(sprintf(
+                                '%d carrier account(s) across FedEx and UPS%s. <a href="%s" class="fi-link fi-link-color-primary">Manage Carrier Accounts &rarr;</a>',
+                                CarrierAccount::count(),
+                                CarrierAccount::whereNull('account_owner_id')->count() > 0
+                                    ? ', '.CarrierAccount::whereNull('account_owner_id')->count().' still need an owner'
+                                    : '',
+                                CarrierAccountResource::getUrl('index'),
+                            ))),
                     ]),
 
                 Section::make('Import/Export Settings')

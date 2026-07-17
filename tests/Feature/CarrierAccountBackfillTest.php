@@ -16,7 +16,7 @@ beforeEach(function () {
     $this->fedex = Carrier::factory()->create(['slug' => 'fedex', 'name' => 'FedEx']);
 });
 
-function svCode(Carrier $c, string $code, string $account, ?string $owner, string $plant = 'PLANT002'): ShipViaCode
+function bfSvCode(Carrier $c, string $code, string $account, ?string $owner, string $plant = 'PLANT002'): ShipViaCode
 {
     return ShipViaCode::factory()->create([
         'carrier_id' => $c->id, 'code' => $code, 'service_type' => 'FEDEX_GROUND',
@@ -27,10 +27,10 @@ function svCode(Carrier $c, string $code, string $account, ?string $owner, strin
 
 it('backfills plants, a company owner, deduped accounts, and links ship-via codes', function () {
     // Two codes on the SAME account (dedup), one on another account, various owner text.
-    $a1 = svCode($this->fedex, 'G1', '111', 'RAND');       // → company owner
-    $a2 = svCode($this->fedex, 'OV', '111', 'Rand Graphics'); // same account 111
-    $b1 = svCode($this->fedex, 'G2', '222', null);         // blank → null owner
-    $c1 = svCode($this->fedex, 'CX', '333', 'Acme Co', 'PLANT001'); // customer owner
+    $a1 = bfSvCode($this->fedex, 'G1', '111', 'RAND');       // → company owner
+    $a2 = bfSvCode($this->fedex, 'OV', '111', 'Rand Graphics'); // same account 111
+    $b1 = bfSvCode($this->fedex, 'G2', '222', null);         // blank → null owner
+    $c1 = bfSvCode($this->fedex, 'CX', '333', 'Acme Co', 'PLANT001'); // customer owner
 
     $this->artisan('accounts:backfill')->assertSuccessful();
 
@@ -54,7 +54,7 @@ it('backfills plants, a company owner, deduped accounts, and links ship-via code
 });
 
 it('is idempotent — re-running creates no duplicates', function () {
-    svCode($this->fedex, 'G1', '111', 'RAND');
+    bfSvCode($this->fedex, 'G1', '111', 'RAND');
     $this->artisan('accounts:backfill')->assertSuccessful();
     $this->artisan('accounts:backfill')->assertSuccessful();
 

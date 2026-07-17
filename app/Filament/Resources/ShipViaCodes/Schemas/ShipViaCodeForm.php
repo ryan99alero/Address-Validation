@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\ShipViaCodes\Schemas;
 
 use App\Models\Carrier;
+use App\Models\CarrierAccount;
+use App\Models\Plant;
 use App\Models\ShipViaCode;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
@@ -87,29 +89,51 @@ class ShipViaCodeForm
                     ->description('Configure plant, payment type, and account for BestWay service matching.')
                     ->columns(3)
                     ->schema([
-                        TextInput::make('plant_id')
-                            ->label('Plant ID')
-                            ->maxLength(50)
-                            ->placeholder('e.g., Plant001')
-                            ->helperText('Plant identifier for routing'),
+                        Select::make('plant_id')
+                            ->label('Plant')
+                            ->options(fn (): array => Plant::options())
+                            ->searchable()
+                            ->native(false)
+                            ->helperText('Plant that ships this code.'),
                         Select::make('payment_type')
                             ->label('Payment Type')
                             ->options(ShipViaCode::getPaymentTypeOptions())
                             ->live()
                             ->helperText('Who pays for shipping'),
-                        TextInput::make('account_number')
-                            ->label('Account Number')
-                            ->maxLength(50)
-                            ->placeholder('e.g., 472023872')
+                        Select::make('carrier_account_id')
+                            ->label('Billing Account')
+                            ->options(fn (callable $get): array => self::accountOptions($get('carrier_id')))
+                            ->searchable()
+                            ->native(false)
                             ->visible(fn (callable $get) => $get('payment_type') === ShipViaCode::PAYMENT_SENDER)
-                            ->helperText('Carrier account number when billing sender'),
-                        TextInput::make('account_owner')
-                            ->label('Account Owner')
-                            ->maxLength(50)
-                            ->placeholder('e.g., RAND or a client name')
-                            ->visible(fn (callable $get) => $get('payment_type') === ShipViaCode::PAYMENT_SENDER)
-                            ->helperText('Who the account belongs to. BestWay pools all of one owner\'s accounts on a plant into a single service ladder, and never crosses to another owner. Leave blank to lock to the exact account.'),
+                            ->helperText('The account billed (normally ours). BestWay pools by this account\'s owner. Manage accounts under Carrier Accounts.'),
+                        Select::make('third_party_account_id')
+                            ->label('3rd Party Account')
+                            ->options(fn (callable $get): array => self::accountOptions($get('carrier_id')))
+                            ->searchable()
+                            ->native(false)
+                            ->visible(fn (callable $get) => $get('payment_type') === ShipViaCode::PAYMENT_THIRD_PARTY)
+                            ->helperText('The existing account billed on third-party shipments (normally the customer\'s own account).'),
                     ]),
             ]);
+    }
+
+    /**
+     * Active carrier accounts for the chosen carrier, as id => "Nickname — #number (Owner)".
+     *
+     * @return array<int, string>
+     */
+    protected static function accountOptions(mixed $carrierId): array
+    {
+        return CarrierAccount::query()
+            ->when($carrierId, fn ($q, $id) => $q->where('carrier_id', $id))
+            ->where('is_active', true)
+            ->with('owner')
+            ->orderBy('nickname')
+            ->get()
+            ->mapWithKeys(fn (CarrierAccount $a): array => [
+                $a->id => $a->nickname.' — #'.$a->account_number.' ('.(optional($a->owner)->name ?? 'needs owner').')',
+            ])
+            ->all();
     }
 }

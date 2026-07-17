@@ -10,7 +10,7 @@ use App\Models\CompanySetting;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
 use App\Models\ImportFieldTemplate;
-use App\Models\ShipViaCode;
+use App\Models\Plant;
 use App\Services\ImportService;
 use BackedEnum;
 use Filament\Forms\Components\Checkbox;
@@ -291,7 +291,7 @@ class BatchProcessing extends Page implements HasSchemas
                             ->helperText('Automatically select the most economical shipping service that meets the Required On-Site Date. Original ShipVia will be preserved in Previous_ShipViaCode.'),
                         Select::make('bestway_plant_id')
                             ->label('Plant')
-                            ->options(fn () => ShipViaCode::query()->whereNotNull('plant_id')->distinct()->orderBy('plant_id')->pluck('plant_id', 'plant_id'))
+                            ->options(fn (): array => Plant::options())
                             ->native(false)
                             ->visible(fn ($get) => $get('include_transit_times') && $get('find_best_service'))
                             ->helperText("Which plant ships this batch — BestWay resolves the chosen service to this plant's ShipVia code. Leave blank to use the plant on each row's original Ship Via."),

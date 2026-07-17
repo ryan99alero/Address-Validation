@@ -149,6 +149,23 @@ class ShipViaCode extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        // Transition bridge: keep the legacy account_number in sync with the linked account,
+        // so BestWay (still matching on the legacy column until the Phase 3 switchover) picks
+        // up codes created/edited via the new Billing Account dropdown.
+        static::saving(function (self $code): void {
+            if ($code->carrier_account_id && $code->isDirty('carrier_account_id')) {
+                $account = $code->relationLoaded('carrierAccount')
+                    ? $code->carrierAccount
+                    : CarrierAccount::find($code->carrier_account_id);
+                if ($account) {
+                    $code->account_number = $account->account_number;
+                }
+            }
+        });
+    }
+
     /**
      * Get all lookup codes for this ship via code (code + carrier_code + alternate_codes).
      *
