@@ -327,7 +327,16 @@ class UpsPdfChargeParser
             $cols = preg_split('/\s+/', trim($bm[2]));
             $this->assignBaseColumns($shipment, $intCols, $cols);
             $amounts = preg_split('/\s+/', trim($bm[3]));
-            $this->addCharge($shipment, $shipment['service'], $amounts);
+            // In the Address Corrections section the base "service" line IS the flat correction
+            // fee (a fixed ~$20.20, not real transport, even though the line is labelled with the
+            // package's service). Prefix the charge description so ChargeCategoryResolver's
+            // "Address Correction …" rule categorizes it as Address Correction instead of Base
+            // Transportation. The shipment's own service field stays the real service; surcharge
+            // lines below (fuel, etc.) keep their own category and the address_correction driver.
+            $baseDescription = $shipment['section'] === 'address_correction'
+                ? 'Address Correction '.$shipment['service']
+                : $shipment['service'];
+            $this->addCharge($shipment, $baseDescription, $amounts);
             $rest = substr($head, strlen($bm[0]));
         } else {
             // intCols == 0 base line, or no integer columns present: first "<words> <amts>".

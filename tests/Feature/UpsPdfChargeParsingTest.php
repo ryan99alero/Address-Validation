@@ -278,3 +278,31 @@ test('importUpsPdf reconciles the real UPS invoice end to end', function () {
     $invoice->refresh();
     expect($invoice->correctionLines()->count())->toBe(8);
 })->group('slow');
+
+test('address correction section tags the base fee so it categorizes as Address Correction', function () {
+    // Minimal invoice whose only detail is an Address Corrections block: a $20.20 flat fee
+    // (printed with the package's service "Next Day Air") plus its fuel surcharge.
+    $text = implode(' ', [
+        'Invoice Date June 27, 2026 Invoice Number 0000691317266 Account Number 691317',
+        'Summary of Charges Charges this period $ 25.20',
+        'Address Corrections Tracking Number Service Number of Packages Published Charge Incentive Credit Billed Charge',
+        '1Z4444444444444444 Next Day Air 1 20.20 0.00 20.20 Fuel Surcharge 5.00 0.00 5.00 Total 25.20 0.00 25.20',
+        '1st ref: 4 Sender : Shipping Rand Receiver: Store Four',
+    ]);
+
+    $ac = collect((new UpsPdfChargeParser)->parse($text)['shipments'])
+        ->firstWhere('section', 'address_correction');
+
+    expect($ac)->not->toBeNull();
+
+    $descriptions = collect($ac['charges'])->pluck('description');
+    // The base fee line is prefixed → ChargeCategoryResolver's "Address Correction …" rule
+    // makes it Address Correction (not Base Transportation). The shipment keeps the real
+    // service; the fuel line keeps its own label.
+    expect($descriptions)->toContain('Address Correction Next Day Air')
+        ->and($descriptions)->toContain('Fuel Surcharge')
+        ->and($descriptions)->not->toContain('Next Day Air') // bare (untagged) service must NOT appear
+        ->and($ac['service'])->toBe('Next Day Air');
+
+    expect(collect($ac['charges'])->firstWhere('description', 'Address Correction Next Day Air')['amount'])->toBe(20.20);
+});
