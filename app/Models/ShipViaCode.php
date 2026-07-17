@@ -353,11 +353,14 @@ class ShipViaCode extends Model
      * @param  string  $serviceType  The target service type (e.g., FEDEX_GROUND)
      * @param  string|null  $plantId  Plant to match (resolved: batch override or the code's plant)
      * @param  self|null  $original  The address's original code — source of payment type + payer
+     * @param  int|null  $accountOverride  A batch-chosen carrier_account: when set, match only
+     *                                     that account's codes (the user picked the ship account)
      */
     public static function findMatchingForBestWay(
         string $serviceType,
         ?string $plantId,
-        ?self $original = null
+        ?self $original = null,
+        ?int $accountOverride = null
     ): ?self {
         $query = static::where('service_type', $serviceType)
             ->where('is_active', true);
@@ -367,6 +370,12 @@ class ShipViaCode extends Model
             $query->where('plant_id', $plantId);
         } else {
             $query->whereNull('plant_id');
+        }
+
+        // Explicit batch ship account: use exactly that account's codes for the service, and
+        // skip the owner/payer derivation (the user chose the account for the whole batch).
+        if ($accountOverride !== null) {
+            return $query->where('carrier_account_id', $accountOverride)->orderBy('account_number')->first();
         }
 
         $paymentType = $original?->payment_type;

@@ -519,7 +519,7 @@ class ShippingRecommendationService
      * @param  Collection<int, TransitTime>  $transitTimes
      * @return array{transit: TransitTime, service_type: string, code: string, ship_date: CarbonInterface}|null
      */
-    protected function selectJitService(Address $address, Collection $transitTimes, ?string $plantOverride): ?array
+    protected function selectJitService(Address $address, Collection $transitTimes, ?string $plantOverride, ?int $accountOverride = null): ?array
     {
         $required = $address->required_on_site_date?->startOfDay();
         if (! $required || $transitTimes->isEmpty()) {
@@ -540,7 +540,7 @@ class ShippingRecommendationService
         $plantId = $plantOverride ?: $original?->plant_id;
 
         $candidates = $transitTimes
-            ->map(function (TransitTime $t) use ($required, $floor, $plantId, $original) {
+            ->map(function (TransitTime $t) use ($required, $floor, $plantId, $original, $accountOverride) {
                 // Duration is measured from the ship date FedEx quoted against (stored on
                 // the transit row, holiday/weekend-aware), then inverted from the required
                 // date below to ship as late as possible.
@@ -554,7 +554,7 @@ class ShippingRecommendationService
                     return null; // would have to ship before the earliest ship date
                 }
 
-                $code = ShipViaCode::findMatchingForBestWay($t->service_type, $plantId, $original);
+                $code = ShipViaCode::findMatchingForBestWay($t->service_type, $plantId, $original, $accountOverride);
                 if (! $code) {
                     return null; // no code on the same plant + owner/account — never jump payers
                 }
@@ -585,9 +585,9 @@ class ShippingRecommendationService
      * @param  Collection<int, TransitTime>  $transitTimes
      * @return 'optimized'|'already_optimal'|'no_service'
      */
-    protected function applyJitToAddress(Address $address, Collection $transitTimes, ?string $plantOverride): string
+    protected function applyJitToAddress(Address $address, Collection $transitTimes, ?string $plantOverride, ?int $accountOverride = null): string
     {
-        $jit = $this->selectJitService($address, $transitTimes, $plantOverride);
+        $jit = $this->selectJitService($address, $transitTimes, $plantOverride, $accountOverride);
 
         if (! $jit) {
             $address->bestway_optimized = false;
@@ -722,7 +722,7 @@ class ShippingRecommendationService
      * @param  Collection<int, Address>  $addresses
      * @return array{processed: int, optimized: int, already_optimal: int, no_viable_service: int, no_matching_code: int}
      */
-    public function applyBestWayOptimizationBatch(Collection $addresses, ?string $plantOverride = null): array
+    public function applyBestWayOptimizationBatch(Collection $addresses, ?string $plantOverride = null, ?int $accountOverride = null): array
     {
         $counts = ['processed' => 0, 'optimized' => 0, 'already_optimal' => 0, 'no_viable_service' => 0, 'no_matching_code' => 0];
         $updates = [];
@@ -740,7 +740,7 @@ class ShippingRecommendationService
                 continue;
             }
 
-            $outcome = $this->applyJitToAddress($address, $transitTimes, $plantOverride);
+            $outcome = $this->applyJitToAddress($address, $transitTimes, $plantOverride, $accountOverride);
             match ($outcome) {
                 'optimized' => $counts['optimized']++,
                 'already_optimal' => $counts['already_optimal']++,

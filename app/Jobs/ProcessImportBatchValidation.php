@@ -378,7 +378,7 @@ class ProcessImportBatchValidation implements ShouldQueue
             'addresses_count' => $addressesToOptimize->count(),
         ]);
 
-        $result = $recommendationService->applyBestWayOptimizationBatch($addressesToOptimize, $this->batch->bestway_plant_id);
+        $result = $recommendationService->applyBestWayOptimizationBatch($addressesToOptimize, $this->batch->bestway_plant_id, $this->batch->bestway_carrier_account_id);
 
         Log::info('ProcessImportBatchValidation: BestWay optimization completed', [
             'batch_id' => $this->batch->id,

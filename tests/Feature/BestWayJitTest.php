@@ -181,6 +181,25 @@ it('never crosses to a different owner — a client account stays off-limits', f
         ->and($a->ship_via_meets_deadline)->toBeFalse();
 });
 
+it('uses ONLY the batch-chosen ship account when an account override is set', function () {
+    $c = $this->carrier;
+    $rand = AccountOwner::create(['name' => 'RAND', 'type' => AccountOwner::TYPE_COMPANY]);
+    $acctA = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCTA', 'nickname' => 'A', 'account_owner_id' => $rand->id]);
+    $acctB = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCTB', 'nickname' => 'B', 'account_owner_id' => $rand->id]);
+    acctCode($c, 'G1', 'FEDEX_GROUND', $acctA);       // original code, account A
+    acctCode($c, 'OVB', 'STANDARD_OVERNIGHT', $acctB); // overnight only on account B
+
+    $a = ownerJitAddress($c);
+    // Override the batch to ship on account B.
+    $this->svc->applyBestWayOptimizationBatch(collect([$a]), null, $acctB->id);
+    $a->refresh();
+
+    // Ground (4-day) ships too early → picks account B's overnight, because the override
+    // constrains BestWay to account B's codes.
+    expect($a->ship_via_code)->toBe('OVB')
+        ->and($a->bestway_optimized)->toBeTrue();
+});
+
 it('locks an owner-unassigned account to itself — never pools null owners', function () {
     $c = $this->carrier;
     // Two linked accounts with NO owner yet (the backfill worklist state). Must not pool.

@@ -604,6 +604,29 @@ class ImportService
     }
 
     /**
+     * Detect the file's Ship Via Code column from its headers, so the standard "ShipViaCode"
+     * field our shipping solution exports pre-matches without manual mapping. Matches common
+     * spellings (ShipViaCode / Ship Via Code / ShipVia / Ship Method Code). Returns the raw
+     * header, or null when none looks like a ship-via code.
+     *
+     * @param  array<int, string>  $headers
+     */
+    public function detectShipViaCodeColumn(array $headers): ?string
+    {
+        $aliases = ['shipviacode', 'shipvia', 'shipviacd', 'shipmethodcode', 'shipmethod', 'shipcode', 'servicecode'];
+
+        foreach ($headers as $header) {
+            // Strip all non-alphanumerics (NOT normalizeHeader — that removes the "ship" prefix).
+            $key = strtolower((string) preg_replace('/[^A-Za-z0-9]/', '', $header));
+            if (in_array($key, $aliases, true)) {
+                return $header;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Normalize a header for matching.
      * Converts to lowercase, removes common prefixes, and standardizes format.
      */

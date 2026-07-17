@@ -9,6 +9,15 @@ function targets(array $headers): array
         ->all();
 }
 
+it('detects the Ship Via Code column for the standalone selector', function () {
+    $svc = app(ImportService::class);
+
+    expect($svc->detectShipViaCodeColumn(['Name', 'ShipViaCode', 'Zip']))->toBe('ShipViaCode')
+        ->and($svc->detectShipViaCodeColumn(['Name', 'Ship Via Code']))->toBe('Ship Via Code')
+        ->and($svc->detectShipViaCodeColumn(['Name', 'ShipVia']))->toBe('ShipVia')
+        ->and($svc->detectShipViaCodeColumn(['Name', 'Address', 'City']))->toBeNull();
+});
+
 it('auto-maps the BestWay/Transit fields that previously fell through', function () {
     $map = targets(['Address 1', 'City', 'State', 'Zip', 'ShipViaCode', 'Required On-Site Date']);
 

@@ -6,6 +6,7 @@ use App\Jobs\ProcessExportBatch;
 use App\Jobs\ProcessImportBatchImport;
 use App\Jobs\ProcessImportBatchValidation;
 use App\Models\Carrier;
+use App\Models\CarrierAccount;
 use App\Models\CompanySetting;
 use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
@@ -271,6 +272,7 @@ class BatchProcessing extends Page implements HasSchemas
                             ->options(fn () => Carrier::whereIn('slug', ['ups', 'fedex'])
                                 ->where('is_active', true)
                                 ->pluck('name', 'id'))
+                            ->live()
                             ->visible(fn ($get) => $get('include_transit_times'))
                             ->required(fn ($get) => $get('include_transit_times'))
                             ->helperText('Select UPS or FedEx for transit time lookups'),
@@ -293,8 +295,26 @@ class BatchProcessing extends Page implements HasSchemas
                             ->label('Plant')
                             ->options(fn (): array => Plant::options())
                             ->native(false)
+                            ->live()
                             ->visible(fn ($get) => $get('include_transit_times') && $get('find_best_service'))
                             ->helperText("Which plant ships this batch — BestWay resolves the chosen service to this plant's ShipVia code. Leave blank to use the plant on each row's original Ship Via."),
+                        Select::make('bestway_carrier_account_id')
+                            ->label('Ship Account')
+                            ->options(fn (callable $get): array => CarrierAccount::query()
+                                ->where('is_active', true)
+                                ->when($get('transit_carrier_id'), fn ($q, $id) => $q->where('carrier_id', $id))
+                                ->when($get('bestway_plant_id'), fn ($q, $plant) => $q->whereHas('shipViaCodes', fn ($q) => $q->where('is_active', true)->where('plant_id', $plant)))
+                                ->with('owner')
+                                ->orderBy('nickname')
+                                ->get()
+                                ->mapWithKeys(fn (CarrierAccount $a): array => [
+                                    $a->id => $a->nickname.' — #'.$a->account_number.' ('.(optional($a->owner)->name ?? 'no owner').')',
+                                ])
+                                ->all())
+                            ->native(false)
+                            ->searchable()
+                            ->visible(fn ($get) => $get('include_transit_times') && $get('find_best_service') && $get('transit_carrier_id'))
+                            ->helperText('Ship on this account — BestWay picks the cheapest service on this account\'s ShipVia codes (for the plant above) that meets the on-site date. Leave blank to keep each row on its original account.'),
                         DatePicker::make('default_ship_date')
                             ->label('Ship Date (applies to all orders)')
                             ->native(true) // native browser date input — emits plain Y-m-d, no timezone shift
@@ -467,6 +487,8 @@ class BatchProcessing extends Page implements HasSchemas
             }
 
             $this->mappings = $importService->autoMatchHeaders($this->headers);
+            // Pre-match the standard "ShipViaCode" column our shipping solution exports.
+            $this->shipViaCodeColumn ??= $importService->detectShipViaCodeColumn($this->headers);
             $this->previewRows = $importService->getPreviewRows($file, 3);
 
             // Count rows efficiently without loading all data into memory
@@ -498,6 +520,7 @@ class BatchProcessing extends Page implements HasSchemas
                 'default_on_site_date' => $data['default_on_site_date'] ?? null,
                 'default_ship_date' => $data['default_ship_date'] ?? null,
                 'bestway_plant_id' => $data['bestway_plant_id'] ?? null,
+                'bestway_carrier_account_id' => $data['bestway_carrier_account_id'] ?? null,
                 'imported_by' => auth()->id(),
             ]);
 
