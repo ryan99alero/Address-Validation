@@ -272,11 +272,13 @@
                                         <span class="text-sm font-medium text-gray-600 dark:text-gray-400">Overall Progress</span>
                                         <span class="text-lg font-bold text-gray-900 dark:text-white">{{ $overallProgress }}%</span>
                                     </div>
-                                    <div class="bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                                    <div class="relative bg-gray-200 dark:bg-gray-700 rounded-full h-3.5 overflow-hidden shadow-inner">
                                         <div
-                                            class="h-full transition-all duration-500 {{ $overallProgress >= 100 ? 'bg-success-500' : 'bg-primary-500' }}"
+                                            class="relative h-full rounded-full shadow-md transition-all duration-500 bg-gradient-to-r {{ $overallProgress >= 100 ? 'from-emerald-400 via-green-500 to-lime-400' : 'from-rose-500 via-amber-400 to-emerald-400' }}"
                                             style="width: {{ $overallProgress }}%"
-                                        ></div>
+                                        >
+                                            <div class="absolute inset-x-0 top-0 h-1/2 rounded-full bg-gradient-to-b from-white/50 to-transparent"></div>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -301,8 +303,10 @@
                                                 <span class="text-gray-500">{{ $this->batch->processed_rows ?? 0 }} / {{ $this->batch->total_rows }} <span class="font-semibold">({{ $importPercent }}%)</span></span>
                                             </div>
                                             @if($phase === \App\Models\ImportBatch::PHASE_IMPORTING)
-                                                <div class="mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5 overflow-hidden">
-                                                    <div class="h-full bg-primary-500 transition-all" style="width: {{ $importPercent }}%"></div>
+                                                <div class="relative mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-2 overflow-hidden shadow-inner">
+                                                    <div class="relative h-full rounded-full bg-gradient-to-r from-sky-400 to-blue-500 shadow transition-all" style="width: {{ $importPercent }}%">
+                                                        <div class="absolute inset-x-0 top-0 h-1/2 rounded-full bg-gradient-to-b from-white/50 to-transparent"></div>
+                                                    </div>
                                                 </div>
                                             @endif
                                         </div>
@@ -327,8 +331,10 @@
                                                 <span class="text-gray-500">{{ $this->batch->validated_rows ?? 0 }} / {{ $this->batch->successful_rows ?? 0 }} <span class="font-semibold">({{ $validationPercent }}%)</span></span>
                                             </div>
                                             @if($phase === \App\Models\ImportBatch::PHASE_VALIDATING)
-                                                <div class="mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5 overflow-hidden">
-                                                    <div class="h-full bg-primary-500 transition-all" style="width: {{ $validationPercent }}%"></div>
+                                                <div class="relative mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-2 overflow-hidden shadow-inner">
+                                                    <div class="relative h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 shadow transition-all" style="width: {{ $validationPercent }}%">
+                                                        <div class="absolute inset-x-0 top-0 h-1/2 rounded-full bg-gradient-to-b from-white/50 to-transparent"></div>
+                                                    </div>
                                                 </div>
                                             @endif
                                         </div>
@@ -354,8 +360,10 @@
                                                     <span class="text-gray-500">{{ $this->batch->transit_time_rows ?? 0 }} / {{ $this->batch->total_for_transit ?? 0 }} <span class="font-semibold">({{ $transitPercent }}%)</span></span>
                                                 </div>
                                                 @if($phase === \App\Models\ImportBatch::PHASE_TRANSIT_TIMES)
-                                                    <div class="mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5 overflow-hidden">
-                                                        <div class="h-full bg-primary-500 transition-all" style="width: {{ $transitPercent }}%"></div>
+                                                    <div class="relative mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-2 overflow-hidden shadow-inner">
+                                                        <div class="relative h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 shadow transition-all" style="width: {{ $transitPercent }}%">
+                                                            <div class="absolute inset-x-0 top-0 h-1/2 rounded-full bg-gradient-to-b from-white/50 to-transparent"></div>
+                                                        </div>
                                                     </div>
                                                 @endif
                                             </div>
@@ -388,8 +396,10 @@
                                                     </span>
                                                 </div>
                                                 @if($phase === \App\Models\ImportBatch::PHASE_RECOMMENDATIONS)
-                                                    <div class="mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5 overflow-hidden">
-                                                        <div class="h-full bg-primary-500 transition-all animate-pulse" style="width: 50%"></div>
+                                                    <div class="relative mt-1 bg-gray-200 dark:bg-gray-600 rounded-full h-2 overflow-hidden shadow-inner">
+                                                        <div class="relative h-full rounded-full bg-gradient-to-r from-emerald-400 to-lime-500 shadow transition-all animate-pulse" style="width: 50%">
+                                                            <div class="absolute inset-x-0 top-0 h-1/2 rounded-full bg-gradient-to-b from-white/50 to-transparent"></div>
+                                                        </div>
                                                     </div>
                                                 @endif
                                             </div>
@@ -501,11 +511,13 @@
                         <span class="text-2xl font-bold text-primary-700 dark:text-primary-300">{{ $exportPercent }}%</span>
                     </div>
                     {{-- Progress bar --}}
-                    <div class="bg-primary-200 dark:bg-primary-800 rounded-full h-2 overflow-hidden">
+                    <div class="relative bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden shadow-inner">
                         <div
-                            class="h-full bg-primary-500 transition-all duration-300"
+                            class="relative h-full rounded-full bg-gradient-to-r from-cyan-400 via-sky-500 to-indigo-500 shadow transition-all duration-300"
                             style="width: {{ $exportPercent }}%"
-                        ></div>
+                        >
+                            <div class="absolute inset-x-0 top-0 h-1/2 rounded-full bg-gradient-to-b from-white/50 to-transparent"></div>
+                        </div>
                     </div>
                     {{-- Phase steps --}}
                     <div class="mt-3 flex items-center gap-6 text-xs text-primary-600 dark:text-primary-400">
