@@ -263,23 +263,41 @@ it('does NOT optimize a blank-ShipVia row when no account is chosen (guard)', fu
     expect(Address::find($a->id)->bestway_optimized)->toBeFalse();
 });
 
-it('uses ONLY the batch-chosen ship account when an account override is set', function () {
+it('a batch ship account pools across that account OWNER (reaches a sibling account), not just the exact account', function () {
     $c = $this->carrier;
     $rand = AccountOwner::create(['name' => 'RAND', 'type' => AccountOwner::TYPE_COMPANY]);
-    $acctA = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCTA', 'nickname' => 'A', 'account_owner_id' => $rand->id]);
-    $acctB = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCTB', 'nickname' => 'B', 'account_owner_id' => $rand->id]);
-    acctCode($c, 'G1', 'FEDEX_GROUND', $acctA);       // original code, account A
-    acctCode($c, 'OVB', 'STANDARD_OVERNIGHT', $acctB); // overnight only on account B
+    $client = AccountOwner::create(['name' => 'Acme', 'type' => AccountOwner::TYPE_CUSTOMER]);
+    $ground = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCT_GROUND', 'nickname' => 'Ground', 'account_owner_id' => $rand->id]);
+    $express = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCT_EXPRESS', 'nickname' => 'Express', 'account_owner_id' => $rand->id]);
+    $clientAcct = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'CLIENT', 'nickname' => 'Client', 'account_owner_id' => $client->id]);
+    acctCode($c, 'G1', 'FEDEX_GROUND', $ground);        // Ground on RAND's Ground account
+    acctCode($c, 'OVE', 'STANDARD_OVERNIGHT', $express); // Overnight on RAND's SEPARATE Express account
+    acctCode($c, 'OVC', 'STANDARD_OVERNIGHT', $clientAcct); // Overnight on a CLIENT account (must be excluded)
 
     $a = ownerJitAddress($c);
-    // Override the batch to ship on account B (plant governs the account — always paired).
-    $this->svc->applyBestWayOptimizationBatch(collect([$a]), 'PLANT002', $acctB->id);
+    // Pick RAND's GROUND account — BestWay must still reach RAND's Express account's overnight.
+    $this->svc->applyBestWayOptimizationBatch(collect([$a]), 'PLANT002', $ground->id);
     $a->refresh();
 
-    // Ground (4-day) ships too early → picks account B's overnight, because the override
-    // constrains BestWay to account B's codes.
-    expect($a->ship_via_code)->toBe('OVB')
+    // Ground too early → RAND sibling (Express) overnight, NOT the client's — pooled by owner.
+    expect($a->ship_via_code)->toBe('OVE')
         ->and($a->bestway_optimized)->toBeTrue();
+});
+
+it('"Restrict to this account only" locks BestWay to the exact account (no sibling)', function () {
+    $c = $this->carrier;
+    $rand = AccountOwner::create(['name' => 'RAND', 'type' => AccountOwner::TYPE_COMPANY]);
+    $ground = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCT_GROUND', 'nickname' => 'Ground', 'account_owner_id' => $rand->id]);
+    $express = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCT_EXPRESS', 'nickname' => 'Express', 'account_owner_id' => $rand->id]);
+    acctCode($c, 'G1', 'FEDEX_GROUND', $ground);
+    acctCode($c, 'OVE', 'STANDARD_OVERNIGHT', $express); // overnight ONLY on the sibling account
+
+    $a = ownerJitAddress($c);
+    // Strict to the Ground account: the overnight lives on the sibling → out of reach → not optimized.
+    $this->svc->applyBestWayOptimizationBatch(collect([$a]), 'PLANT002', $ground->id, true);
+    $a->refresh();
+
+    expect($a->bestway_optimized)->toBeFalse();
 });
 
 it('locks an owner-unassigned account to itself — never pools null owners', function () {

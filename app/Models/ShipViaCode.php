@@ -360,7 +360,8 @@ class ShipViaCode extends Model
         string $serviceType,
         ?string $plantId,
         ?self $original = null,
-        ?int $accountOverride = null
+        ?int $accountOverride = null,
+        bool $accountStrict = false
     ): ?self {
         $query = static::where('service_type', $serviceType)
             ->where('is_active', true);
@@ -372,9 +373,21 @@ class ShipViaCode extends Model
             $query->whereNull('plant_id');
         }
 
-        // Explicit batch ship account: use exactly that account's codes for the service, and
-        // skip the owner/payer derivation (the user chose the account for the whole batch).
+        // Explicit batch ship account. By default the chosen account establishes the PAYER, so
+        // pool across ALL that owner's accounts on the plant (Company/Customer/Vendor) — e.g. a
+        // plant's separate Ground and Express accounts, both ours, form one ladder — never
+        // crossing to another owner. With "Restrict to this account only" (strict), or when the
+        // account has no owner assigned, lock to exactly that account.
         if ($accountOverride !== null) {
+            $ownerId = $accountStrict
+                ? null
+                : CarrierAccount::whereKey($accountOverride)->value('account_owner_id');
+
+            if ($ownerId !== null) {
+                return $query->whereHas('carrierAccount', fn ($q) => $q->where('account_owner_id', $ownerId))
+                    ->orderBy('account_number')->first();
+            }
+
             return $query->where('carrier_account_id', $accountOverride)->orderBy('account_number')->first();
         }
 
