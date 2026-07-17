@@ -75,6 +75,9 @@ test('address correction is a flat fee: the service-labelled line is the fee, fu
     expect($resolver->resolve($this->ups->id, 'ADC', 'Address Correction Ground'))->toBe($this->addressCorrection->id)
         // Its fuel keeps the Fuel category.
         ->and($resolver->resolve($this->ups->id, 'ADC', 'Address Correction Fuel Surcharge'))->toBe($this->fuel->id)
+        // The UPS PDF path emits NO charge code — the "Address Correction …" description prefix
+        // alone (what UpsPdfChargeParser now tags the correction base line with) must still resolve.
+        ->and($resolver->resolve($this->ups->id, null, 'Address Correction Ground'))->toBe($this->addressCorrection->id)
         // A flat "Address Correction" line still resolves to Address Correction.
         ->and($resolver->resolve($this->fedex->id, null, 'Address Correction'))->toBe($this->addressCorrection->id);
 });
