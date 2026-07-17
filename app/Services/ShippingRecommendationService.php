@@ -38,6 +38,18 @@ class ShippingRecommendationService
         'INTERNATIONAL_ECONOMY' => 22,
         'INTERNATIONAL_PRIORITY' => 45,
         'INTERNATIONAL_FIRST' => 55,
+
+        // UPS domestic ladder (short codes, cheapest → dearest). Key spaces are disjoint from
+        // FedEx and a batch's transit rows are single-carrier, so one flat map stays correct.
+        'SP' => 8,    // SurePost (below Ground)
+        'GND' => 10,  // Ground
+        'STD' => 12,  // Standard (to CA/MX)
+        '3DS' => 20,  // 3 Day Select
+        '2DA' => 30,  // 2nd Day Air
+        '2DM' => 35,  // 2nd Day Air A.M.
+        'NDS' => 40,  // Next Day Air Saver
+        'NDA' => 50,  // Next Day Air
+        'NDM' => 60,  // Next Day Air Early
     ];
 
     /**
@@ -537,7 +549,19 @@ class ShippingRecommendationService
             : ShipViaCode::lookup($address->ship_via_code);
         // The payer is derived from the original code's billed account (owner), so load them.
         $original?->loadMissing(['carrierAccount', 'thirdPartyAccount']);
-        $plantId = $plantOverride ?: $original?->plant_id;
+
+        // A batch ship account fully supersedes the row's ShipVia (scenarios 1 & 2): match only
+        // that account's codes on the batch plant, regardless of whether the file ShipVia is
+        // present, different, or blank. Otherwise (scenario 3) fall back to the row's own code.
+        if ($accountOverride !== null) {
+            $plantId = $plantOverride;
+        } else {
+            // No account chosen AND no resolvable ShipVia → no basis to bill; don't optimize.
+            if ($original === null) {
+                return null;
+            }
+            $plantId = $plantOverride ?: $original->plant_id;
+        }
 
         $candidates = $transitTimes
             ->map(function (TransitTime $t) use ($required, $floor, $plantId, $original, $accountOverride) {

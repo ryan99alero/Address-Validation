@@ -296,6 +296,7 @@ class BatchProcessing extends Page implements HasSchemas
                             ->options(fn (): array => Plant::options())
                             ->native(false)
                             ->live()
+                            ->required(fn ($get) => filled($get('bestway_carrier_account_id')))
                             ->visible(fn ($get) => $get('include_transit_times') && $get('find_best_service'))
                             ->helperText("Which plant ships this batch — BestWay resolves the chosen service to this plant's ShipVia code. Leave blank to use the plant on each row's original Ship Via."),
                         Select::make('bestway_carrier_account_id')

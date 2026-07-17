@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Address;
 use App\Models\Carrier;
 use App\Models\CompanySetting;
+use App\Models\ShipViaCode;
 use App\Models\TransitTime;
 use Carbon\Carbon;
 use Exception;
@@ -369,33 +370,16 @@ class UpsTimeInTransitService
      */
     protected function mapServiceLevelToType(string $serviceLevel, ?string $description): string
     {
-        // UPS service level to type mapping
-        $mapping = [
-            '01' => 'UPS_NEXT_DAY_AIR',
-            '02' => 'UPS_2ND_DAY_AIR',
-            '03' => 'UPS_GROUND',
-            '05' => 'UPS_EXPEDITED',
-            '07' => 'UPS_EXPRESS',
-            '08' => 'UPS_EXPEDITED',
-            '11' => 'UPS_STANDARD',
-            '12' => 'UPS_3_DAY_SELECT',
-            '13' => 'UPS_NEXT_DAY_AIR_SAVER',
-            '14' => 'UPS_NEXT_DAY_AIR_EARLY',
-            '21' => 'UPS_EXPRESS_PLUS',
-            '28' => 'UPS_EXPRESS_SAVER',
-            '29' => 'UPS_EXPRESS_FREIGHT',
-            '54' => 'UPS_EXPRESS_PLUS',
-            '59' => 'UPS_2ND_DAY_AIR_AM',
-            '65' => 'UPS_SAVER',
-            '82' => 'UPS_TODAY_STANDARD',
-            '83' => 'UPS_TODAY_DEDICATED_COURIER',
-            '84' => 'UPS_TODAY_INTERCITY',
-            '85' => 'UPS_TODAY_EXPRESS',
-            '86' => 'UPS_TODAY_EXPRESS_SAVER',
-            '96' => 'UPS_WORLDWIDE_EXPRESS_FREIGHT',
-        ];
+        // Emit our canonical UPS service_type — the SHORT codes the UPS ship_via_codes use (GND,
+        // 2DA, NDA…), sourced from ShipViaCode::CARRIER_CODE_MAP so the two never drift. This is
+        // what lets BestWay match a UPS transit option to a ship_via code; the old 'UPS_GROUND'
+        // form never equalled a code's 'GND', so BestWay found no UPS service at all.
+        $mapped = ShipViaCode::CARRIER_CODE_MAP[$serviceLevel] ?? null;
+        if ($mapped !== null && ($mapped['carrier'] ?? null) === 'ups') {
+            return $mapped['service_type'];
+        }
 
-        return $mapping[$serviceLevel] ?? 'UPS_SERVICE_'.$serviceLevel;
+        return 'UPS_SERVICE_'.$serviceLevel;
     }
 
     /**

@@ -7,6 +7,7 @@ use App\Models\CarrierAccount;
 use App\Models\ShipViaCode;
 use App\Models\TransitTime;
 use App\Services\ShippingRecommendationService;
+use App\Services\UpsTimeInTransitService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -181,6 +182,87 @@ it('never crosses to a different owner — a client account stays off-limits', f
         ->and($a->ship_via_meets_deadline)->toBeFalse();
 });
 
+it('UPS transit maps service levels to the SHORT codes ship-via codes use', function () {
+    $ups = Carrier::factory()->create(['slug' => 'ups']);
+    $svc = new UpsTimeInTransitService($ups);
+    $m = new ReflectionMethod($svc, 'mapServiceLevelToType');
+    $m->setAccessible(true);
+
+    expect($m->invoke($svc, '03', null))->toBe('GND')
+        ->and($m->invoke($svc, '01', null))->toBe('NDA')
+        ->and($m->invoke($svc, '02', null))->toBe('2DA')
+        ->and($m->invoke($svc, '12', null))->toBe('3DS');
+});
+
+it('optimizes a UPS batch: transit short codes match UPS ship-via codes + rank cheapest', function () {
+    $ups = Carrier::factory()->create(['slug' => 'ups', 'name' => 'UPS']);
+    foreach ([['UGND', 'GND'], ['UNDA', 'NDA']] as [$code, $type]) {
+        ShipViaCode::factory()->create([
+            'carrier_id' => $ups->id, 'code' => $code, 'service_type' => $type,
+            'plant_id' => 'PLANT002', 'payment_type' => ShipViaCode::PAYMENT_SENDER,
+            'account_number' => 'U1', 'is_active' => true,
+        ]);
+    }
+    $a = Address::factory()->create([
+        'requested_ship_date' => '2026-07-10', 'required_on_site_date' => '2026-07-15',
+        'ship_via_code' => 'UGND', 'validation_status' => 'valid',
+    ]);
+    foreach ([['GND', 'FOUR_DAYS'], ['NDA', 'ONE_DAY']] as [$type, $days]) {
+        TransitTime::factory()->create([
+            'address_id' => $a->id, 'carrier_id' => $ups->id, 'service_type' => $type,
+            'service_name' => $type, 'maximum_transit_time' => $days, 'delivery_date' => now()->addDays(30),
+        ]);
+    }
+
+    $this->svc->applyBestWayOptimization($a->load('transitTimes'));
+    $a->refresh();
+
+    // Ground (4-day) ships 7/9 (too early) → NDA on the same account. Proves match + UPS ranking.
+    expect($a->ship_via_code)->toBe('UNDA')
+        ->and($a->bestway_optimized)->toBeTrue();
+});
+
+it('optimizes a BLANK-ShipVia row when a batch account is chosen (scenario 2)', function () {
+    $c = $this->carrier;
+    $rand = AccountOwner::create(['name' => 'RAND', 'type' => AccountOwner::TYPE_COMPANY]);
+    $acct = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCT', 'nickname' => 'A', 'account_owner_id' => $rand->id]);
+    acctCode($c, 'OV', 'STANDARD_OVERNIGHT', $acct);
+
+    $a = Address::factory()->create([
+        'requested_ship_date' => '2026-07-10', 'required_on_site_date' => '2026-07-15',
+        'ship_via_code' => null, 'validation_status' => 'valid',
+    ]);
+    TransitTime::factory()->create([
+        'address_id' => $a->id, 'carrier_id' => $c->id, 'service_type' => 'STANDARD_OVERNIGHT',
+        'service_name' => 'Overnight', 'maximum_transit_time' => 'ONE_DAY', 'delivery_date' => now()->addDays(30),
+    ]);
+
+    $this->svc->applyBestWayOptimizationBatch(collect([$a->load('transitTimes')]), 'PLANT002', $acct->id);
+
+    expect(Address::find($a->id)->ship_via_code)->toBe('OV')
+        ->and(Address::find($a->id)->bestway_optimized)->toBeTrue();
+});
+
+it('does NOT optimize a blank-ShipVia row when no account is chosen (guard)', function () {
+    $c = $this->carrier;
+    $rand = AccountOwner::create(['name' => 'RAND', 'type' => AccountOwner::TYPE_COMPANY]);
+    $acct = CarrierAccount::create(['carrier_id' => $c->id, 'account_number' => 'ACCT', 'nickname' => 'A', 'account_owner_id' => $rand->id]);
+    acctCode($c, 'OV', 'STANDARD_OVERNIGHT', $acct);
+
+    $a = Address::factory()->create([
+        'requested_ship_date' => '2026-07-10', 'required_on_site_date' => '2026-07-15',
+        'ship_via_code' => null, 'validation_status' => 'valid',
+    ]);
+    TransitTime::factory()->create([
+        'address_id' => $a->id, 'carrier_id' => $c->id, 'service_type' => 'STANDARD_OVERNIGHT',
+        'service_name' => 'Overnight', 'maximum_transit_time' => 'ONE_DAY', 'delivery_date' => now()->addDays(30),
+    ]);
+
+    $this->svc->applyBestWayOptimizationBatch(collect([$a->load('transitTimes')]), 'PLANT002', null);
+
+    expect(Address::find($a->id)->bestway_optimized)->toBeFalse();
+});
+
 it('uses ONLY the batch-chosen ship account when an account override is set', function () {
     $c = $this->carrier;
     $rand = AccountOwner::create(['name' => 'RAND', 'type' => AccountOwner::TYPE_COMPANY]);
@@ -190,8 +272,8 @@ it('uses ONLY the batch-chosen ship account when an account override is set', fu
     acctCode($c, 'OVB', 'STANDARD_OVERNIGHT', $acctB); // overnight only on account B
 
     $a = ownerJitAddress($c);
-    // Override the batch to ship on account B.
-    $this->svc->applyBestWayOptimizationBatch(collect([$a]), null, $acctB->id);
+    // Override the batch to ship on account B (plant governs the account — always paired).
+    $this->svc->applyBestWayOptimizationBatch(collect([$a]), 'PLANT002', $acctB->id);
     $a->refresh();
 
     // Ground (4-day) ships too early → picks account B's overnight, because the override
