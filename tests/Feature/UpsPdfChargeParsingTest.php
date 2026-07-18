@@ -1,11 +1,14 @@
 <?php
 
+use App\Jobs\PushInvoiceChargebacks;
+use App\Jobs\SyncInvoiceCartonCosts;
 use App\Models\Carrier;
 use App\Models\CarrierCharge;
 use App\Models\CarrierInvoice;
 use App\Models\CarrierShipment;
 use App\Services\CarrierInvoiceParserService;
 use App\Services\Invoices\UpsPdfChargeParser;
+use Illuminate\Support\Facades\Queue;
 
 /**
  * A synthetic flattened UPS invoice covering the tricky shapes: an outbound shipment with
@@ -305,4 +308,21 @@ test('address correction section tags the base fee so it categorizes as Address 
         ->and($ac['service'])->toBe('Next Day Air');
 
     expect(collect($ac['charges'])->firstWhere('description', 'Address Correction Next Day Air')['amount'])->toBe(20.20);
+});
+
+test('post-import fan-out queues the chargeback push + carton sync (the UPS PDF-path gap)', function () {
+    Queue::fake();
+    $service = app(CarrierInvoiceParserService::class);
+
+    // Empty set → nothing dispatched.
+    (fn () => $this->dispatchPostImportJobs([]))->call($service);
+    Queue::assertNothingPushed();
+
+    // Non-empty → both post-import jobs, carrying the invoice ids. This is the shared method
+    // importUpsPdf() now calls directly (it does NOT route through finalizeInvoices()), which
+    // is what was previously skipping chargebacks/carton-sync on every UPS PDF import.
+    (fn () => $this->dispatchPostImportJobs([101, 102]))->call($service);
+    Queue::assertPushed(PushInvoiceChargebacks::class,
+        fn ($j) => $j->invoiceIds === [101, 102]);
+    Queue::assertPushed(SyncInvoiceCartonCosts::class);
 });
