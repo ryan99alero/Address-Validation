@@ -19,7 +19,7 @@ class ChargebackPush extends Model
 
     public const STATUS_FAILED = 'failed';             // gave up after retries (Putback_Failed)
 
-    public const STATUS_SKIPPED_JOB_CLOSED = 'skipped_job_closed';
+    public const STATUS_SKIPPED_JOB_CLOSED = 'skipped_job_closed'; // Job/adminStatus/@jobChargesOK = false (not billable)
 
     public const STATUS_SKIPPED_NO_JOBSHIPMENT = 'skipped_no_jobshipment';
 

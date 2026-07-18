@@ -126,8 +126,9 @@ class PushChargeback implements ShouldQueue
 
     /**
      * The correct JobShipment for this tracking. UPS recycles numbers, so several can return; the
-     * current job is the OPEN one (older recycles are closed). One open → use it; none → job closed;
-     * many open → break the tie with the carton mirror, else ambiguous. Returns null on any skip.
+     * billable one is where Pace says jobChargesOK=true (open is NOT sufficient — a job can be open
+     * but locked to charges). One chargeable → use it; none → not chargeable; many → break the tie
+     * with the carton mirror, else ambiguous. Returns null on any skip.
      *
      * @return array<string, mixed>|null
      */
@@ -140,19 +141,24 @@ class PushChargeback implements ShouldQueue
             return null;
         }
 
-        $open = array_values(array_filter($shipments, fn (array $s): bool => ($s['openJob'] ?? null) === true));
-        if ($open === []) {
+        // A job is billable only when Pace says its charges are OK (Job/adminStatus/@jobChargesOK) —
+        // NOT merely that it's open. A job can be open yet locked to further charges, and we must not
+        // bill it. Among a recycled tracking's several JobShipments, the current one is the chargeable
+        // one (older recycles are closed/locked).
+        $chargeable = array_values(array_filter($shipments, fn (array $s): bool => ($s['jobChargesOK'] ?? null) === true));
+        if ($chargeable === []) {
+            // No billable job (closed, or open but jobChargesOK=false) → skipped_job_closed.
             $ledger->update(['status' => ChargebackPush::STATUS_SKIPPED_JOB_CLOSED]);
 
             return null;
         }
-        if (count($open) === 1) {
-            return $open[0];
+        if (count($chargeable) === 1) {
+            return $chargeable[0];
         }
 
-        // Multiple open: prefer the job the carton mirror recorded for this tracking.
+        // Multiple chargeable: prefer the job the carton mirror recorded for this tracking.
         $cartonJob = DB::table('carton_costs')->where('tracking_number', $this->charge['tracking_number'])->value('pace_job_number');
-        $matched = array_values(array_filter($open, fn (array $s): bool => (string) ($s['job'] ?? '') === (string) $cartonJob));
+        $matched = array_values(array_filter($chargeable, fn (array $s): bool => (string) ($s['job'] ?? '') === (string) $cartonJob));
         if (count($matched) === 1) {
             return $matched[0];
         }
