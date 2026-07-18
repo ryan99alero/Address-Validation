@@ -39,7 +39,10 @@ class ChargebackPusher
 
     /**
      * Look up the JobShipment(s) for a tracking number. UPS recycles tracking numbers, so several
-     * can return across years — the caller disambiguates by ship date. Returns the raw rows.
+     * can return across years — the caller disambiguates by ship date / charge-ability. Returns the
+     * raw rows. `jobChargesOK` (Job/adminStatus/@jobChargesOK) is the authoritative "may we bill this
+     * job?" flag — it is NOT the same as `openJob`; a job can be open yet locked to further charges.
+     * `openJob` is kept only for audit/diagnostic context.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -51,6 +54,7 @@ class ChargebackPusher
             ['name' => 'jobPart', 'xpath' => '@jobPart'],
             ['name' => 'customer', 'xpath' => '@customer'],
             ['name' => 'openJob', 'xpath' => 'job/adminStatus/@openJob'],
+            ['name' => 'jobChargesOK', 'xpath' => 'job/adminStatus/@jobChargesOK'],
         ];
 
         $response = $client->loadValueObjects(
