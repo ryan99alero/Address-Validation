@@ -1163,8 +1163,22 @@ class CarrierInvoiceParserService
             }
 
             $invoice = $this->getOrCreateInvoice($carrierId, $number, $invoiceDate, InvoiceIdentity::account($section['account'] ?? null));
-            $expectedTotals[$invoice->id] = ($expectedTotals[$invoice->id] ?? 0.0) + (float) ($section['expected_total'] ?? 0);
-            $seen = $this->loadChargeMultiset($invoice);
+
+            // CSV is authoritative for FedEx charges — its itemized total ties to the invoice's
+            // "Net Charge Amount" column to the cent. When the CSV already imported this invoice's
+            // charges, the PDF must NOT re-add them: PDF + CSV double-counts (breaking both the
+            // grand total and reconciliation). Mirror importUpsPdf()'s $hasCsvCharges guard — still
+            // map trackings so address-correction detail can attach, but skip PDF charge recording
+            // and reconcile for a CSV-owned invoice (leave the CSV's reconciled state intact).
+            $csvAuthoritative = CarrierCharge::where('carrier_invoice_id', $invoice->id)
+                ->where('source_type', 'csv')->exists();
+
+            $seen = [];
+            if (! $csvAuthoritative) {
+                $expectedTotals[$invoice->id] = ($expectedTotals[$invoice->id] ?? 0.0) + (float) ($section['expected_total'] ?? 0);
+                $seen = $this->loadChargeMultiset($invoice);
+                $touched[$invoice->id] = $invoice;
+            }
 
             foreach ($section['shipments'] as $shipment) {
                 $tracking = (string) ($shipment['tracking_id'] ?? '');
@@ -1179,13 +1193,14 @@ class CarrierInvoiceParserService
                         // leave null
                     }
                 }
-                foreach ($shipment['charge_ledger'] as $charge) {
-                    $this->mergeCharge($invoice, $seen, $carrierId, $tracking, (string) $charge['description'], (float) $charge['amount'], $shipDate, null);
+                if (! $csvAuthoritative) {
+                    foreach ($shipment['charge_ledger'] as $charge) {
+                        $this->mergeCharge($invoice, $seen, $carrierId, $tracking, (string) $charge['description'], (float) $charge['amount'], $shipDate, null);
+                    }
                 }
                 $trackingToInvoice[$tracking] = $invoice;
                 $trackingShipDate[$tracking] = $shipDate;
             }
-            $touched[$invoice->id] = $invoice;
         }
 
         // Address corrections (Ground Address Correction section) → route to the
