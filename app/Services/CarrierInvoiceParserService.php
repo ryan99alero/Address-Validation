@@ -1467,6 +1467,13 @@ class CarrierInvoiceParserService
         $newCorrections = $this->linkCorrectionsToCache($invoice);
         $this->refreshInvoiceTotals($invoice, $newCorrections);
 
+        // UPS PDF has its own inline finalize above (it does NOT call finalizeInvoices()), so
+        // fan out the post-import jobs here — otherwise PDF imports never push chargebacks or
+        // sync carton costs the way the CSV/FedEx paths do.
+        if ($invoice->charges()->count() > 0) {
+            $this->dispatchPostImportJobs([$invoice->id]);
+        }
+
         return [$invoice->id];
     }
 
@@ -1641,16 +1648,29 @@ class CarrierInvoiceParserService
             $survived[] = $invoice->id;
         }
 
-        // Read each surviving invoice's Pace carton ship costs into the recoup baseline mirror.
-        // Queued: it makes a live Pace API call and must not block the import.
-        if ($survived !== []) {
-            SyncInvoiceCartonCosts::dispatch($survived);
-            // Push eligible carrier charges back to Pace as JobCost chargebacks. No-op unless the
-            // master toggle is on; queued so a Pace call never blocks the import.
-            PushInvoiceChargebacks::dispatch($survived);
-        }
+        $this->dispatchPostImportJobs($survived);
 
         return $survived;
+    }
+
+    /**
+     * Post-import fan-out shared by every import path: sync each invoice's Pace carton ship costs
+     * into the recoup baseline mirror, and push eligible carrier charges back to Pace as JobCost
+     * chargebacks. Both are queued (a live Pace API call must never block the import) and the
+     * chargeback push is a no-op unless the master toggle is on. IMPORTANT: importUpsPdf() has its
+     * own inline finalize and does NOT go through finalizeInvoices(), so it calls this directly —
+     * otherwise UPS PDF imports would never sync carton costs or push chargebacks.
+     *
+     * @param  array<int, int>  $invoiceIds
+     */
+    protected function dispatchPostImportJobs(array $invoiceIds): void
+    {
+        if ($invoiceIds === []) {
+            return;
+        }
+
+        SyncInvoiceCartonCosts::dispatch($invoiceIds);
+        PushInvoiceChargebacks::dispatch($invoiceIds);
     }
 
     /**
