@@ -94,12 +94,16 @@ class PushChargeback implements ShouldQueue
         }
 
         $notes = $pusher->buildNotes($ledger->id, $this->noteContext($c, $shipment));
+        // Pace returns an EMPTY STRING (not null) for a JobShipment with no @jobPart, so `?? '01'`
+        // let it through and created JobCosts with a blank Job Part. Default ANY empty value to the
+        // primary part '01', and store the same resolved value on the ledger so it mirrors Pace.
+        $jobPart = trim((string) ($shipment['jobPart'] ?? '')) ?: '01';
         $payload = $pusher->buildJobCostPayload([
-            'job' => (string) $shipment['job'], 'jobPart' => (string) ($shipment['jobPart'] ?? '01'),
+            'job' => (string) $shipment['job'], 'jobPart' => $jobPart,
             'activityCode' => (string) $c['activity_code'], 'amount' => (float) $c['amount'],
             'tracking' => (string) $c['tracking_number'], 'notes' => $notes,
         ]);
-        $ledger->update(['notes' => $notes, 'pace_job' => $shipment['job'] ?? null, 'pace_job_part' => $shipment['jobPart'] ?? null, 'pace_customer_id' => $shipment['customer'] ?? null]);
+        $ledger->update(['notes' => $notes, 'pace_job' => $shipment['job'] ?? null, 'pace_job_part' => $jobPart, 'pace_customer_id' => $shipment['customer'] ?? null]);
 
         try {
             $result = $client->createObject('JobCost', $payload);
