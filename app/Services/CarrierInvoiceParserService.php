@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\ChargeDriver;
 use App\Jobs\PushInvoiceChargebacks;
 use App\Jobs\SyncInvoiceCartonCosts;
 use App\Models\Carrier;
@@ -18,6 +19,7 @@ use App\Services\Invoices\PdfTextExtractor;
 use App\Services\Invoices\UpsPdfChargeParser;
 use App\Services\Invoices\UpsPdfInvoiceParser;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class CarrierInvoiceParserService
@@ -1655,6 +1657,7 @@ class CarrierInvoiceParserService
 
             $newCorrections = $this->linkCorrectionsToCache($invoice);
             $this->refreshInvoiceTotals($invoice, $newCorrections);
+            $this->attributeCorrectionSurcharges($invoice);
 
             if (array_key_exists($invoice->id, $expectedTotals)) {
                 $this->reconcileInvoice($invoice, (float) $invoice->charges()->sum('amount'), $expectedTotals[$invoice->id]);
@@ -1666,6 +1669,41 @@ class CarrierInvoiceParserService
         $this->dispatchPostImportJobs($survived);
 
         return $survived;
+    }
+
+    /**
+     * A tracking whose charges include a correction (address/audit) but NO base transport is a
+     * correction-only adjustment line — its surcharges (fuel, DAS, residential) are part of the
+     * correction, not a base shipment. UPS carries this via the PDF section; FedEx has no sections,
+     * so its correction fuel would otherwise stay driver=normal and never charge back. Inherit the
+     * correction driver onto the tracking's remaining `normal` charges so they become chargeback-
+     * eligible. Category is untouched — only the "why" (driver) changes — so the fuel still books to
+     * its own cost center (e.g. 72520) while the fee books to 72510.
+     */
+    protected function attributeCorrectionSurcharges(CarrierInvoice $invoice): void
+    {
+        $baseCategoryId = (int) (DB::table('charge_categories')->where('name', 'Base Transportation')->value('id') ?? 0);
+        $correctionDrivers = [ChargeDriver::AddressCorrection->value, ChargeDriver::AuditCorrection->value];
+
+        $charges = $invoice->charges()
+            ->whereNotNull('tracking_number')->where('tracking_number', '<>', '')
+            ->get(['id', 'tracking_number', 'driver', 'charge_category_id']);
+
+        foreach ($charges->groupBy('tracking_number') as $rows) {
+            $correctionDriver = $rows->first(fn ($r): bool => in_array($r->driver, $correctionDrivers, true))?->driver;
+            if ($correctionDriver === null) {
+                continue;
+            }
+            // A tracking that also has base transport is a real shipment — its surcharges belong to
+            // that shipment, not the correction, so leave them alone.
+            if ($rows->contains(fn ($r): bool => (int) $r->charge_category_id === $baseCategoryId)) {
+                continue;
+            }
+            $ids = $rows->filter(fn ($r): bool => $r->driver === ChargeDriver::Normal->value)->pluck('id')->all();
+            if ($ids !== []) {
+                CarrierCharge::whereIn('id', $ids)->update(['driver' => $correctionDriver, 'driver_source' => 'correction_sibling']);
+            }
+        }
     }
 
     /**
