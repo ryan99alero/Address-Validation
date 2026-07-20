@@ -152,7 +152,8 @@ class PushChargeback implements ShouldQueue
         $chargeable = array_values(array_filter($shipments, fn (array $s): bool => ($s['jobChargesOK'] ?? null) === true));
         if ($chargeable === []) {
             // No billable job (closed, or open but jobChargesOK=false) → skipped_job_closed.
-            $ledger->update(['status' => ChargebackPush::STATUS_SKIPPED_JOB_CLOSED]);
+            // Record the job number(s) so the skip is diagnosable in the ledger without a Pace lookup.
+            $ledger->update(['status' => ChargebackPush::STATUS_SKIPPED_JOB_CLOSED, 'pace_job' => $this->jobList($shipments)]);
 
             return null;
         }
@@ -167,9 +168,25 @@ class PushChargeback implements ShouldQueue
             return $matched[0];
         }
 
-        $ledger->update(['status' => ChargebackPush::STATUS_SKIPPED_AMBIGUOUS]);
+        $ledger->update(['status' => ChargebackPush::STATUS_SKIPPED_AMBIGUOUS, 'pace_job' => $this->jobList($chargeable)]);
 
         return null;
+    }
+
+    /**
+     * Distinct job number(s) across the given JobShipments, comma-joined — stamped on skipped
+     * rows so the ChargebackPushes view shows which job(s) were involved without a Pace lookup.
+     *
+     * @param  array<int, array<string, mixed>>  $shipments
+     */
+    private function jobList(array $shipments): ?string
+    {
+        $jobs = array_values(array_unique(array_filter(array_map(
+            fn (array $s): string => trim((string) ($s['job'] ?? '')),
+            $shipments
+        ))));
+
+        return $jobs === [] ? null : implode(', ', $jobs);
     }
 
     /**
