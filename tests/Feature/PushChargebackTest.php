@@ -57,5 +57,7 @@ test('an OPEN job with jobChargesOK=false is skipped, not billed (gate is jobCha
     $row = ChargebackPush::where('dedupe_key', ChargebackPush::dedupeKey(1, 'X1', 1, 20.20, null))->first();
     expect($row)->not->toBeNull()
         ->and($row->status)->toBe(ChargebackPush::STATUS_SKIPPED_JOB_CLOSED)
-        ->and($row->pace_jobcost_id)->toBeNull();
+        ->and($row->pace_jobcost_id)->toBeNull()
+        // The job number is stamped on the skip so it's diagnosable without a Pace lookup.
+        ->and($row->pace_job)->toBe('J1');
 });
