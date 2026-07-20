@@ -38,11 +38,19 @@ class ChargebackPusher
     }
 
     /**
-     * Look up the JobShipment(s) for a tracking number. UPS recycles tracking numbers, so several
-     * can return across years — the caller disambiguates by ship date / charge-ability. Returns the
-     * raw rows. `jobChargesOK` (Job/adminStatus/@jobChargesOK) is the authoritative "may we bill this
-     * job?" flag — it is NOT the same as `openJob`; a job can be open yet locked to further charges.
-     * `openJob` is kept only for audit/diagnostic context.
+     * Resolve the job shipment(s) for a carrier tracking number.
+     *
+     * Carrier tracking numbers live on Pace's CARTON object (one per package), NOT on JobShipment:
+     * a JobShipment's own @trackingNumber only ever carries its primary package, so multi-carton and
+     * most FedEx trackings never match `JobShipment/@trackingNumber` and were falsely recorded
+     * `skipped_no_jobshipment` (a valid, empty totalRecords:0 response — indistinguishable from a
+     * fake tracking). Resolve via Carton instead — the same object the carton-cost mirror uses — and
+     * traverse Carton -> shipment -> job. UPS recycles tracking numbers, so several rows can return
+     * across years; the caller disambiguates by charge-ability. `jobChargesOK`
+     * (shipment/job/adminStatus/@jobChargesOK) is the authoritative "may we bill this job?" flag — it
+     * is NOT the same as `openJob`; a job can be open yet locked to further charges. `openJob` is kept
+     * only for audit/diagnostic context. All xpaths below are confirmed against the live Pace object
+     * model; the returned key names are preserved so the caller is object-agnostic.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -50,15 +58,15 @@ class ChargebackPusher
     {
         $fields = [
             ['name' => 'trackingNumber', 'xpath' => '@trackingNumber'],
-            ['name' => 'job', 'xpath' => '@job'],
-            ['name' => 'jobPart', 'xpath' => '@jobPart'],
-            ['name' => 'customer', 'xpath' => '@customer'],
-            ['name' => 'openJob', 'xpath' => 'job/adminStatus/@openJob'],
-            ['name' => 'jobChargesOK', 'xpath' => 'job/adminStatus/@jobChargesOK'],
+            ['name' => 'job', 'xpath' => 'shipment/job/@job'],
+            ['name' => 'jobPart', 'xpath' => 'shipment/@jobPart'],
+            ['name' => 'customer', 'xpath' => 'shipment/job/@customer'],
+            ['name' => 'openJob', 'xpath' => 'shipment/job/adminStatus/@openJob'],
+            ['name' => 'jobChargesOK', 'xpath' => 'shipment/job/adminStatus/@jobChargesOK'],
         ];
 
         $response = $client->loadValueObjects(
-            objectName: 'JobShipment',
+            objectName: 'Carton',
             fields: $fields,
             xpathFilter: "@trackingNumber = '".str_replace("'", "''", $tracking)."'",
             limit: 25,

@@ -4,6 +4,7 @@ namespace App\Services\Chargebacks;
 
 use App\Models\ChargebackPush;
 use App\Services\Recoup\CartonCostSyncService;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -26,11 +27,48 @@ class ChargebackEligibility
             return collect();
         }
 
+        return $this->baseQuery()
+            ->whereIn('cc.carrier_invoice_id', $invoiceIds)
+            ->get()
+            ->reject(fn (object $r): bool => $this->alreadyPushed($r))
+            ->map(fn (object $r): object => $this->castRow($r))
+            ->values();
+    }
+
+    /**
+     * The same eligible charges, scoped to specific carrier_charge ids — for RE-DRIVING charges that
+     * are already in the ledger (e.g. rows falsely skipped by a resolver bug). It deliberately does
+     * NOT reject already-pushed rows: the caller resets those rows to `pending` first and wants them
+     * re-dispatched. Every other eligibility rule still applies, so a charge that has since become
+     * stale (unreconciled, too old) is simply not returned and its skip is left untouched.
+     *
+     * @param  array<int, int>  $chargeIds
+     * @return Collection<int, object{carrier_charge_id:int, carrier_id:int, carrier_invoice_id:int, invoice_number:?string, invoice_date:?string, tracking_number:string, charge_category_id:int, driver:string, amount:float, ship_date:?string, activity_code:string}>
+     */
+    public function forChargeIds(array $chargeIds): Collection
+    {
+        $chargeIds = array_values(array_unique(array_filter($chargeIds)));
+        if ($chargeIds === []) {
+            return collect();
+        }
+
+        return $this->baseQuery()
+            ->whereIn('cc.id', $chargeIds)
+            ->get()
+            ->map(fn (object $r): object => $this->castRow($r))
+            ->values();
+    }
+
+    /**
+     * Shared eligibility query: the columns + rules that define a chargeable charge. Callers add the
+     * scope (by invoice or by charge id) and decide whether to reject ledger duplicates.
+     */
+    private function baseQuery(): Builder
+    {
         return DB::table('carrier_charges as cc')
             ->join('charge_drivers as d', 'd.key', '=', 'cc.driver')
             ->join('charge_categories as c', 'c.id', '=', 'cc.charge_category_id')
             ->join('carrier_invoices as i', 'i.id', '=', 'cc.carrier_invoice_id')
-            ->whereIn('cc.carrier_invoice_id', $invoiceIds)
             ->where('d.push_to_pace', true)
             ->whereNotNull('d.pace_activity_code')->where('d.pace_activity_code', '!=', '')
             ->whereNotNull('cc.tracking_number')->where('cc.tracking_number', '!=', '')
@@ -42,15 +80,14 @@ class ChargebackEligibility
                 i.invoice_number, i.invoice_date, cc.tracking_number, cc.charge_category_id,
                 cc.driver, cc.amount, cc.ship_date,
                 COALESCE(NULLIF(c.pace_cost_center, ?), d.pace_activity_code) AS activity_code
-            ', [''])
-            ->get()
-            ->reject(fn (object $r): bool => $this->alreadyPushed($r))
-            ->map(function (object $r): object {
-                $r->amount = (float) $r->amount;
+            ', ['']);
+    }
 
-                return $r;
-            })
-            ->values();
+    private function castRow(object $r): object
+    {
+        $r->amount = (float) $r->amount;
+
+        return $r;
     }
 
     /**
