@@ -83,7 +83,17 @@ class PaceCorrectionsTable
                 TextColumn::make('source')
                     ->label('Validator')
                     ->badge()
-                    ->getStateUsing(fn ($record): string => self::validatorLabel($record->metadata['source'] ?? null)),
+                    // A validation that changed nothing is its own bucket ("No Changes"), even though a
+                    // carrier (usually FedEx) was the one that confirmed it — otherwise those rows read as
+                    // real FedEx corrections when they aren't.
+                    ->getStateUsing(fn ($record): string => self::isNoChange($record)
+                        ? 'No Changes'
+                        : self::validatorLabel($record->metadata['source'] ?? null))
+                    ->color(fn (string $state): string => match ($state) {
+                        'No Changes' => 'gray',
+                        'Local Cache' => 'info',
+                        default => 'warning',
+                    }),
             ])
             ->filters([
                 SelectFilter::make('status')
@@ -95,7 +105,15 @@ class PaceCorrectionsTable
                 SelectFilter::make('source')
                     ->label('Validator')
                     ->options(fn (): array => self::validatorOptions())
-                    ->query(fn (Builder $query, array $data): Builder => $query->when($data['value'] ?? null, fn (Builder $q, $value): Builder => $q->where('metadata->source', $value))),
+                    ->query(fn (Builder $query, array $data): Builder => $query->when(
+                        $data['value'] ?? null,
+                        fn (Builder $q, $value): Builder => $value === 'no_changes'
+                            // No Changes = nothing actually changed, regardless of which validator ran.
+                            ? self::whereNoChange($q)
+                            // A real correction by this validator — exclude the no-change rows so they
+                            // don't double-count under both "FedEx" and "No Changes".
+                            : $q->where('metadata->source', $value)->whereJsonLength('metadata->changes', '>', 0),
+                    )),
                 Filter::make('created_at')
                     ->schema([
                         DatePicker::make('from')->label('From'),
@@ -122,13 +140,32 @@ class PaceCorrectionsTable
      */
     protected static function validatorOptions(): array
     {
-        $options = ['local_cache' => 'Local Cache'];
+        $options = ['no_changes' => 'No Changes', 'local_cache' => 'Local Cache'];
 
         foreach (Carrier::query()->orderBy('name')->pluck('name', 'slug') as $slug => $name) {
             $options[$slug.'_api'] = $name;
         }
 
         return $options;
+    }
+
+    /**
+     * A correction record where nothing actually changed — an empty (or absent) changes list. Kept
+     * consistent with the "(no changes)" hint on the comparison column.
+     */
+    protected static function isNoChange(object $record): bool
+    {
+        return empty($record->metadata['changes'] ?? []);
+    }
+
+    /**
+     * Constrain a query to no-change rows: an empty changes array OR no changes key at all.
+     */
+    protected static function whereNoChange(Builder $query): Builder
+    {
+        return $query->where(fn (Builder $q): Builder => $q
+            ->whereJsonLength('metadata->changes', 0)
+            ->orWhereNull('metadata->changes'));
     }
 
     /**
