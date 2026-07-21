@@ -22,11 +22,29 @@ class ImportBatchesTable
                 TextColumn::make('id')
                     ->label('ID')
                     ->sortable(),
+                TextColumn::make('name')
+                    ->label('Name')
+                    ->searchable()
+                    ->placeholder('—')
+                    ->limit(30)
+                    ->tooltip(fn ($record) => $record->name),
                 TextColumn::make('original_filename')
                     ->label('File')
                     ->searchable()
                     ->limit(30)
                     ->tooltip(fn ($record) => $record->original_filename),
+                // The answers captured at import, so the entered ship/on-site dates are visible here
+                // instead of only in an export.
+                TextColumn::make('default_ship_date')
+                    ->label('Ship Date')
+                    ->date()
+                    ->placeholder('—')
+                    ->toggleable(),
+                TextColumn::make('default_on_site_date')
+                    ->label('On-Site Date')
+                    ->date()
+                    ->placeholder('—')
+                    ->toggleable(),
                 TextColumn::make('status')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {

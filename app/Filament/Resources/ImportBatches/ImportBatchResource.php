@@ -41,8 +41,16 @@ class ImportBatchResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()
-            ->where('imported_by', auth()->id());
+        $query = parent::getEloquentQuery();
+
+        // Admins see every batch (the "Imported By" column shows who ran each); non-admins see only
+        // their own imports. Previously ALL users were scoped to their own, so an admin couldn't see a
+        // batch another user ran even though it appeared in exports.
+        if (! auth()->user()?->is_admin) {
+            $query->where('imported_by', auth()->id());
+        }
+
+        return $query;
     }
 
     public static function getRelations(): array

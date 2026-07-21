@@ -358,6 +358,11 @@ class ProcessImportBatchValidation implements ShouldQueue
     {
         $recommendationService = new ShippingRecommendationService;
 
+        // In a BestWay-enabled batch every address is a real Yes/No. Default all to No first; the ones
+        // BestWay actually optimizes below get their true/false from the service, and the ones it can't
+        // process (no on-site date / no transit times) stay No instead of a blank in the export.
+        $this->batch->addresses()->whereNull('bestway_optimized')->update(['bestway_optimized' => false]);
+
         // Get addresses with required_on_site_date and transit times
         $addressesToOptimize = $this->batch->addresses()
             ->whereNotNull('required_on_site_date')

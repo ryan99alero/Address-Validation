@@ -252,8 +252,13 @@ class Address extends Model
             $changes[] = 'State: '.$this->output_state;
         }
 
-        if ($this->output_postal !== null && $this->output_postal !== $this->input_postal) {
-            $changes[] = 'Zip: '.$this->output_postal;
+        // Compare the FULL output ZIP (5+4 reassembled) against the input, digits-only — otherwise a
+        // ZIP+4 input ("12345-1234") vs the split ZIP5 output ("12345" + ext "1234") always looked like
+        // a change and reported "Zip: 12345" even though the exported ZipCode is correctly 12345-1234.
+        $outputFullPostal = $this->getFullPostalCode();
+        if ($outputFullPostal !== null
+            && preg_replace('/[^0-9]/', '', $outputFullPostal) !== preg_replace('/[^0-9]/', '', (string) $this->input_postal)) {
+            $changes[] = 'Zip: '.$outputFullPostal;
         }
 
         return implode(', ', $changes);
