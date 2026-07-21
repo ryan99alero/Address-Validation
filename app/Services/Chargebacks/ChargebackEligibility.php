@@ -95,10 +95,12 @@ class ChargebackEligibility
      */
     private function alreadyPushed(object $r): bool
     {
-        $key = ChargebackPush::dedupeKey(
-            (int) $r->carrier_id, $r->tracking_number, (int) $r->charge_category_id, $r->amount, $r->ship_date,
-        );
+        // txn_id is the identity going forward (stable across a re-import that changes ship_date). The
+        // legacy dedupe_key is a transition fallback that also catches rows not yet backfilled; it can
+        // be dropped once every environment has run chargebacks:backfill-identity.
+        $txnId = ChargebackPush::identity((array) $r);
+        $legacy = ChargebackPush::dedupeKey((int) $r->carrier_id, $r->tracking_number, (int) $r->charge_category_id, $r->amount, $r->ship_date);
 
-        return ChargebackPush::where('dedupe_key', $key)->exists();
+        return ChargebackPush::where('txn_id', $txnId)->orWhere('dedupe_key', $legacy)->exists();
     }
 }

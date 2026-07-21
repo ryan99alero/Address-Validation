@@ -60,10 +60,12 @@ class PushChargeback implements ShouldQueue
         }
 
         $c = $this->charge;
-        $key = ChargebackPush::dedupeKey((int) $c['carrier_id'], $c['tracking_number'], $c['charge_category_id'] ?? null, (float) $c['amount'], $c['ship_date'] ?? null);
+        $txnId = ChargebackPush::identity($c);
 
-        // Claim-first: the row is the mutex. Concurrent/duplicate dispatch loses on the unique key.
-        $ledger = ChargebackPush::firstOrCreate(['dedupe_key' => $key], [
+        // Claim-first: the row is the mutex. Concurrent/duplicate dispatch AND a re-import that changed
+        // ship_date all resolve to the same txn_id, so a charge is claimed (and pushed) exactly once.
+        $ledger = ChargebackPush::firstOrCreate(['txn_id' => $txnId], [
+            'dedupe_key' => ChargebackPush::dedupeKey((int) $c['carrier_id'], $c['tracking_number'], $c['charge_category_id'] ?? null, (float) $c['amount'], $c['ship_date'] ?? null),
             'carrier_charge_id' => $c['carrier_charge_id'] ?? null,
             'carrier_id' => $c['carrier_id'], 'carrier_invoice_id' => $c['carrier_invoice_id'] ?? null,
             'tracking_number' => $c['tracking_number'], 'charge_category_id' => $c['charge_category_id'] ?? null,
@@ -220,9 +222,7 @@ class PushChargeback implements ShouldQueue
     {
         // Retries exhausted. Leave 'unverified' as-is (the reconciler will resolve by token); only
         // stamp the error so it's visible.
-        $c = $this->charge;
-        $key = ChargebackPush::dedupeKey((int) $c['carrier_id'], $c['tracking_number'], $c['charge_category_id'] ?? null, (float) $c['amount'], $c['ship_date'] ?? null);
-        ChargebackPush::where('dedupe_key', $key)->where('status', ChargebackPush::STATUS_PENDING)
+        ChargebackPush::where('txn_id', ChargebackPush::identity($this->charge))->where('status', ChargebackPush::STATUS_PENDING)
             ->update(['status' => ChargebackPush::STATUS_UNVERIFIED, 'last_error' => $e->getMessage()]);
     }
 }

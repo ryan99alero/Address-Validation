@@ -29,8 +29,8 @@ test('master toggle OFF ignores the charge — no ledger row, no Pace call', fun
 });
 
 test('an already-pushed charge is never pushed again (returns before touching Pace)', function () {
-    $key = ChargebackPush::dedupeKey(1, 'X1', 1, 20.20, null);
-    ChargebackPush::create(['dedupe_key' => $key, 'carrier_id' => 1, 'tracking_number' => 'X1', 'amount' => 20.20, 'status' => 'pushed', 'pace_jobcost_id' => '999']);
+    $txn = ChargebackPush::identity(pcCharge());
+    ChargebackPush::create(['txn_id' => $txn, 'dedupe_key' => 'legacy-1', 'carrier_id' => 1, 'tracking_number' => 'X1', 'charge_category_id' => 1, 'amount' => 20.20, 'status' => 'pushed', 'pace_jobcost_id' => '999']);
 
     $pusher = Mockery::mock(ChargebackPusher::class);
     $pusher->shouldReceive('activeConnection')->andReturn(new IntegrationConnection(['driver' => 'pace']));
@@ -39,8 +39,28 @@ test('an already-pushed charge is never pushed again (returns before touching Pa
 
     (new PushChargeback(pcCharge()))->handle($pusher);
 
-    expect(ChargebackPush::where('dedupe_key', $key)->count())->toBe(1)
-        ->and(ChargebackPush::where('dedupe_key', $key)->first()->pace_jobcost_id)->toBe('999');
+    expect(ChargebackPush::where('txn_id', $txn)->count())->toBe(1)
+        ->and(ChargebackPush::where('txn_id', $txn)->first()->pace_jobcost_id)->toBe('999');
+});
+
+test('the same charge re-imported with a different ship_date is claimed only once (the dup bug)', function () {
+    // Gen 1: ship_date null. Gen 2: same charge, ship_date populated by a re-import. Old dedupe_key
+    // forked these into two JobCosts; the txn_id identity (ship_date-independent) must not.
+    $gen1 = pcCharge() + ['invoice_number' => 'INV9', 'invoice_date' => '2026-07-11', 'ship_date' => null];
+    $gen2 = pcCharge() + ['invoice_number' => 'INV9', 'invoice_date' => '2026-07-11', 'ship_date' => '2026-07-07'];
+
+    expect(ChargebackPush::identity($gen1))->toBe(ChargebackPush::identity($gen2));
+
+    ChargebackPush::create(['txn_id' => ChargebackPush::identity($gen1), 'dedupe_key' => 'legacy-g1', 'carrier_id' => 1, 'tracking_number' => 'X1', 'amount' => 20.20, 'status' => 'pushed', 'pace_jobcost_id' => '999']);
+
+    $pusher = Mockery::mock(ChargebackPusher::class);
+    $pusher->shouldReceive('activeConnection')->andReturn(new IntegrationConnection(['driver' => 'pace']));
+    $pusher->shouldReceive('pushEnabled')->andReturnTrue();
+    $pusher->shouldNotReceive('lookupJobShipments');
+
+    (new PushChargeback($gen2))->handle($pusher); // the re-import re-push
+
+    expect(ChargebackPush::count())->toBe(1); // NOT two
 });
 
 test('an OPEN job with jobChargesOK=false is skipped, not billed (gate is jobChargesOK, not openJob)', function () {
