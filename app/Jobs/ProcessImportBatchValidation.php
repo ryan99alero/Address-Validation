@@ -358,11 +358,6 @@ class ProcessImportBatchValidation implements ShouldQueue
     {
         $recommendationService = new ShippingRecommendationService;
 
-        // In a BestWay-enabled batch every address is a real Yes/No. Default all to No first; the ones
-        // BestWay actually optimizes below get their true/false from the service, and the ones it can't
-        // process (no on-site date / no transit times) stay No instead of a blank in the export.
-        $this->batch->addresses()->whereNull('bestway_optimized')->update(['bestway_optimized' => false]);
-
         // Get addresses with required_on_site_date and transit times
         $addressesToOptimize = $this->batch->addresses()
             ->whereNotNull('required_on_site_date')
@@ -370,33 +365,38 @@ class ProcessImportBatchValidation implements ShouldQueue
             ->with(['transitTimes', 'shipViaCodeRecord'])
             ->get();
 
-        if ($addressesToOptimize->isEmpty()) {
+        if ($addressesToOptimize->isNotEmpty()) {
+            Log::info('ProcessImportBatchValidation: Applying BestWay optimization', [
+                'batch_id' => $this->batch->id,
+                'addresses_count' => $addressesToOptimize->count(),
+            ]);
+
+            $result = $recommendationService->applyBestWayOptimizationBatch($addressesToOptimize, $this->batch->bestway_plant_id, $this->batch->bestway_carrier_account_id, (bool) $this->batch->bestway_account_strict);
+
+            Log::info('ProcessImportBatchValidation: BestWay optimization completed', [
+                'batch_id' => $this->batch->id,
+                'processed' => $result['processed'],
+                'optimized' => $result['optimized'],
+                'already_optimal' => $result['already_optimal'],
+                'no_viable_service' => $result['no_viable_service'],
+                'no_matching_code' => $result['no_matching_code'] ?? 0,
+            ]);
+
+            if ($this->batch->reverse_validate_future_date) {
+                $this->reverseValidateFutureDates();
+            }
+        } else {
             Log::info('ProcessImportBatchValidation: No addresses to optimize with BestWay', [
                 'batch_id' => $this->batch->id,
             ]);
-
-            return;
         }
 
-        Log::info('ProcessImportBatchValidation: Applying BestWay optimization', [
-            'batch_id' => $this->batch->id,
-            'addresses_count' => $addressesToOptimize->count(),
-        ]);
-
-        $result = $recommendationService->applyBestWayOptimizationBatch($addressesToOptimize, $this->batch->bestway_plant_id, $this->batch->bestway_carrier_account_id, (bool) $this->batch->bestway_account_strict);
-
-        Log::info('ProcessImportBatchValidation: BestWay optimization completed', [
-            'batch_id' => $this->batch->id,
-            'processed' => $result['processed'],
-            'optimized' => $result['optimized'],
-            'already_optimal' => $result['already_optimal'],
-            'no_viable_service' => $result['no_viable_service'],
-            'no_matching_code' => $result['no_matching_code'] ?? 0,
-        ]);
-
-        if ($this->batch->reverse_validate_future_date) {
-            $this->reverseValidateFutureDates();
-        }
+        // In a BestWay-enabled batch every address resolves to a definite Yes/No on BOTH flags. Anything
+        // the engine couldn't evaluate (no on-site date / no transit times, or a service path that left
+        // it blank) defaults to No — so neither bestway_optimized nor ship_via_meets_deadline (whether
+        // it arrives by the requested date) is ever blank in the export.
+        $this->batch->addresses()->whereNull('bestway_optimized')->update(['bestway_optimized' => false]);
+        $this->batch->addresses()->whereNull('ship_via_meets_deadline')->update(['ship_via_meets_deadline' => false]);
     }
 
     /**

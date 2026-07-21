@@ -33,18 +33,21 @@ test('a real ZIP change is still reported, with the full 5+4 value', function ()
     expect($a->change_summary)->toContain('Zip: 67212-6789');
 });
 
-// FIX 2 — BestWay Optimized is a real Yes/No, never blank, in a find_best_service batch.
-test('BestWay optimization defaults unprocessed addresses to No instead of null', function () {
+// FIX 2 — BOTH BestWay flags are a real Yes/No, never blank, in a find_best_service batch.
+test('BestWay optimization defaults unprocessed addresses to No on both flags', function () {
     $batch = ImportBatch::create(['name' => 'B', 'original_filename' => 'b.csv', 'file_path' => 'b.csv', 'status' => 'processing', 'find_best_service' => true]);
-    // Two addresses with no required_on_site_date → BestWay can't optimize them.
+    // Two addresses with no required_on_site_date / transit times → BestWay can't evaluate them.
     $a1 = Address::create(['import_batch_id' => $batch->id, 'validation_status' => 'valid']);
     $a2 = Address::create(['import_batch_id' => $batch->id, 'validation_status' => 'valid']);
-    expect($a1->bestway_optimized)->toBeNull();
+    expect($a1->bestway_optimized)->toBeNull()
+        ->and($a1->ship_via_meets_deadline)->toBeNull();
 
     (fn () => $this->applyBestWayOptimization())->call(new ProcessImportBatchValidation($batch));
 
     expect($a1->refresh()->bestway_optimized)->toBeFalse()
-        ->and($a2->refresh()->bestway_optimized)->toBeFalse();
+        ->and($a1->ship_via_meets_deadline)->toBeFalse()
+        ->and($a2->refresh()->bestway_optimized)->toBeFalse()
+        ->and($a2->ship_via_meets_deadline)->toBeFalse();
 });
 
 // FIX 3 — non-admins see only their own batches; admins see all.
