@@ -45,3 +45,29 @@ test('a flagged duplicate is countable in the nav badge and isolable by filter',
         ->assertCanSeeTableRecords([$dup])
         ->assertCanNotSeeTableRecords([$canonical]);
 });
+
+test('a quarantined near-duplicate surfaces in Needs Review and can be dismissed', function () {
+    $posted = ChargebackPush::create([
+        'txn_id' => 'CB1-p', 'dedupe_key' => 'pp', 'carrier_id' => 1, 'tracking_number' => '1ZQ',
+        'amount' => 18.40, 'activity_code' => '72510', 'status' => 'pushed', 'pace_jobcost_id' => '900',
+    ]);
+    $q = ChargebackPush::create([
+        'txn_id' => 'CB1-q', 'dedupe_key' => 'qq', 'carrier_id' => 1, 'tracking_number' => '1ZQ',
+        'amount' => 20.20, 'activity_code' => '72510', 'status' => ChargebackPush::STATUS_QUARANTINED,
+        'conflict_with_id' => $posted->id, 'conflict_reason' => ChargebackPush::CONFLICT_AMOUNT,
+    ]);
+
+    expect(ChargebackPushes::getNavigationBadge())->toBe('1'); // only the quarantined row awaits a human
+
+    Livewire::test(ChargebackPushes::class)
+        ->filterTable('needs_review', true)
+        ->assertCanSeeTableRecords([$q])
+        ->assertCanNotSeeTableRecords([$posted])
+        ->assertTableActionExists('push_anyway')
+        ->assertTableActionExists('dismiss')
+        ->callTableAction('dismiss', $q, data: ['review_note' => 'both are genuinely owed on this shipment']);
+
+    expect($q->refresh()->status)->toBe(ChargebackPush::STATUS_DISMISSED)
+        ->and($q->review_note)->toBe('both are genuinely owed on this shipment')
+        ->and($q->reviewed_by_id)->not->toBeNull();
+});

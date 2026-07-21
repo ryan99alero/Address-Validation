@@ -31,7 +31,7 @@ class PushChargeback implements ShouldQueue
     /**
      * @param  array<string, mixed>  $charge
      */
-    public function __construct(public array $charge)
+    public function __construct(public array $charge, public bool $force = false)
     {
         $this->onQueue('chargebacks');
     }
@@ -73,9 +73,25 @@ class PushChargeback implements ShouldQueue
             'activity_code' => $c['activity_code'], 'status' => ChargebackPush::STATUS_PENDING,
         ]);
 
-        // Terminal states — don't touch (pushed, permanently failed, or already-decided skip).
-        if (in_array($ledger->status, [ChargebackPush::STATUS_PUSHED, ChargebackPush::STATUS_FAILED], true)
+        // Terminal states — don't touch (pushed, permanently failed, already-decided skip, or held for
+        // review). A quarantined/dismissed row only moves again via an explicit human action (force).
+        if (in_array($ledger->status, [ChargebackPush::STATUS_PUSHED, ChargebackPush::STATUS_FAILED,
+            ChargebackPush::STATUS_QUARANTINED, ChargebackPush::STATUS_DISMISSED], true)
             || str_starts_with($ledger->status, 'skipped_')) {
+            return;
+        }
+
+        // Near-duplicate guard: an EXACT dup is impossible (same txn_id → claimed once above), but a
+        // re-import that corrected this charge's amount OR recategorized it produces a different txn_id
+        // and would post a second JobCost for the same shipment. Hold it for a human instead of posting.
+        // `force` (a reviewer's "Push anyway") bypasses this.
+        if (! $this->force && ($near = $this->findNearDuplicate($c, $ledger)) !== null) {
+            $ledger->update([
+                'status' => ChargebackPush::STATUS_QUARANTINED,
+                'conflict_with_id' => $near['conflict']->id,
+                'conflict_reason' => $near['reason'],
+            ]);
+
             return;
         }
 
@@ -194,6 +210,44 @@ class PushChargeback implements ShouldQueue
         ))));
 
         return $jobs === [] ? null : implode(', ', $jobs);
+    }
+
+    /**
+     * A posted chargeback for the SAME shipment (carrier + tracking + invoice) that shares exactly one
+     * of {activity_code, amount} with this charge — the same charge re-imported with a corrected amount
+     * or a new category. Genuinely different charges on a shipment differ in BOTH, so they don't match.
+     * Needs the invoice to establish "same shipment".
+     *
+     * @param  array<string, mixed>  $c
+     * @return array{conflict: ChargebackPush, reason: string}|null
+     */
+    private function findNearDuplicate(array $c, ChargebackPush $ledger): ?array
+    {
+        if (empty($c['carrier_invoice_id'])) {
+            return null;
+        }
+
+        $conflict = ChargebackPush::where('status', ChargebackPush::STATUS_PUSHED)
+            ->where('id', '!=', $ledger->id)
+            ->where('carrier_id', $c['carrier_id'])
+            ->where('tracking_number', $c['tracking_number'])
+            ->where('carrier_invoice_id', $c['carrier_invoice_id'])
+            ->where(function ($q) use ($c): void {
+                $q->where(fn ($w) => $w->where('activity_code', $c['activity_code'])->where('amount', '!=', (float) $c['amount']))
+                    ->orWhere(fn ($w) => $w->where('amount', (float) $c['amount'])->where('activity_code', '!=', $c['activity_code']));
+            })
+            ->first();
+
+        if (! $conflict) {
+            return null;
+        }
+
+        return [
+            'conflict' => $conflict,
+            'reason' => (string) $conflict->activity_code === (string) $c['activity_code']
+                ? ChargebackPush::CONFLICT_AMOUNT
+                : ChargebackPush::CONFLICT_CATEGORY,
+        ];
     }
 
     /**

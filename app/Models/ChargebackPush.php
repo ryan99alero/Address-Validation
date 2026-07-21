@@ -39,11 +39,16 @@ class ChargebackPush extends Model
 
     public const REVERSAL_FAILED = 'reverse_failed';
 
+    public const CONFLICT_AMOUNT = 'amount_changed';   // same shipment+category, a re-import changed the amount
+
+    public const CONFLICT_CATEGORY = 'category_changed'; // same shipment+amount, a re-import recategorized it
+
     protected $fillable = [
-        'txn_id', 'identity_version', 'dedupe_key', 'duplicate_of_id', 'carrier_charge_id', 'carrier_id',
-        'carrier_invoice_id', 'tracking_number', 'charge_category_id', 'driver', 'amount', 'ship_date',
-        'pace_job', 'pace_job_part', 'pace_customer_id', 'activity_code', 'notes', 'pace_jobcost_id',
-        'response_snapshot', 'status', 'reversal_state', 'attempts', 'last_error', 'pushed_at',
+        'txn_id', 'identity_version', 'dedupe_key', 'duplicate_of_id', 'conflict_with_id', 'conflict_reason',
+        'carrier_charge_id', 'carrier_id', 'carrier_invoice_id', 'tracking_number', 'charge_category_id',
+        'driver', 'amount', 'ship_date', 'pace_job', 'pace_job_part', 'pace_customer_id', 'activity_code',
+        'notes', 'pace_jobcost_id', 'response_snapshot', 'status', 'reversal_state', 'reviewed_by_id',
+        'reviewed_at', 'review_note', 'attempts', 'last_error', 'pushed_at',
     ];
 
     /** @var array<int, string> */
@@ -59,6 +64,7 @@ class ChargebackPush extends Model
             'ship_date' => 'date',
             'attempts' => 'integer',
             'pushed_at' => 'datetime',
+            'reviewed_at' => 'datetime',
             'response_snapshot' => 'array',
         ];
     }
@@ -129,5 +135,16 @@ class ChargebackPush extends Model
     public function duplicateOf(): BelongsTo
     {
         return $this->belongsTo(self::class, 'duplicate_of_id');
+    }
+
+    /** The already-posted charge a quarantined row conflicts with (same shipment, changed amount/category). */
+    public function conflictWith(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'conflict_with_id');
+    }
+
+    public function reviewedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reviewed_by_id');
     }
 }

@@ -2,9 +2,12 @@
 
 namespace App\Filament\Pages;
 
+use App\Jobs\PushChargeback;
 use App\Models\ChargebackPush;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Textarea;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
@@ -14,6 +17,8 @@ use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use UnitEnum;
 
@@ -42,8 +47,9 @@ class ChargebackPushes extends Page implements HasTable
 
     public static function getNavigationBadge(): ?string
     {
-        // Everything awaiting a human: rows to chase (failed/unverified) + duplicates awaiting reversal.
-        $n = ChargebackPush::whereIn('status', ['failed', 'unverified'])
+        // Everything awaiting a human: rows to chase (failed/unverified), duplicates awaiting reversal,
+        // and near-duplicates held for review.
+        $n = ChargebackPush::whereIn('status', ['failed', 'unverified', ChargebackPush::STATUS_QUARANTINED])
             ->orWhere('reversal_state', ChargebackPush::REVERSAL_NEEDS)
             ->count();
 
@@ -81,6 +87,15 @@ class ChargebackPushes extends Page implements HasTable
                         default => null,
                     })
                     ->tooltip(fn (ChargebackPush $record): ?string => $record->duplicate_of_id ? 'Duplicate of cb#'.$record->duplicate_of_id : null),
+                // A near-duplicate held for review: same shipment as an already-posted charge, but its
+                // amount or category changed on re-import. The tooltip points at the posted counterpart.
+                TextColumn::make('conflict_reason')->label('Conflict')->badge()->color('warning')->placeholder('—')
+                    ->formatStateUsing(fn (?string $state): ?string => match ($state) {
+                        ChargebackPush::CONFLICT_AMOUNT => 'Amount changed',
+                        ChargebackPush::CONFLICT_CATEGORY => 'Recategorized',
+                        default => null,
+                    })
+                    ->tooltip(fn (ChargebackPush $record): ?string => $record->conflict_with_id ? 'Conflicts with posted cb#'.$record->conflict_with_id : null),
                 TextColumn::make('pace_job')->label('Job')->searchable(),
                 TextColumn::make('pace_customer_id')->label('Customer')->toggleable(),
                 TextColumn::make('pace_jobcost_id')->label('JobCost ID')->fontFamily('mono')->placeholder('—')->searchable(),
@@ -95,6 +110,35 @@ class ChargebackPushes extends Page implements HasTable
                     ->label('Duplicates needing reversal')
                     ->query(fn (Builder $query): Builder => $query->where('reversal_state', ChargebackPush::REVERSAL_NEEDS))
                     ->toggle(),
+                Filter::make('needs_review')
+                    ->label('Needs review (near-duplicates)')
+                    ->query(fn (Builder $query): Builder => $query->where('status', ChargebackPush::STATUS_QUARANTINED))
+                    ->toggle(),
+            ])
+            ->recordActions([
+                Action::make('push_anyway')
+                    ->label('Push anyway')
+                    ->icon(Heroicon::OutlinedArrowUpTray)
+                    ->color('warning')
+                    ->visible(fn (ChargebackPush $record): bool => $record->status === ChargebackPush::STATUS_QUARANTINED)
+                    ->requiresConfirmation()
+                    ->modalHeading('Push this near-duplicate to Pace?')
+                    ->modalDescription('This posts a SECOND JobCost for the same shipment as an already-posted charge. Only do this if both charges are genuinely owed.')
+                    ->action(function (ChargebackPush $record): void {
+                        $record->update(['status' => ChargebackPush::STATUS_PENDING, 'reviewed_by_id' => Auth::id(), 'reviewed_at' => now()]);
+                        PushChargeback::dispatch($this->chargeFromLedger($record), force: true);
+                        Notification::make()->title('Queued for push (review override)')->success()->send();
+                    }),
+                Action::make('dismiss')
+                    ->label('Dismiss')
+                    ->icon(Heroicon::OutlinedXMark)
+                    ->color('gray')
+                    ->visible(fn (ChargebackPush $record): bool => $record->status === ChargebackPush::STATUS_QUARANTINED)
+                    ->schema([Textarea::make('review_note')->label('Reason')->required()->maxLength(500)])
+                    ->action(function (array $data, ChargebackPush $record): void {
+                        $record->update(['status' => ChargebackPush::STATUS_DISMISSED, 'review_note' => $data['review_note'], 'reviewed_by_id' => Auth::id(), 'reviewed_at' => now()]);
+                        Notification::make()->title('Dismissed')->success()->send();
+                    }),
             ])
             ->headerActions([
                 Action::make('export')
@@ -104,6 +148,27 @@ class ChargebackPushes extends Page implements HasTable
             ])
             ->defaultSort('id', 'desc')
             ->paginated([50, 100, 'all']);
+    }
+
+    /**
+     * Rebuild the charge-array a quarantined ledger row was claimed from, so a reviewer's "Push anyway"
+     * can force it through the engine (bypassing the near-duplicate guard).
+     *
+     * @return array<string, mixed>
+     */
+    private function chargeFromLedger(ChargebackPush $r): array
+    {
+        $invoice = $r->carrier_invoice_id
+            ? DB::table('carrier_invoices')->where('id', $r->carrier_invoice_id)->first(['invoice_number', 'invoice_date'])
+            : null;
+
+        return [
+            'carrier_charge_id' => $r->carrier_charge_id, 'carrier_id' => $r->carrier_id,
+            'carrier_invoice_id' => $r->carrier_invoice_id, 'invoice_number' => $invoice->invoice_number ?? null,
+            'invoice_date' => $invoice->invoice_date ?? null, 'tracking_number' => $r->tracking_number,
+            'charge_category_id' => $r->charge_category_id, 'driver' => $r->driver, 'amount' => (float) $r->amount,
+            'ship_date' => $r->ship_date?->format('Y-m-d'), 'activity_code' => $r->activity_code,
+        ];
     }
 
     private function exportCsv(): StreamedResponse
