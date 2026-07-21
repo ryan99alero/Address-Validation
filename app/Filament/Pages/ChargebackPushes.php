@@ -10,8 +10,10 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use UnitEnum;
 
@@ -40,7 +42,10 @@ class ChargebackPushes extends Page implements HasTable
 
     public static function getNavigationBadge(): ?string
     {
-        $n = ChargebackPush::whereIn('status', ['failed', 'unverified'])->count();
+        // Everything awaiting a human: rows to chase (failed/unverified) + duplicates awaiting reversal.
+        $n = ChargebackPush::whereIn('status', ['failed', 'unverified'])
+            ->orWhere('reversal_state', ChargebackPush::REVERSAL_NEEDS)
+            ->count();
 
         return $n > 0 ? (string) $n : null;
     }
@@ -66,6 +71,16 @@ class ChargebackPushes extends Page implements HasTable
                 TextColumn::make('driver')->badge()->toggleable(),
                 TextColumn::make('activity_code')->label('Activity')->badge(),
                 TextColumn::make('amount')->money('USD')->sortable()->alignEnd(),
+                // A charge a re-import forked into a second JobCost: flagged here as a duplicate that must
+                // be backed out of Pace. The tooltip points at the canonical row it duplicates.
+                TextColumn::make('reversal_state')->label('Duplicate')->badge()->color('danger')->placeholder('—')
+                    ->formatStateUsing(fn (?string $state): ?string => match ($state) {
+                        ChargebackPush::REVERSAL_NEEDS => 'Needs reversal',
+                        ChargebackPush::REVERSAL_PENDING => 'Reversing…',
+                        ChargebackPush::REVERSAL_FAILED => 'Reversal failed',
+                        default => null,
+                    })
+                    ->tooltip(fn (ChargebackPush $record): ?string => $record->duplicate_of_id ? 'Duplicate of cb#'.$record->duplicate_of_id : null),
                 TextColumn::make('pace_job')->label('Job')->searchable(),
                 TextColumn::make('pace_customer_id')->label('Customer')->toggleable(),
                 TextColumn::make('pace_jobcost_id')->label('JobCost ID')->fontFamily('mono')->placeholder('—')->searchable(),
@@ -76,6 +91,10 @@ class ChargebackPushes extends Page implements HasTable
             ])
             ->filters([
                 SelectFilter::make('status')->options(fn (): array => ChargebackPush::query()->distinct()->pluck('status', 'status')->all()),
+                Filter::make('needs_reversal')
+                    ->label('Duplicates needing reversal')
+                    ->query(fn (Builder $query): Builder => $query->where('reversal_state', ChargebackPush::REVERSAL_NEEDS))
+                    ->toggle(),
             ])
             ->headerActions([
                 Action::make('export')
@@ -89,9 +108,10 @@ class ChargebackPushes extends Page implements HasTable
 
     private function exportCsv(): StreamedResponse
     {
-        $columns = ['id', 'status', 'carrier_id', 'carrier_invoice_id', 'tracking_number', 'driver',
-            'charge_category_id', 'activity_code', 'amount', 'ship_date', 'pace_job', 'pace_job_part',
-            'pace_customer_id', 'pace_jobcost_id', 'pushed_at', 'attempts', 'last_error', 'notes'];
+        $columns = ['id', 'txn_id', 'status', 'reversal_state', 'duplicate_of_id', 'carrier_id',
+            'carrier_invoice_id', 'tracking_number', 'driver', 'charge_category_id', 'activity_code',
+            'amount', 'ship_date', 'pace_job', 'pace_job_part', 'pace_customer_id', 'pace_jobcost_id',
+            'pushed_at', 'attempts', 'last_error', 'notes'];
 
         return response()->streamDownload(function () use ($columns): void {
             $out = fopen('php://output', 'w');
