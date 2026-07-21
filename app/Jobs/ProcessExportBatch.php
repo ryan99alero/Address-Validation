@@ -292,7 +292,9 @@ class ProcessExportBatch implements ShouldQueue
         $have = array_map(fn ($h) => $this->normalizeHeader($h), $existingHeaders);
 
         $fields = [
+            ['field' => 'ship_via_service', 'header' => 'Ship Via Service'],
             ['field' => 'ship_via_days', 'header' => 'Ship Via Transit Days'],
+            ['field' => 'ship_via_meets_deadline', 'header' => 'Ship Via Meets Deadline'],
             ['field' => 'bestway_optimized', 'header' => 'BestWay Optimized'],
             ['field' => 'ship_method_comment', 'header' => 'ShipMethodComment'],
         ];
@@ -318,6 +320,24 @@ class ProcessExportBatch implements ShouldQueue
             'addresscleansingcomment' => $address->change_summary,
             'addresscleansingreconciled' => (string) ($address->validation_status ?? ''),
             'shipmethodcomment' => $address->ship_method_comment,
+            // Service / transit / BestWay / reverse-schedule results. When the re-uploaded file already
+            // carries one of these columns, its content is REFRESHED in place: the current finding
+            // overwrites it, and an empty finding blanks it — same as address cleansing above. Every arm
+            // returns '' (never null) so a stale value can never survive a re-export.
+            'bestwayoptimized' => $address->bestway_optimized === null ? '' : ($address->bestway_optimized ? 'Yes' : 'No'),
+            'shipviatransitdays', 'shipviadays' => $address->ship_via_days !== null ? (string) $address->ship_via_days : '',
+            'shipviaservice' => (string) ($address->ship_via_service ?? ''),
+            'shipviadeliverydate', 'shipviadate' => $address->ship_via_date?->format('m/d/Y') ?? '',
+            'shipviameetsdeadline', 'canmeetrequireddate', 'arrivesbyrequireddate' => $address->ship_via_meets_deadline === null ? '' : ($address->ship_via_meets_deadline ? 'Yes' : 'No'),
+            'recommendedshipdate' => $address->recommended_ship_date?->format('m/d/Y') ?? '',
+            'recommendedshipservice' => (string) ($address->recommended_ship_service ?? ''),
+            'fastestservice' => (string) ($address->fastest_service ?? ''),
+            'fastestdays' => $address->fastest_days !== null ? (string) $address->fastest_days : '',
+            'fastestdeliverydate', 'fastestdate' => $address->fastest_date?->format('m/d/Y') ?? '',
+            'groundservice' => (string) ($address->ground_service ?? ''),
+            'grounddays' => $address->ground_days !== null ? (string) $address->ground_days : '',
+            'grounddeliverydate', 'grounddate' => $address->ground_date?->format('m/d/Y') ?? '',
+            'distancemiles' => $address->distance_miles !== null ? number_format((float) $address->distance_miles, 1) : '',
             default => null,
         };
     }
