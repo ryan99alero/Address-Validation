@@ -52,19 +52,24 @@ class ChargebackPusher
      * only for audit/diagnostic context. All xpaths below are confirmed against the live Pace object
      * model; the returned key names are preserved so the caller is object-agnostic.
      *
+     * @param  string|null  $referenceDate  the charge's ship/invoice date — narrows a recycled tracking
+     *                                      to the shipment from THIS period (see narrowByShipDate)
      * @return array<int, array<string, mixed>>
      */
-    public function lookupJobShipments(PaceApiClient $client, string $tracking): array
+    public function lookupJobShipments(PaceApiClient $client, string $tracking, ?string $referenceDate = null): array
     {
         $fields = [
             ['name' => 'trackingNumber', 'xpath' => '@trackingNumber'],
             ['name' => 'job', 'xpath' => 'shipment/job/@job'],
             ['name' => 'jobPart', 'xpath' => 'shipment/@jobPart'],
             ['name' => 'customer', 'xpath' => 'shipment/job/@customer'],
+            ['name' => 'shipDate', 'xpath' => '@actualDate'],
             ['name' => 'openJob', 'xpath' => 'shipment/job/adminStatus/@openJob'],
             ['name' => 'jobChargesOK', 'xpath' => 'shipment/job/adminStatus/@jobChargesOK'],
         ];
 
+        // Pace rejects a date range in the xpathFilter (500 "param2 cannot be null"), so we fetch by
+        // tracking and narrow client-side.
         $response = $client->loadValueObjects(
             objectName: 'Carton',
             fields: $fields,
@@ -72,7 +77,39 @@ class ChargebackPusher
             limit: 25,
         );
 
-        return $client->parseValueObjects($response['valueObjects'] ?? [])->all();
+        $rows = $client->parseValueObjects($response['valueObjects'] ?? [])->all();
+
+        return $this->narrowByShipDate($rows, $referenceDate);
+    }
+
+    /**
+     * UPS recycles tracking numbers across ~years, so one tracking can match cartons from 2013, 2021,
+     * 2026… all under different jobs. Restrict to the shipment from THIS charge's period by comparing
+     * the carton ship date (@actualDate) to the charge's ship/invoice date — so we never resolve (or
+     * bill) a decade-old recycled job. If no match falls in the window (missing dates, no reference),
+     * the full set is returned unchanged rather than dropping a resolvable charge.
+     *
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function narrowByShipDate(array $rows, ?string $referenceDate): array
+    {
+        if ($referenceDate === null || count($rows) <= 1) {
+            return $rows;
+        }
+        $ref = strtotime($referenceDate);
+        if ($ref === false) {
+            return $rows;
+        }
+
+        $windowSeconds = 60 * 86400; // ±60 days — comfortably isolates one year's shipment from another
+        $near = array_values(array_filter($rows, function (array $r) use ($ref, $windowSeconds): bool {
+            $d = isset($r['shipDate']) && $r['shipDate'] !== null && $r['shipDate'] !== '' ? strtotime((string) $r['shipDate']) : false;
+
+            return $d !== false && abs($d - $ref) <= $windowSeconds;
+        }));
+
+        return $near !== [] ? $near : $rows;
     }
 
     /**

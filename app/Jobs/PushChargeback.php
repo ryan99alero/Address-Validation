@@ -161,7 +161,10 @@ class PushChargeback implements ShouldQueue
      */
     private function resolveShipment(ChargebackPusher $pusher, PaceApiClient $client, ChargebackPush $ledger): ?array
     {
-        $shipments = $pusher->lookupJobShipments($client, (string) $this->charge['tracking_number']);
+        // Pass the charge's ship date (falling back to the invoice date) so a recycled tracking resolves
+        // to the shipment from THIS period, not a decade-old reuse of the same number.
+        $referenceDate = $this->charge['ship_date'] ?? $this->charge['invoice_date'] ?? null;
+        $shipments = $pusher->lookupJobShipments($client, (string) $this->charge['tracking_number'], $referenceDate);
         if ($shipments === []) {
             $ledger->update(['status' => ChargebackPush::STATUS_SKIPPED_NO_JOBSHIPMENT]);
 
