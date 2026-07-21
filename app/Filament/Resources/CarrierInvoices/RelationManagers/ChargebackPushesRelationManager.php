@@ -2,10 +2,9 @@
 
 namespace App\Filament\Resources\CarrierInvoices\RelationManagers;
 
-use App\Models\ChargebackPush;
+use App\Filament\Support\ChargebackPushTable;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
-use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 
 /**
@@ -34,6 +33,7 @@ class ChargebackPushesRelationManager extends RelationManager
                 TextColumn::make('driver')->badge()->toggleable(),
                 TextColumn::make('activity_code')->label('Activity')->badge(),
                 TextColumn::make('amount')->money('USD')->sortable()->alignEnd(),
+                ...ChargebackPushTable::flagColumns(),
                 TextColumn::make('pace_job')->label('Job')->searchable(),
                 TextColumn::make('pace_jobcost_id')->label('JobCost ID')->fontFamily('mono')->placeholder('—')->searchable(),
                 TextColumn::make('pushed_at')->dateTime()->sortable()->placeholder('—'),
@@ -41,8 +41,9 @@ class ChargebackPushesRelationManager extends RelationManager
                     ->tooltip(fn (?string $state): ?string => $state),
             ])
             ->filters([
-                SelectFilter::make('status')->options(fn (): array => ChargebackPush::query()->distinct()->pluck('status', 'status')->all()),
+                ChargebackPushTable::viewFilter(),
             ])
+            ->recordActions(ChargebackPushTable::reviewActions())
             ->defaultSort('id', 'desc')
             ->paginated([25, 50, 100]);
     }

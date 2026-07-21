@@ -41,7 +41,7 @@ test('a flagged duplicate is countable in the nav badge and isolable by filter',
     expect(ChargebackPushes::getNavigationBadge())->toBe('1');
 
     Livewire::test(ChargebackPushes::class)
-        ->filterTable('needs_reversal', true)
+        ->filterTable('view', ChargebackPush::REVERSAL_NEEDS)
         ->assertCanSeeTableRecords([$dup])
         ->assertCanNotSeeTableRecords([$canonical]);
 });
@@ -60,7 +60,7 @@ test('a quarantined near-duplicate surfaces in Needs Review and can be dismissed
     expect(ChargebackPushes::getNavigationBadge())->toBe('1'); // only the quarantined row awaits a human
 
     Livewire::test(ChargebackPushes::class)
-        ->filterTable('needs_review', true)
+        ->filterTable('view', ChargebackPush::STATUS_QUARANTINED)
         ->assertCanSeeTableRecords([$q])
         ->assertCanNotSeeTableRecords([$posted])
         ->assertTableActionExists('push_anyway')
@@ -70,4 +70,18 @@ test('a quarantined near-duplicate surfaces in Needs Review and can be dismissed
     expect($q->refresh()->status)->toBe(ChargebackPush::STATUS_DISMISSED)
         ->and($q->review_note)->toBe('both are genuinely owed on this shipment')
         ->and($q->reviewed_by_id)->not->toBeNull();
+});
+
+test('a flagged duplicate can be marked reversed, clearing it from needs-reversal and the badge', function () {
+    $canonical = ChargebackPush::create(['txn_id' => 'CB1-c', 'dedupe_key' => 'c1', 'carrier_id' => 1, 'tracking_number' => '1ZDUP', 'amount' => 31.00, 'activity_code' => '72530', 'status' => 'pushed', 'pace_jobcost_id' => '600']);
+    $dup = ChargebackPush::create(['dedupe_key' => 'c2', 'carrier_id' => 1, 'tracking_number' => '1ZDUP', 'amount' => 31.00, 'activity_code' => '72530', 'status' => 'pushed', 'pace_jobcost_id' => '601', 'duplicate_of_id' => $canonical->id, 'reversal_state' => ChargebackPush::REVERSAL_NEEDS]);
+
+    Livewire::test(ChargebackPushes::class)
+        ->assertTableActionExists('mark_reversed')
+        ->callTableAction('mark_reversed', $dup);
+
+    expect($dup->refresh()->status)->toBe(ChargebackPush::STATUS_REVERSED)
+        ->and($dup->reversal_state)->toBeNull()
+        ->and($dup->reviewed_by_id)->not->toBeNull()
+        ->and(ChargebackPushes::getNavigationBadge())->toBeNull(); // nothing awaits a human now
 });
