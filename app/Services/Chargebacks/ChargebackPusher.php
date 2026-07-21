@@ -76,14 +76,14 @@ class ChargebackPusher
     }
 
     /**
-     * The CSR/finance-facing note. The [CB:id] token is FIRST so truncation never eats it — the
-     * reconciler matches on it to tell "already applied" from "safe to re-post".
+     * The CSR/finance-facing note. The [CB:txn_id] token is FIRST (and mirrors the structured ioID
+     * field) so a human can read it; recovery matches on ioID, not this text.
      *
      * @param  array{carrier?:string, tracking?:string, invoice?:string, invoice_date?:string, amount?:float|string, recorded?:?string, corrected?:?string, label?:string}  $ctx
      */
-    public function buildNotes(int $ledgerId, array $ctx): string
+    public function buildNotes(string $txnId, array $ctx): string
     {
-        $parts = ['[CB:'.$ledgerId.']'];
+        $parts = ['[CB:'.$txnId.']'];
         $parts[] = trim(($ctx['carrier'] ?? 'Carrier').' '.($ctx['label'] ?? 'chargeback').'.');
         if (! empty($ctx['tracking'])) {
             $parts[] = 'Tracking '.$ctx['tracking'].'.';
@@ -106,7 +106,7 @@ class ChargebackPusher
      * postingStatus / autoPost / postable) — Pace's Create-Costs workflow owns those. Dates are the
      * post moment (now).
      *
-     * @param  array{job:string, jobPart:string, activityCode:string, amount:float|string, tracking:string, notes:string}  $a
+     * @param  array{job:string, jobPart:string, activityCode:string, amount:float|string, tracking:string, notes:string, txnId:string}  $a
      * @return array<string, mixed>
      */
     public function buildJobCostPayload(array $a): array
@@ -120,6 +120,10 @@ class ChargebackPusher
             'cost' => number_format((float) $a['amount'], 2, '.', ''),
             'actualCost' => number_format((float) $a['amount'], 2, '.', ''),
             'sourceID' => $a['tracking'],
+            // The stable txn_id in Pace's external-transaction field: an exact structured idempotency
+            // key the recovery probe matches on, so a crash between Pace-commit and our-save can adopt
+            // the existing JobCost instead of posting a second one.
+            'ioID' => $a['txnId'],
             'notes' => $a['notes'],
             'startDateTime' => $now->format('Y-m-d\TH:i:s'),
             'endDateTime' => $now->format('Y-m-d\TH:i:s'),

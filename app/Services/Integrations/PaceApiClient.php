@@ -437,6 +437,28 @@ class PaceApiClient
     }
 
     /**
+     * Find a JobCost we created by its ioID (the chargeback txn_id) — an EXACT match on Pace's
+     * external-transaction field, the primary anti-double-bill probe (replaces the fuzzy notes match).
+     * Returns the JobCost primary key, or null if none carries it.
+     */
+    public function findJobCostIdByIoId(string $ioId): ?string
+    {
+        $response = $this->loadValueObjects(
+            objectName: 'JobCost',
+            fields: [['name' => 'id', 'xpath' => '@id']],
+            xpathFilter: "@ioID = '".str_replace("'", "''", $ioId)."'",
+            limit: 5,
+        );
+        $rows = $this->parseValueObjects($response['valueObjects'] ?? []);
+        if ($rows->isEmpty()) {
+            return null;
+        }
+        $first = $rows->first();
+
+        return isset($first['id']) ? (string) $first['id'] : ($first['_primaryKey'] ?? null);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function readContact(string $primaryKey): array

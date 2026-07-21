@@ -81,13 +81,18 @@ class PushChargeback implements ShouldQueue
 
         $ledger->increment('attempts');
         $client = new PaceApiClient($connection);
-        $token = '[CB:'.$ledger->id.']';
 
-        // Retry → verify the create didn't already apply before re-posting.
-        if ($ledger->attempts > 1 && ($existingId = $client->findJobCostIdByToken($token)) !== null) {
-            $ledger->update(['status' => ChargebackPush::STATUS_PUSHED, 'pace_jobcost_id' => $existingId, 'pushed_at' => now()]);
+        // Retry → verify the create didn't already apply before re-posting. Probe by ioID (the txn_id we
+        // stamp on every JobCost — an exact structured match), falling back to the legacy notes token for
+        // any JobCost created before ioID was populated.
+        if ($ledger->attempts > 1) {
+            $existingId = $client->findJobCostIdByIoId($txnId)
+                ?? $client->findJobCostIdByToken('[CB:'.$ledger->id.']');
+            if ($existingId !== null) {
+                $ledger->update(['status' => ChargebackPush::STATUS_PUSHED, 'pace_jobcost_id' => $existingId, 'pushed_at' => now()]);
 
-            return;
+                return;
+            }
         }
 
         $shipment = $this->resolveShipment($pusher, $client, $ledger);
@@ -95,7 +100,7 @@ class PushChargeback implements ShouldQueue
             return; // resolveShipment set a skip status
         }
 
-        $notes = $pusher->buildNotes($ledger->id, $this->noteContext($c, $shipment));
+        $notes = $pusher->buildNotes($txnId, $this->noteContext($c, $shipment));
         // Pace returns an EMPTY STRING (not null) for a JobShipment with no @jobPart, so `?? '01'`
         // let it through and created JobCosts with a blank Job Part. Default ANY empty value to the
         // primary part '01', and store the same resolved value on the ledger so it mirrors Pace.
@@ -103,7 +108,7 @@ class PushChargeback implements ShouldQueue
         $payload = $pusher->buildJobCostPayload([
             'job' => (string) $shipment['job'], 'jobPart' => $jobPart,
             'activityCode' => (string) $c['activity_code'], 'amount' => (float) $c['amount'],
-            'tracking' => (string) $c['tracking_number'], 'notes' => $notes,
+            'tracking' => (string) $c['tracking_number'], 'notes' => $notes, 'txnId' => $txnId,
         ]);
         $ledger->update(['notes' => $notes, 'pace_job' => $shipment['job'] ?? null, 'pace_job_part' => $jobPart, 'pace_customer_id' => $shipment['customer'] ?? null]);
 
