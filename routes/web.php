@@ -75,7 +75,7 @@ Route::get('/batch-processing/download/{batch}', function (ImportBatch $batch) {
 // (not a Livewire streamDownload) so the browser reliably downloads; deleted after send.
 Route::get('/exports/grid/{file}', function (string $file) {
     $name = basename($file); // strip any path traversal
-    abort_unless(str_ends_with($name, '.csv'), 404);
+    abort_unless(str_ends_with($name, '.csv') || str_ends_with($name, '.xlsx'), 404);
     $path = Storage::disk('local')->path('exports/'.$name);
     abort_unless(is_file($path), 404, 'Export not found or already downloaded');
 

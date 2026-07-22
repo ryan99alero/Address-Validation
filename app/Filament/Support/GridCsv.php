@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\Livewire;
+use OpenSpout\Common\Entity\Row;
+use OpenSpout\Writer\XLSX\Writer as XlsxWriter;
 
 /**
  * Reusable CSV Export / Import header actions for any Filament grid, wired globally via
@@ -42,6 +44,7 @@ class GridCsv
         return [
             static::importAction()->extraAttributes(['class' => 'hidden']),
             static::exportAction()->extraAttributes(['class' => 'hidden']),
+            static::exportXlsxAction()->extraAttributes(['class' => 'hidden']),
         ];
     }
 
@@ -74,6 +77,9 @@ class GridCsv
                     <x-filament::dropdown.list.item icon="heroicon-m-arrow-down-tray" wire:click="mountTableAction('exportCsv')">
                         Export CSV
                     </x-filament::dropdown.list.item>
+                    <x-filament::dropdown.list.item icon="heroicon-m-table-cells" wire:click="mountTableAction('exportXlsx')">
+                        Export Excel (.xlsx)
+                    </x-filament::dropdown.list.item>
                 </x-filament::dropdown.list>
             </x-filament::dropdown>
         BLADE);
@@ -81,61 +87,110 @@ class GridCsv
 
     public static function exportAction(): Action
     {
-        return Action::make('exportCsv')
-            ->label('Export CSV')
+        return static::makeExportAction('exportCsv', 'Export CSV', 'csv');
+    }
+
+    public static function exportXlsxAction(): Action
+    {
+        return static::makeExportAction('exportXlsx', 'Export Excel', 'xlsx');
+    }
+
+    protected static function makeExportAction(string $name, string $label, string $format): Action
+    {
+        return Action::make($name)
+            ->label($label)
             ->icon('heroicon-o-arrow-down-tray')
             ->color('gray')
             ->visible(fn ($livewire): bool => static::eloquentQuery($livewire) !== null)
-            // Write the FILTERED query to a storage file and hand back a normal download link (in a toast
-            // and the notification bell). A Livewire action's streamDownload doesn't reliably reach the
-            // browser — spinner finishes, no file — so we deliver via a real GET route instead.
-            ->action(function ($livewire): void {
-                $query = static::eloquentQuery($livewire);
-                if (! $query) {
-                    Notification::make()->title('Export is not available for this view')->warning()->send();
+            ->action(fn ($livewire) => static::runExport($livewire, $format));
+    }
 
-                    return;
-                }
+    /**
+     * Write the FILTERED query to a storage file and hand back a real download link (a toast + the
+     * notification bell). A Livewire action's streamDownload doesn't reliably reach the browser, so we
+     * deliver via a normal GET route instead. Both formats stream row-by-row from a chunked query, so a
+     * large filtered export stays memory-safe.
+     */
+    protected static function runExport($livewire, string $format): void
+    {
+        $query = static::eloquentQuery($livewire);
+        if (! $query) {
+            Notification::make()->title('Export is not available for this view')->warning()->send();
 
-                $model = $query->getModel();
-                $columns = Schema::getColumnListing($model->getTable());
-                $key = $model->getKeyName();
-                $filename = class_basename($model).'_'.now()->format('Ymd_His').'_'.Str::random(6).'.csv';
+            return;
+        }
 
-                Storage::disk('local')->makeDirectory('exports');
-                $path = Storage::disk('local')->path('exports/'.$filename);
-                $out = fopen($path, 'w');
-                fputcsv($out, $columns);
-                $rowCount = 0;
-                $query->toBase()->orderBy($key)->chunk(1000, function ($rows) use ($out, $columns, &$rowCount): void {
-                    foreach ($rows as $row) {
-                        fputcsv($out, array_map(fn (string $c) => $row->{$c} ?? '', $columns));
-                        $rowCount++;
-                    }
-                });
-                fclose($out);
+        $model = $query->getModel();
+        $columns = Schema::getColumnListing($model->getTable());
+        $key = $model->getKeyName();
+        $ext = $format === 'xlsx' ? 'xlsx' : 'csv';
+        $filename = class_basename($model).'_'.now()->format('Ymd_His').'_'.Str::random(6).'.'.$ext;
 
-                $download = Action::make('download')
-                    ->label('Download CSV')
-                    ->url(route('grid-export.download', ['file' => $filename]));
+        Storage::disk('local')->makeDirectory('exports');
+        $path = Storage::disk('local')->path('exports/'.$filename);
 
-                // Toast now + the bell entry, both with the download link.
-                Notification::make()
-                    ->title('Export ready')
-                    ->body(number_format($rowCount).' row'.($rowCount === 1 ? '' : 's').' (current filters).')
-                    ->success()
-                    ->actions([$download])
-                    ->send();
+        $rowCount = $format === 'xlsx'
+            ? static::writeXlsx($query, $columns, $key, $path)
+            : static::writeCsv($query, $columns, $key, $path);
 
-                if ($user = Filament::auth()->user()) {
-                    Notification::make()
-                        ->title('Export ready')
-                        ->body(class_basename($model).' — '.number_format($rowCount).' rows.')
-                        ->success()
-                        ->actions([$download])
-                        ->sendToDatabase($user);
-                }
-            });
+        $download = Action::make('download')
+            ->label('Download '.strtoupper($ext))
+            ->url(route('grid-export.download', ['file' => $filename]));
+
+        Notification::make()
+            ->title('Export ready')
+            ->body(number_format($rowCount).' row'.($rowCount === 1 ? '' : 's').' (current filters).')
+            ->success()
+            ->actions([$download])
+            ->send();
+
+        if ($user = Filament::auth()->user()) {
+            Notification::make()
+                ->title('Export ready')
+                ->body(class_basename($model).' — '.number_format($rowCount).' rows.')
+                ->success()
+                ->actions([$download])
+                ->sendToDatabase($user);
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $columns
+     */
+    protected static function writeCsv(Builder $query, array $columns, string $key, string $path): int
+    {
+        $out = fopen($path, 'w');
+        fputcsv($out, $columns);
+        $count = 0;
+        $query->toBase()->orderBy($key)->chunk(1000, function ($rows) use ($out, $columns, &$count): void {
+            foreach ($rows as $row) {
+                fputcsv($out, array_map(fn (string $c) => $row->{$c} ?? '', $columns));
+                $count++;
+            }
+        });
+        fclose($out);
+
+        return $count;
+    }
+
+    /**
+     * @param  array<int, string>  $columns
+     */
+    protected static function writeXlsx(Builder $query, array $columns, string $key, string $path): int
+    {
+        $writer = new XlsxWriter;
+        $writer->openToFile($path);
+        $writer->addRow(Row::fromValues($columns));
+        $count = 0;
+        $query->toBase()->orderBy($key)->chunk(1000, function ($rows) use ($writer, $columns, &$count): void {
+            foreach ($rows as $row) {
+                $writer->addRow(Row::fromValues(array_map(fn (string $c) => $row->{$c} ?? '', $columns)));
+                $count++;
+            }
+        });
+        $writer->close();
+
+        return $count;
     }
 
     public static function importAction(): Action

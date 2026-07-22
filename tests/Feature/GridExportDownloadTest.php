@@ -39,3 +39,13 @@ test('the grid export route blocks guests', function () {
     // A guest must not receive the file, however the auth middleware chooses to deny it.
     expect($this->get(route('grid-export.download', ['file' => 'ok.csv']))->status())->not->toBe(200);
 });
+
+test('the grid export route also serves xlsx', function () {
+    Storage::fake('local');
+    $this->actingAs(User::factory()->create());
+    Storage::disk('local')->put('exports/report.xlsx', 'binary-xlsx-bytes');
+
+    $this->get(route('grid-export.download', ['file' => 'report.xlsx']))
+        ->assertOk()
+        ->assertDownload('report.xlsx');
+});

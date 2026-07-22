@@ -32,3 +32,17 @@ test('the global grid export works on a Resource list page (CarrierInvoices)', f
 
     expect(Storage::disk('local')->files('exports'))->toHaveCount(1);
 });
+
+test('the grid export can produce an XLSX (Excel) file', function () {
+    Storage::fake('local');
+    $this->actingAs(User::factory()->create());
+    ChargebackPush::create(['dedupe_key' => 'd', 'carrier_id' => 1, 'tracking_number' => 'T', 'amount' => 5, 'status' => 'pushed', 'activity_code' => '72510']);
+
+    Livewire::test(ChargebackPushes::class)
+        ->call('mountTableAction', 'exportXlsx')
+        ->assertNotified('Export ready');
+
+    $files = Storage::disk('local')->files('exports');
+    expect($files)->toHaveCount(1)
+        ->and($files[0])->toEndWith('.xlsx');
+});
