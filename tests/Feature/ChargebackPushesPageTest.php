@@ -85,3 +85,14 @@ test('a flagged duplicate can be marked reversed, clearing it from needs-reversa
         ->and($dup->reviewed_by_id)->not->toBeNull()
         ->and(ChargebackPushes::getNavigationBadge())->toBeNull(); // nothing awaits a human now
 });
+
+test('the ship-date range filters by when the shipment HAPPENED, not the import/created date', function () {
+    // Both rows were "imported" now (created_at = now), but their real ship dates differ.
+    $old = ChargebackPush::create(['dedupe_key' => 'old', 'carrier_id' => 1, 'tracking_number' => 'OLD', 'amount' => 5, 'status' => 'pushed', 'ship_date' => '2024-03-01']);
+    $recent = ChargebackPush::create(['dedupe_key' => 'new', 'carrier_id' => 1, 'tracking_number' => 'NEW', 'amount' => 5, 'status' => 'pushed', 'ship_date' => '2026-07-01']);
+
+    Livewire::test(ChargebackPushes::class)
+        ->filterTable('range_ship_date', ['from' => '2026-01-01'])
+        ->assertCanSeeTableRecords([$recent])
+        ->assertCanNotSeeTableRecords([$old]);
+});

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\CarrierInvoices\RelationManagers;
 
 use App\Filament\Support\ChargebackPushTable;
+use App\Filament\Support\DateRangeFilter;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -42,6 +43,7 @@ class ChargebackPushesRelationManager extends RelationManager
             ])
             ->filters([
                 ChargebackPushTable::viewFilter(),
+                DateRangeFilter::make('ship_date', 'Ship date'),
             ])
             ->recordActions(ChargebackPushTable::reviewActions())
             ->defaultSort('id', 'desc')

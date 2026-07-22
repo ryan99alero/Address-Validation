@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Support\ChargebackPushTable;
+use App\Filament\Support\DateRangeFilter;
 use App\Models\ChargebackPush;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -81,6 +82,7 @@ class ChargebackPushes extends Page implements HasTable
             ])
             ->filters([
                 ChargebackPushTable::viewFilter(),
+                DateRangeFilter::make('ship_date', 'Ship date'),
             ])
             ->recordActions(ChargebackPushTable::reviewActions())
             ->headerActions([
@@ -100,10 +102,13 @@ class ChargebackPushes extends Page implements HasTable
             'amount', 'ship_date', 'pace_job', 'pace_job_part', 'pace_customer_id', 'pace_jobcost_id',
             'pushed_at', 'attempts', 'last_error', 'notes'];
 
-        return response()->streamDownload(function () use ($columns): void {
+        // Export exactly what's on screen: the current filters (View, ship-date range) + sort apply.
+        $query = $this->getFilteredSortedTableQuery();
+
+        return response()->streamDownload(function () use ($columns, $query): void {
             $out = fopen('php://output', 'w');
             fputcsv($out, $columns);
-            ChargebackPush::query()->orderByDesc('id')->chunk(500, function ($rows) use ($out, $columns): void {
+            $query->chunk(500, function ($rows) use ($out, $columns): void {
                 foreach ($rows as $row) {
                     fputcsv($out, array_map(fn (string $c) => (string) $row->{$c}, $columns));
                 }
