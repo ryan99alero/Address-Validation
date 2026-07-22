@@ -22,8 +22,7 @@ test('the chargeback pushes page lists ledger rows with the JobCost id', functio
         ->assertOk()
         ->assertSee('1ZTEST')
         ->assertSee('72510')
-        ->assertSee('555')          // the returned JobCost id
-        ->assertTableActionExists('export');
+        ->assertSee('555');         // the returned JobCost id (export is the global 2-arrows action now)
 });
 
 test('a flagged duplicate is countable in the nav badge and isolable by filter', function () {

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\CarrierInvoices\Tables;
 
 use App\Filament\Resources\CarrierInvoices\CarrierInvoiceResource;
+use App\Filament\Support\DateRangeFilter;
 use App\Models\Carrier;
 use App\Models\CarrierInvoice;
 use Filament\Actions\BulkActionGroup;
@@ -99,6 +100,7 @@ class CarrierInvoicesTable
                         'na' => $query->whereNull('charges_reconciled'),
                         default => $query,
                     }),
+                DateRangeFilter::make('invoice_date', 'Invoice date'),
             ])
             ->recordActions([
                 ViewAction::make()

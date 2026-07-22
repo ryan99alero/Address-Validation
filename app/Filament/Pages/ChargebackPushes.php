@@ -6,14 +6,12 @@ use App\Filament\Support\ChargebackPushTable;
 use App\Filament\Support\DateRangeFilter;
 use App\Models\ChargebackPush;
 use BackedEnum;
-use Filament\Actions\Action;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 use UnitEnum;
 
 /**
@@ -85,35 +83,9 @@ class ChargebackPushes extends Page implements HasTable
                 DateRangeFilter::make('ship_date', 'Ship date'),
             ])
             ->recordActions(ChargebackPushTable::reviewActions())
-            ->headerActions([
-                Action::make('export')
-                    ->label('Export CSV')
-                    ->icon(Heroicon::OutlinedArrowDownTray)
-                    ->action(fn (): StreamedResponse => $this->exportCsv()),
-            ])
+            // Export is the global Import/Export (2-arrows) button, which already streams only the
+            // filtered query — no separate whole-table "Export CSV" here.
             ->defaultSort('id', 'desc')
             ->paginated([50, 100, 'all']);
-    }
-
-    private function exportCsv(): StreamedResponse
-    {
-        $columns = ['id', 'txn_id', 'status', 'reversal_state', 'duplicate_of_id', 'carrier_id',
-            'carrier_invoice_id', 'tracking_number', 'driver', 'charge_category_id', 'activity_code',
-            'amount', 'ship_date', 'pace_job', 'pace_job_part', 'pace_customer_id', 'pace_jobcost_id',
-            'pushed_at', 'attempts', 'last_error', 'notes'];
-
-        // Export exactly what's on screen: the current filters (View, ship-date range) + sort apply.
-        $query = $this->getFilteredSortedTableQuery();
-
-        return response()->streamDownload(function () use ($columns, $query): void {
-            $out = fopen('php://output', 'w');
-            fputcsv($out, $columns);
-            $query->chunk(500, function ($rows) use ($out, $columns): void {
-                foreach ($rows as $row) {
-                    fputcsv($out, array_map(fn (string $c) => (string) $row->{$c}, $columns));
-                }
-            });
-            fclose($out);
-        }, 'chargeback-pushes-'.now()->format('Ymd-His').'.csv');
     }
 }
