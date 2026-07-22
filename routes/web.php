@@ -70,3 +70,14 @@ Route::get('/batch-processing/download/{batch}', function (ImportBatch $batch) {
 
     return response()->download($filePath);
 })->middleware(['auth'])->name('filament.admin.pages.batch-processing.download');
+
+// Generic grid CSV export download — files written by GridCsv into storage/app/exports. A normal GET
+// (not a Livewire streamDownload) so the browser reliably downloads; deleted after send.
+Route::get('/exports/grid/{file}', function (string $file) {
+    $name = basename($file); // strip any path traversal
+    abort_unless(str_ends_with($name, '.csv'), 404);
+    $path = Storage::disk('local')->path('exports/'.$name);
+    abort_unless(is_file($path), 404, 'Export not found or already downloaded');
+
+    return response()->download($path)->deleteFileAfterSend();
+})->middleware(['auth'])->name('grid-export.download');

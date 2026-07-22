@@ -3,14 +3,17 @@
 namespace App\Filament\Support;
 
 use Filament\Actions\Action;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\FileUpload;
+use Filament\Notifications\Actions\Action as NotificationAction;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\Livewire;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Reusable CSV Export / Import header actions for any Filament grid, wired globally via
@@ -80,29 +83,56 @@ class GridCsv
             ->icon('heroicon-o-arrow-down-tray')
             ->color('gray')
             ->visible(fn ($livewire): bool => static::eloquentQuery($livewire) !== null)
-            ->action(function ($livewire): ?StreamedResponse {
+            // Write the FILTERED query to a storage file and hand back a normal download link (in a toast
+            // and the notification bell). A Livewire action's streamDownload doesn't reliably reach the
+            // browser — spinner finishes, no file — so we deliver via a real GET route instead.
+            ->action(function ($livewire): void {
                 $query = static::eloquentQuery($livewire);
                 if (! $query) {
                     Notification::make()->title('Export is not available for this view')->warning()->send();
 
-                    return null;
+                    return;
                 }
 
                 $model = $query->getModel();
                 $columns = Schema::getColumnListing($model->getTable());
                 $key = $model->getKeyName();
-                $filename = class_basename($model).'_'.now()->format('Ymd_His').'.csv';
+                $filename = class_basename($model).'_'.now()->format('Ymd_His').'_'.Str::random(6).'.csv';
 
-                return response()->streamDownload(function () use ($query, $columns, $key): void {
-                    $out = fopen('php://output', 'w');
-                    fputcsv($out, $columns);
-                    $query->toBase()->orderBy($key)->chunk(1000, function ($rows) use ($out, $columns): void {
-                        foreach ($rows as $row) {
-                            fputcsv($out, array_map(fn (string $c) => $row->{$c} ?? '', $columns));
-                        }
-                    });
-                    fclose($out);
-                }, $filename, ['Content-Type' => 'text/csv']);
+                Storage::disk('local')->makeDirectory('exports');
+                $path = Storage::disk('local')->path('exports/'.$filename);
+                $out = fopen($path, 'w');
+                fputcsv($out, $columns);
+                $rowCount = 0;
+                $query->toBase()->orderBy($key)->chunk(1000, function ($rows) use ($out, $columns, &$rowCount): void {
+                    foreach ($rows as $row) {
+                        fputcsv($out, array_map(fn (string $c) => $row->{$c} ?? '', $columns));
+                        $rowCount++;
+                    }
+                });
+                fclose($out);
+
+                $download = NotificationAction::make('download')
+                    ->label('Download CSV')
+                    ->url(route('grid-export.download', ['file' => $filename]))
+                    ->markAsRead();
+
+                // Toast now + the bell entry, both with the download link.
+                Notification::make()
+                    ->title('Export ready')
+                    ->body(number_format($rowCount).' row'.($rowCount === 1 ? '' : 's').' (current filters).')
+                    ->success()
+                    ->actions([$download])
+                    ->send();
+
+                if ($user = Filament::auth()->user()) {
+                    Notification::make()
+                        ->title('Export ready')
+                        ->body(class_basename($model).' — '.number_format($rowCount).' rows.')
+                        ->success()
+                        ->actions([$download])
+                        ->sendToDatabase($user);
+                }
             });
     }
 
