@@ -5,7 +5,6 @@ namespace App\Filament\Support;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\FileUpload;
-use Filament\Notifications\Actions\Action as NotificationAction;
 use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Blade;
@@ -36,9 +35,13 @@ class GridCsv
      */
     public static function registeredActions(): array
     {
+        // CSS-hidden (NOT ->hidden()): Filament v5 will not RESOLVE a ->hidden() action for mounting,
+        // so mountTableAction('exportCsv') from the ⇄ dropdown silently no-ops. extraAttributes keeps
+        // the action fully mountable while the button itself is display:none (the visible trigger is the
+        // dropdown rendered by renderTrigger()).
         return [
-            static::importAction()->hidden(),
-            static::exportAction()->hidden(),
+            static::importAction()->extraAttributes(['class' => 'hidden']),
+            static::exportAction()->extraAttributes(['class' => 'hidden']),
         ];
     }
 
@@ -112,10 +115,9 @@ class GridCsv
                 });
                 fclose($out);
 
-                $download = NotificationAction::make('download')
+                $download = Action::make('download')
                     ->label('Download CSV')
-                    ->url(route('grid-export.download', ['file' => $filename]))
-                    ->markAsRead();
+                    ->url(route('grid-export.download', ['file' => $filename]));
 
                 // Toast now + the bell entry, both with the download link.
                 Notification::make()
@@ -206,10 +208,17 @@ class GridCsv
 
     /**
      * The table's filtered Eloquent query, or null for collection-backed / non-Eloquent tables.
+     * Filament v5 does NOT inject the Livewire component into a HIDDEN action's closure (the passed
+     * $livewire is null when the export runs via mountTableAction), so fall back to Livewire::current()
+     * — the component currently handling the request — exactly as renderTrigger() already does.
      */
-    protected static function eloquentQuery($livewire): ?Builder
+    protected static function eloquentQuery($livewire = null): ?Builder
     {
-        if (! method_exists($livewire, 'getFilteredTableQuery')) {
+        if (! is_object($livewire) || ! method_exists($livewire, 'getFilteredTableQuery')) {
+            $livewire = Livewire::current();
+        }
+
+        if (! is_object($livewire) || ! method_exists($livewire, 'getFilteredTableQuery')) {
             return null;
         }
 
