@@ -102,4 +102,21 @@ class FolderIntegration extends Model
     {
         $this->update(['last_checked_at' => now(), 'last_status' => $status, 'last_error' => $error]);
     }
+
+    /**
+     * Is this folder due for an automatic scan per its poll frequency? Mirrors
+     * MailIntegration::isDueForPoll(), but keys off last_checked_at — which markChecked()
+     * stamps the moment enumeration finishes (before the chunk jobs run), so a scan already
+     * in flight is not re-dispatched by the next scheduler tick. A folder that has never been
+     * scanned is due immediately.
+     */
+    public function isDueForPoll(): bool
+    {
+        if (! $this->is_active || empty($this->poll_minutes)) {
+            return false;
+        }
+
+        return $this->last_checked_at === null
+            || $this->last_checked_at->addMinutes($this->poll_minutes)->isPast();
+    }
 }

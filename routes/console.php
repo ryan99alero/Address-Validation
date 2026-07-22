@@ -37,6 +37,15 @@ Schedule::command('mail:process-invoices --due')
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/mail-invoices.log'));
 
+// Poll carrier invoice SMB/local folders; like mail, each integration is gated by its own
+// Check Frequency (poll_minutes), so this 15-minute tick is just the granularity — a folder set
+// to "every 12 hours" scans within ~15 min of becoming due instead of only once a day.
+Schedule::command('folders:process --due')
+    ->everyFifteenMinutes()
+    ->name('folder-invoice-polling')
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/folder-invoices.log'));
+
 // Purge Pace address-correction audit logs older than the configured retention
 // (Company Setup → Retention days). 0 = keep forever.
 Schedule::call(function () {

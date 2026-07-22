@@ -26,6 +26,21 @@ class FolderIntegrationsTable
                 IconColumn::make('is_active')->label('Active')->boolean(),
                 TextColumn::make('connection_type')->label('Type')->badge(),
                 TextColumn::make('base_path')->label('Path')->limit(50)->wrap(),
+                TextColumn::make('poll_minutes')
+                    ->label('Frequency')
+                    ->badge()
+                    ->color('gray')
+                    ->formatStateUsing(fn (?int $state): string => match (true) {
+                        empty($state) => 'Manual only',
+                        $state % 1440 === 0 => 'Every '.($state / 1440).' day(s)',
+                        $state % 60 === 0 => 'Every '.($state / 60).' hr(s)',
+                        default => "Every {$state} min",
+                    }),
+                TextColumn::make('last_checked_at')
+                    ->label('Last Checked')
+                    ->since()
+                    ->placeholder('Never')
+                    ->tooltip('When the folder was last scanned for new files (runs on the Frequency above). Differs from "Last Run", which only moves when a new invoice is actually imported.'),
                 TextColumn::make('last_processed_at')->label('Last Run')->since()->placeholder('Never'),
             ])
             ->recordActions([
