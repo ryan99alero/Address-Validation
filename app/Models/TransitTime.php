@@ -123,6 +123,11 @@ class TransitTime extends Model
             $min = $this->convertTransitTimeToNumber($this->minimum_transit_time);
             $max = $this->convertTransitTimeToNumber($this->maximum_transit_time);
 
+            // A carrier-provided 0 (UPS totalTransitDays: 0) is "not provided" — collapse it to the
+            // other bound so we never render a nonsense range like "3-0 Days".
+            $max = $max ?: $min;
+            $min = $min ?: $max;
+
             if ($min === $max) {
                 return "{$min} ".($min === 1 ? 'Day' : 'Days');
             }
@@ -163,8 +168,11 @@ class TransitTime extends Model
                 return "{$min}-{$max}";
             }
 
-            // Otherwise return whichever we have
-            $days = $max ?? $min;
+            // Otherwise return whichever we have. Use ?: (not ??) so a carrier-provided 0 — e.g.
+            // UPS returns totalTransitDays: 0 alongside a real businessTransitDays: 3 — falls back
+            // to the other value instead of being treated as a real "0 days" and dropping through
+            // to the far-less-reliable delivery_date loop (which caps at 365). Mirrors transitBusinessDays().
+            $days = $max ?: $min;
             if ($days && $days > 0) {
                 return (string) $days;
             }

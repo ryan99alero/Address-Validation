@@ -389,8 +389,10 @@ class UpsTimeInTransitService
      */
     protected function formatTransitDays(array $service): string
     {
-        $businessDays = $service['businessTransitDays'] ?? null;
-        $totalDays = $service['totalTransitDays'] ?? null;
+        // A carrier-provided 0 (UPS sends totalTransitDays: 0 when it only means businessTransitDays)
+        // is "not provided", not a real zero — normalize it away so it never reaches the description.
+        $businessDays = ((int) ($service['businessTransitDays'] ?? 0)) ?: null;
+        $totalDays = ((int) ($service['totalTransitDays'] ?? 0)) ?: null;
 
         if ($businessDays !== null && $totalDays !== null && $businessDays !== $totalDays) {
             return "{$businessDays} Business Days ({$totalDays} Total)";
@@ -408,7 +410,10 @@ class UpsTimeInTransitService
      */
     protected function mapDaysToEnum(?int $days): ?string
     {
-        if ($days === null) {
+        // UPS routinely returns totalTransitDays: 0 (unpopulated) next to a real businessTransitDays.
+        // Treat anything below 1 as "not provided" so maximum_transit_time is null rather than a
+        // bogus "0_DAYS" that later reads as a real zero.
+        if ($days === null || $days < 1) {
             return null;
         }
 
