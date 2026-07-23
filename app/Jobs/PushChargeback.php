@@ -126,7 +126,10 @@ class PushChargeback implements ShouldQueue
             'activityCode' => (string) $c['activity_code'], 'amount' => (float) $c['amount'],
             'tracking' => (string) $c['tracking_number'], 'notes' => $notes, 'txnId' => $txnId,
         ]);
-        $ledger->update(['notes' => $notes, 'pace_job' => $shipment['job'] ?? null, 'pace_job_part' => $jobPart, 'pace_customer_id' => $shipment['customer'] ?? null]);
+        $ledger->update(array_merge(
+            ['notes' => $notes, 'pace_job' => $shipment['job'] ?? null, 'pace_job_part' => $jobPart],
+            ChargebackPusher::enrichmentFrom($shipment),
+        ));
 
         try {
             $result = $client->createObject('JobCost', $payload);
@@ -177,9 +180,13 @@ class PushChargeback implements ShouldQueue
         // one (older recycles are closed/locked).
         $chargeable = array_values(array_filter($shipments, fn (array $s): bool => ($s['jobChargesOK'] ?? null) === true));
         if ($chargeable === []) {
-            // No billable job (closed, or open but jobChargesOK=false) → skipped_job_closed.
-            // Record the job number(s) so the skip is diagnosable in the ledger without a Pace lookup.
-            $ledger->update(['status' => ChargebackPush::STATUS_SKIPPED_JOB_CLOSED, 'pace_job' => $this->jobList($shipments)]);
+            // No billable job (closed, or open but jobChargesOK=false) → skipped_job_closed. Record the
+            // job number(s) AND the customer/CSR/salesperson so this closed-job charge can be downloaded
+            // and sent to the responsible reps without any further Pace lookup.
+            $ledger->update(array_merge(
+                ['status' => ChargebackPush::STATUS_SKIPPED_JOB_CLOSED, 'pace_job' => $this->jobList($shipments)],
+                ChargebackPusher::enrichmentFrom(ChargebackPusher::repShipment($shipments) ?? []),
+            ));
 
             return null;
         }
@@ -194,7 +201,10 @@ class PushChargeback implements ShouldQueue
             return $matched[0];
         }
 
-        $ledger->update(['status' => ChargebackPush::STATUS_SKIPPED_AMBIGUOUS, 'pace_job' => $this->jobList($chargeable)]);
+        $ledger->update(array_merge(
+            ['status' => ChargebackPush::STATUS_SKIPPED_AMBIGUOUS, 'pace_job' => $this->jobList($chargeable)],
+            ChargebackPusher::enrichmentFrom(ChargebackPusher::repShipment($chargeable) ?? []),
+        ));
 
         return null;
     }

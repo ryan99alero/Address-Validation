@@ -50,16 +50,41 @@ test('lookupJobShipments queries the CARTON object and traverses shipment -> job
         ->and($client->lastCall['xpathFilter'])->toBe("@trackingNumber = 'O''Brien-123'")
         ->and($client->lastCall['limit'])->toBe(25);
 
-    // Every field the caller consumes is traversed from Carton -> shipment -> job.
+    // Every field the caller consumes is traversed from Carton -> shipment -> job, including the
+    // customer/CSR/salesperson names resolved in this same query (verified working against Pace).
     $byName = collect($client->lastCall['fields'])->keyBy('name')->map(fn ($f) => $f['xpath']);
     expect($byName['job'])->toBe('shipment/job/@job')
         ->and($byName['jobChargesOK'])->toBe('shipment/job/adminStatus/@jobChargesOK')
         ->and($byName['openJob'])->toBe('shipment/job/adminStatus/@openJob')
         ->and($byName['customer'])->toBe('shipment/job/@customer')
+        ->and($byName['customerName'])->toBe('shipment/job/customer/@custName')
+        ->and($byName['csrName'])->toBe('shipment/job/csr/@name')
+        ->and($byName['salespersonName'])->toBe('shipment/job/salesPerson/@name')
         ->and($byName['jobPart'])->toBe('shipment/@jobPart');
 
     // Return shape is preserved for resolveShipment (object-agnostic keys).
     expect($rows)->toBe([['job' => 'M244674', 'jobChargesOK' => true, 'jobPart' => '01']]);
+});
+
+test('enrichmentFrom + repShipment extract the ledger name columns from a resolved shipment', function () {
+    // repShipment prefers the billable row; here the closed recycle is the only one, so it's used —
+    // a closed-job charge still needs its customer/CSR/salesperson for the "couldn't bill" download.
+    $shipments = [
+        ['job' => 'J-OLD', 'jobChargesOK' => false, 'customer' => '3035', 'customerName' => 'KUBOTA - SOURCING GROUP', 'csrName' => 'HEATHER', 'salespersonName' => 'RANDALL V'],
+    ];
+
+    $rep = ChargebackPusher::repShipment($shipments);
+    expect(ChargebackPusher::enrichmentFrom($rep))->toBe([
+        'pace_customer_id' => '3035',
+        'pace_customer_name' => 'KUBOTA - SOURCING GROUP',
+        'pace_csr_name' => 'HEATHER',
+        'pace_salesperson_name' => 'RANDALL V',
+    ]);
+
+    // Empty strings (Pace's unset-name sentinel) collapse to null.
+    expect(ChargebackPusher::enrichmentFrom(['customer' => '', 'csrName' => '']))->toBe([
+        'pace_customer_id' => null, 'pace_customer_name' => null, 'pace_csr_name' => null, 'pace_salesperson_name' => null,
+    ]);
 });
 
 test('an IntegrationConnection is not required to build the recording double', function () {

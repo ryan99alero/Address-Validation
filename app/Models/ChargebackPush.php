@@ -46,7 +46,8 @@ class ChargebackPush extends Model
     protected $fillable = [
         'txn_id', 'identity_version', 'dedupe_key', 'duplicate_of_id', 'conflict_with_id', 'conflict_reason',
         'carrier_charge_id', 'carrier_id', 'carrier_invoice_id', 'tracking_number', 'charge_category_id',
-        'driver', 'amount', 'ship_date', 'pace_job', 'pace_job_part', 'pace_customer_id', 'activity_code',
+        'driver', 'amount', 'ship_date', 'pace_job', 'pace_job_part', 'pace_customer_id',
+        'pace_customer_name', 'pace_csr_name', 'pace_salesperson_name', 'activity_code',
         'notes', 'pace_jobcost_id', 'response_snapshot', 'status', 'reversal_state', 'reviewed_by_id',
         'reviewed_at', 'review_note', 'attempts', 'last_error', 'pushed_at',
     ];

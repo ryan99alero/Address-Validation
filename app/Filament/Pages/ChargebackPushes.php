@@ -71,7 +71,8 @@ class ChargebackPushes extends Page implements HasTable
                 TextColumn::make('amount')->money('USD')->sortable()->alignEnd(),
                 ...ChargebackPushTable::flagColumns(),
                 TextColumn::make('pace_job')->label('Job')->searchable(),
-                TextColumn::make('pace_customer_id')->label('Customer')->toggleable(),
+                ...ChargebackPushTable::repColumns(),
+                TextColumn::make('pace_customer_id')->label('Customer #')->searchable()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('pace_jobcost_id')->label('JobCost ID')->fontFamily('mono')->placeholder('—')->searchable(),
                 TextColumn::make('pushed_at')->dateTime()->sortable()->placeholder('—'),
                 TextColumn::make('last_error')->label('Error')->limit(60)->color('danger')->toggleable(isToggledHiddenByDefault: true)

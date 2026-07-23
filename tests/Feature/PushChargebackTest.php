@@ -81,3 +81,24 @@ test('an OPEN job with jobChargesOK=false is skipped, not billed (gate is jobCha
         // The job number is stamped on the skip so it's diagnosable without a Pace lookup.
         ->and($row->pace_job)->toBe('J1');
 });
+
+test('a closed-job skip stamps customer/CSR/salesperson so it can be sent to the reps', function () {
+    $pusher = Mockery::mock(ChargebackPusher::class);
+    $pusher->shouldReceive('activeConnection')->andReturn(new IntegrationConnection(['driver' => 'pace']));
+    $pusher->shouldReceive('pushEnabled')->andReturnTrue();
+    // Closed job (not billable), but Pace returned the responsible customer/CSR/salesperson in the
+    // same Carton lookup — these must land on the ledger for the "couldn't bill" download.
+    $pusher->shouldReceive('lookupJobShipments')->andReturn([
+        ['job' => 'J1', 'jobPart' => '01', 'jobChargesOK' => false, 'customer' => '3035',
+            'customerName' => 'KUBOTA - SOURCING GROUP', 'csrName' => 'HEATHER', 'salespersonName' => 'RANDALL V'],
+    ]);
+
+    (new PushChargeback(pcCharge()))->handle($pusher);
+
+    $row = ChargebackPush::where('dedupe_key', ChargebackPush::dedupeKey(1, 'X1', 1, 20.20, null))->first();
+    expect($row->status)->toBe(ChargebackPush::STATUS_SKIPPED_JOB_CLOSED)
+        ->and($row->pace_customer_id)->toBe('3035')
+        ->and($row->pace_customer_name)->toBe('KUBOTA - SOURCING GROUP')
+        ->and($row->pace_csr_name)->toBe('HEATHER')
+        ->and($row->pace_salesperson_name)->toBe('RANDALL V');
+});

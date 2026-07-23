@@ -69,6 +69,22 @@ class ChargebackPushTable
     }
 
     /**
+     * Customer / CSR / Sales Rep, resolved from the Pace job in the same Carton lookup. Searchable so a
+     * CSR or salesperson can filter the ledger to just their charges — above all the closed-job ones
+     * (couldn't bill) they need to chase. Shared so both chargeback views show the same set.
+     *
+     * @return array<int, TextColumn>
+     */
+    public static function repColumns(): array
+    {
+        return [
+            TextColumn::make('pace_customer_name')->label('Customer')->searchable()->placeholder('—')->wrap(),
+            TextColumn::make('pace_csr_name')->label('CSR')->searchable()->placeholder('—'),
+            TextColumn::make('pace_salesperson_name')->label('Sales Rep')->searchable()->placeholder('—'),
+        ];
+    }
+
+    /**
      * Per-row handling. Quarantined near-dupes get Push-anyway / Dismiss; flagged Duplicates get
      * Mark-reversed (backed out in Pace by hand) / Not-a-duplicate (false positive). Each stamps the
      * reviewer so the decision is auditable.

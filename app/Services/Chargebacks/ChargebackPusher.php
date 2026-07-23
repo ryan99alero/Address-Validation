@@ -63,6 +63,11 @@ class ChargebackPusher
             ['name' => 'job', 'xpath' => 'shipment/job/@job'],
             ['name' => 'jobPart', 'xpath' => 'shipment/@jobPart'],
             ['name' => 'customer', 'xpath' => 'shipment/job/@customer'],
+            // Customer/CSR/salesperson NAMES traverse the job's FKs in this same query (verified against
+            // Pace) — no extra ReadObject call. Fuels the closed-job "who to bill" download.
+            ['name' => 'customerName', 'xpath' => 'shipment/job/customer/@custName'],
+            ['name' => 'csrName', 'xpath' => 'shipment/job/csr/@name'],
+            ['name' => 'salespersonName', 'xpath' => 'shipment/job/salesPerson/@name'],
             ['name' => 'shipDate', 'xpath' => '@actualDate'],
             ['name' => 'openJob', 'xpath' => 'shipment/job/adminStatus/@openJob'],
             ['name' => 'jobChargesOK', 'xpath' => 'shipment/job/adminStatus/@jobChargesOK'],
@@ -110,6 +115,44 @@ class ChargebackPusher
         }));
 
         return $near !== [] ? $near : $rows;
+    }
+
+    /**
+     * Pick the representative shipment for stamping customer/CSR/salesperson onto the ledger: the
+     * billable one if any (jobChargesOK = true), else the first row — a closed/ambiguous recycle is
+     * still the right party to notify about an unbillable charge. Null for an empty set.
+     *
+     * @param  array<int, array<string, mixed>>  $shipments
+     * @return array<string, mixed>|null
+     */
+    public static function repShipment(array $shipments): ?array
+    {
+        foreach ($shipments as $shipment) {
+            if (($shipment['jobChargesOK'] ?? null) === true) {
+                return $shipment;
+            }
+        }
+
+        return $shipments[0] ?? null;
+    }
+
+    /**
+     * The customer/CSR/salesperson ledger columns pulled from a resolved Carton->job shipment. Pace
+     * returns '' for an unset name, so empties are normalized to null.
+     *
+     * @param  array<string, mixed>  $shipment
+     * @return array{pace_customer_id: ?string, pace_customer_name: ?string, pace_csr_name: ?string, pace_salesperson_name: ?string}
+     */
+    public static function enrichmentFrom(array $shipment): array
+    {
+        $clean = fn ($value): ?string => ($value = trim((string) ($value ?? ''))) !== '' ? $value : null;
+
+        return [
+            'pace_customer_id' => $clean($shipment['customer'] ?? null),
+            'pace_customer_name' => $clean($shipment['customerName'] ?? null),
+            'pace_csr_name' => $clean($shipment['csrName'] ?? null),
+            'pace_salesperson_name' => $clean($shipment['salespersonName'] ?? null),
+        ];
     }
 
     /**
