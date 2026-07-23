@@ -12,7 +12,7 @@ beforeEach(function () {
     ChargebackPush::create([
         'dedupe_key' => 'k1', 'carrier_id' => 1, 'tracking_number' => '1ZTEST', 'driver' => 'address_correction',
         'amount' => 20.20, 'activity_code' => '72510', 'pace_job' => 'JOB1', 'pace_jobcost_id' => '555',
-        'status' => 'pushed', 'pushed_at' => now(),
+        'pace_customer_id' => '3035', 'status' => 'pushed', 'pushed_at' => now(),
     ]);
     $this->actingAs(User::factory()->create());
 });
@@ -22,7 +22,8 @@ test('the chargeback pushes page lists ledger rows with the JobCost id', functio
         ->assertOk()
         ->assertSee('1ZTEST')
         ->assertSee('72510')
-        ->assertSee('555');         // the returned JobCost id (export is the global 2-arrows action now)
+        ->assertSee('555')          // the returned JobCost id (export is the global 2-arrows action now)
+        ->assertSee('3035');        // Customer ID column is visible by default (not toggled-hidden)
 });
 
 test('a flagged duplicate is countable in the nav badge and isolable by filter', function () {
