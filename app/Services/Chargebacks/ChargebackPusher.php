@@ -31,6 +31,16 @@ class ChargebackPusher
         return (bool) ($connection?->chargeback_push_enabled);
     }
 
+    /**
+     * Record-only: resolve + write every ledger row but never create a Pace JobCost. Used to
+     * re-import and rebuild the chargeback records (job/customer/CSR/salesperson) for the billing
+     * export without any external ERP write.
+     */
+    public function recordOnly(?IntegrationConnection $connection): bool
+    {
+        return (bool) ($connection?->chargeback_record_only);
+    }
+
     /** activityCode recorded = the Fee Category's cost center, falling back to the driver's. */
     public function resolveActivityCode(?string $categoryCostCenter, ?string $driverCostCenter): ?string
     {

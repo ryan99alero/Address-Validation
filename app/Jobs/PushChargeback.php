@@ -131,6 +131,15 @@ class PushChargeback implements ShouldQueue
             ChargebackPusher::enrichmentFrom($shipment),
         ));
 
+        // Record-only: the job resolved and is billable, but we deliberately do NOT create a Pace
+        // JobCost — the full record (job/customer/CSR/salesperson) is written for the billing export
+        // and nothing is posted to the ERP.
+        if ($pusher->recordOnly($connection)) {
+            $ledger->update(['status' => ChargebackPush::STATUS_RECORDED]);
+
+            return;
+        }
+
         try {
             $result = $client->createObject('JobCost', $payload);
         } catch (PaceRequestException $e) {

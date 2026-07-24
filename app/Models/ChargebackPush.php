@@ -27,6 +27,8 @@ class ChargebackPush extends Model
 
     public const STATUS_SKIPPED_CREDIT = 'skipped_credit';
 
+    public const STATUS_RECORDED = 'recorded';         // resolved + billable, but record-only mode: written, not pushed
+
     public const STATUS_REVERSED = 'reversed';
 
     public const STATUS_QUARANTINED = 'quarantined';   // same shipment+invoice, different amount/category — needs a human

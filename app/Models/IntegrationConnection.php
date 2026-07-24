@@ -38,6 +38,7 @@ class IntegrationConnection extends Model
         'validation_carriers',
         'dry_run',
         'chargeback_push_enabled',
+        'chargeback_record_only',
         'is_active',
         'last_connected_at',
         'last_error_at',
@@ -69,6 +70,7 @@ class IntegrationConnection extends Model
             'validation_carriers' => 'array',
             'dry_run' => 'boolean',
             'chargeback_push_enabled' => 'boolean',
+            'chargeback_record_only' => 'boolean',
             'sync_interval_minutes' => 'integer',
             'last_synced_at' => 'datetime',
         ];

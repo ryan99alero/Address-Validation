@@ -82,6 +82,31 @@ test('an OPEN job with jobChargesOK=false is skipped, not billed (gate is jobCha
         ->and($row->pace_job)->toBe('J1');
 });
 
+test('record-only mode writes the full record but never posts a JobCost to Pace', function () {
+    $pusher = Mockery::mock(ChargebackPusher::class);
+    $pusher->shouldReceive('activeConnection')->andReturn(new IntegrationConnection(['driver' => 'pace']));
+    $pusher->shouldReceive('pushEnabled')->andReturnTrue();
+    $pusher->shouldReceive('recordOnly')->andReturnTrue();   // record-only ON
+    $pusher->shouldReceive('buildNotes')->andReturn('[CB:x] note');
+    $pusher->shouldReceive('buildJobCostPayload')->andReturn(['job' => 'J9']);
+    // A BILLABLE job (jobChargesOK=true) that would normally push — record-only must resolve + record it
+    // WITHOUT any Pace write. enrichmentFrom/repShipment are static, so they run for real.
+    $pusher->shouldReceive('lookupJobShipments')->andReturn([
+        ['job' => 'J9', 'jobPart' => '01', 'jobChargesOK' => true, 'customer' => '3035',
+            'customerName' => 'KUBOTA', 'csrName' => 'HEATHER', 'salespersonName' => 'RANDALL V'],
+    ]);
+
+    (new PushChargeback(pcCharge()))->handle($pusher);
+
+    $row = ChargebackPush::where('dedupe_key', ChargebackPush::dedupeKey(1, 'X1', 1, 20.20, null))->first();
+    expect($row->status)->toBe(ChargebackPush::STATUS_RECORDED)
+        ->and($row->pace_jobcost_id)->toBeNull()          // nothing posted to Pace
+        ->and($row->pace_job)->toBe('J9')
+        ->and($row->pace_customer_name)->toBe('KUBOTA')
+        ->and($row->pace_csr_name)->toBe('HEATHER')
+        ->and($row->pace_salesperson_name)->toBe('RANDALL V');
+});
+
 test('a closed-job skip stamps customer/CSR/salesperson so it can be sent to the reps', function () {
     $pusher = Mockery::mock(ChargebackPusher::class);
     $pusher->shouldReceive('activeConnection')->andReturn(new IntegrationConnection(['driver' => 'pace']));
