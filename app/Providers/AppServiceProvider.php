@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Filament\Support\GridCsv;
+use App\Filament\Support\ScopedSearchDropdown;
 use App\Listeners\SpawnWorkerOnJobQueued;
 use App\Models\IntegrationConnection;
 use Carbon\CarbonImmutable;
@@ -50,6 +51,13 @@ class AppServiceProvider extends ServiceProvider
         FilamentView::registerRenderHook(
             TablesRenderHook::TOOLBAR_END,
             fn (): string => GridCsv::renderTrigger(),
+        );
+
+        // "Search in: [ All fields ▾ ]" scope selector, inline right after the search box. Renders
+        // only on tables whose component uses the ScopedTableSearch trait.
+        FilamentView::registerRenderHook(
+            TablesRenderHook::TOOLBAR_SEARCH_AFTER,
+            fn (): string => ScopedSearchDropdown::render(),
         );
     }
 

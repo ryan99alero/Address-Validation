@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CarrierCharges\Pages;
 
+use App\Filament\Concerns\ScopedTableSearch;
 use App\Filament\Pages\CarrierChargeCatalog;
 use App\Filament\Resources\CarrierCharges\CarrierChargeResource;
 use Filament\Actions\Action;
@@ -12,7 +13,14 @@ use Illuminate\Database\Eloquent\Builder;
 
 class ListCarrierCharges extends ListRecords
 {
+    use ScopedTableSearch;
+
     protected static string $resource = CarrierChargeResource::class;
+
+    protected function applyGlobalSearchToTableQuery(Builder $query): Builder
+    {
+        return $this->applyScopedColumnSearch($query) ?? parent::applyGlobalSearchToTableQuery($query);
+    }
 
     protected function getHeaderActions(): array
     {

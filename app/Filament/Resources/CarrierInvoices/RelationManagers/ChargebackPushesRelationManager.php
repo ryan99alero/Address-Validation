@@ -2,12 +2,14 @@
 
 namespace App\Filament\Resources\CarrierInvoices\RelationManagers;
 
+use App\Filament\Concerns\ScopedTableSearch;
 use App\Filament\Support\CartonReferenceColumns;
 use App\Filament\Support\ChargebackPushTable;
 use App\Filament\Support\DateRangeFilter;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Pace JobCost chargeback pushes originating from this invoice's charges (absorbed from the
@@ -16,9 +18,16 @@ use Filament\Tables\Table;
  */
 class ChargebackPushesRelationManager extends RelationManager
 {
+    use ScopedTableSearch;
+
     protected static string $relationship = 'chargebackPushes';
 
     protected static ?string $title = 'Chargeback Pushes';
+
+    protected function applyGlobalSearchToTableQuery(Builder $query): Builder
+    {
+        return $this->applyScopedColumnSearch($query) ?? parent::applyGlobalSearchToTableQuery($query);
+    }
 
     public function table(Table $table): Table
     {

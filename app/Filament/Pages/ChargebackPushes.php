@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Concerns\ScopedTableSearch;
 use App\Filament\Support\CartonReferenceColumns;
 use App\Filament\Support\ChargebackPushTable;
 use App\Filament\Support\DateRangeFilter;
@@ -13,6 +14,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use UnitEnum;
 
 /**
@@ -22,7 +24,16 @@ use UnitEnum;
  */
 class ChargebackPushes extends Page implements HasTable
 {
-    use InteractsWithTable;
+    use InteractsWithTable {
+        applyGlobalSearchToTableQuery as protected applyDefaultGlobalSearch;
+    }
+    use ScopedTableSearch;
+
+    protected function applyGlobalSearchToTableQuery(Builder $query): Builder
+    {
+        // Page uses the trait directly, so parent:: can't reach it — call the aliased original.
+        return $this->applyScopedColumnSearch($query) ?? $this->applyDefaultGlobalSearch($query);
+    }
 
     protected string $view = 'filament.pages.chargeback-pushes';
 
