@@ -4,6 +4,7 @@ namespace App\Filament\Resources\CarrierCharges\Tables;
 
 use App\Filament\Filters\BillingTypeFilter;
 use App\Filament\Resources\CarrierInvoices\CarrierInvoiceResource;
+use App\Filament\Support\CartonReferenceColumns;
 use App\Models\CarrierCharge;
 use App\Models\ChargeCategory;
 use Filament\Forms\Components\Select;
@@ -25,6 +26,7 @@ class CarrierChargesTable
                     ->searchable(isIndividual: true)
                     ->copyable()
                     ->placeholder('—'),
+                ...CartonReferenceColumns::make(),
                 TextColumn::make('carrier.name')
                     ->label('Carrier')
                     ->badge()

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CarrierInvoices\RelationManagers;
 
+use App\Filament\Support\CartonReferenceColumns;
 use App\Filament\Support\ChargebackPushTable;
 use App\Filament\Support\DateRangeFilter;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -37,6 +38,7 @@ class ChargebackPushesRelationManager extends RelationManager
                 ...ChargebackPushTable::flagColumns(),
                 TextColumn::make('pace_job')->label('Job')->searchable(),
                 ...ChargebackPushTable::repColumns(),
+                ...CartonReferenceColumns::make(),
                 TextColumn::make('pace_customer_id')->label('Customer ID')->searchable()->toggleable(),
                 TextColumn::make('pace_jobcost_id')->label('JobCost ID')->fontFamily('mono')->placeholder('—')->searchable(),
                 TextColumn::make('pushed_at')->dateTime()->sortable()->placeholder('—'),

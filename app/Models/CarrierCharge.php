@@ -61,6 +61,15 @@ class CarrierCharge extends Model
         return $this->belongsTo(ChargeCategory::class, 'charge_category_id');
     }
 
+    /**
+     * The Pace carton mirror for this line's tracking number (not a FK — matched by tracking),
+     * carrying the shipment's U_reference fields and ship cost.
+     */
+    public function cartonCost(): BelongsTo
+    {
+        return $this->belongsTo(CartonCost::class, 'tracking_number', 'tracking_number');
+    }
+
     public function shipment(): BelongsTo
     {
         return $this->belongsTo(CarrierShipment::class, 'carrier_shipment_id');

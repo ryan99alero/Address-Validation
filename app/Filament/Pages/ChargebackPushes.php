@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Support\CartonReferenceColumns;
 use App\Filament\Support\ChargebackPushTable;
 use App\Filament\Support\DateRangeFilter;
 use App\Models\ChargebackPush;
@@ -72,6 +73,7 @@ class ChargebackPushes extends Page implements HasTable
                 ...ChargebackPushTable::flagColumns(),
                 TextColumn::make('pace_job')->label('Job')->searchable(),
                 ...ChargebackPushTable::repColumns(),
+                ...CartonReferenceColumns::make(),
                 TextColumn::make('pace_customer_id')->label('Customer ID')->searchable()->toggleable(),
                 TextColumn::make('pace_jobcost_id')->label('JobCost ID')->fontFamily('mono')->placeholder('—')->searchable(),
                 TextColumn::make('pushed_at')->dateTime()->sortable()->placeholder('—'),

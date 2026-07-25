@@ -134,6 +134,15 @@ class ChargebackPush extends Model
         return $this->belongsTo(CarrierCharge::class, 'carrier_charge_id');
     }
 
+    /**
+     * The Pace carton mirror for this row's tracking number (not a FK — matched by tracking),
+     * carrying the shipment's U_reference fields.
+     */
+    public function cartonCost(): BelongsTo
+    {
+        return $this->belongsTo(CartonCost::class, 'tracking_number', 'tracking_number');
+    }
+
     /** The canonical row this duplicate points at (set when a re-import forked a charge). */
     public function duplicateOf(): BelongsTo
     {
