@@ -39,6 +39,12 @@ class CartonCostSyncService
         'ship_date' => '@actualDate',
         'pace_job_number' => 'shipment/job/@job',
         'pace_customer_id' => 'shipment/job/@customer',
+        // Custom JobShipment reference fields. Pace stores u_ fields in a parallel extension table,
+        // and the FindObjects descriptor is CASE-SENSITIVE: it must be the uppercase "U_reference"
+        // (lowercase "u_reference" is rejected as an invalid xpath). U_reference2 mirrors the job #.
+        'U_reference' => 'shipment/@U_reference',
+        'U_reference2' => 'shipment/@U_reference2',
+        'U_reference3' => 'shipment/@U_reference3',
         // Third-party billing is a shipment-level flag; read it off the carton's
         // master JobShipment (same traversal as job/customer).
         'is_third_party' => 'shipment/@thirdPartyCharges',
@@ -87,6 +93,9 @@ class CartonCostSyncService
                 'ship_date' => $shipDate,
                 'pace_job_number' => $row['pace_job_number'] ?? null,
                 'pace_customer_id' => $row['pace_customer_id'] ?? null,
+                'U_reference' => $row['U_reference'] ?? null,
+                'U_reference2' => $row['U_reference2'] ?? null,
+                'U_reference3' => $row['U_reference3'] ?? null,
                 'is_third_party' => $this->interpretThirdParty($row['is_third_party'] ?? null),
                 'synced_at' => $now,
                 'updated_at' => $now,
@@ -102,7 +111,7 @@ class CartonCostSyncService
             CartonCost::upsert(
                 $chunk,
                 ['tracking_number'],
-                ['ship_cost', 'ship_date', 'pace_job_number', 'pace_customer_id', 'is_third_party', 'synced_at', 'updated_at'],
+                ['ship_cost', 'ship_date', 'pace_job_number', 'pace_customer_id', 'U_reference', 'U_reference2', 'U_reference3', 'is_third_party', 'synced_at', 'updated_at'],
             );
         }
 
@@ -218,7 +227,7 @@ class CartonCostSyncService
      * into a carton_costs row.
      *
      * @param  array<string, mixed>  $vo
-     * @return array{tracking_number:?string, ship_cost:mixed, ship_date:?string, pace_job_number:?string, pace_customer_id:?string, is_third_party:mixed}
+     * @return array{tracking_number:?string, ship_cost:mixed, ship_date:?string, pace_job_number:?string, pace_customer_id:?string, U_reference:?string, U_reference2:?string, U_reference3:?string, is_third_party:mixed}
      */
     public function mapCartonRow(array $vo): array
     {
@@ -233,6 +242,9 @@ class CartonCostSyncService
             'ship_date' => $shipDate,
             'pace_job_number' => $vo['pace_job_number'] ?? null,
             'pace_customer_id' => $vo['pace_customer_id'] ?? null,
+            'U_reference' => $vo['U_reference'] ?? null,
+            'U_reference2' => $vo['U_reference2'] ?? null,
+            'U_reference3' => $vo['U_reference3'] ?? null,
             'is_third_party' => $vo['is_third_party'] ?? null,
         ];
     }
