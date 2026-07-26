@@ -15,6 +15,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use UnitEnum;
 
 /**
  * Carrier Charge Crosswalk — the operator-editable map from "what a carrier calls a charge" (its
@@ -33,7 +34,9 @@ class CarrierChargeTypeResource extends Resource
 
     protected static ?string $cluster = ChargeClassificationCluster::class;
 
-    protected static ?string $navigationLabel = 'Carrier Charge Crosswalk';
+    protected static string|UnitEnum|null $navigationGroup = 'Views';
+
+    protected static ?string $navigationLabel = 'Charge Crosswalk';
 
     protected static ?int $navigationSort = 3;
 

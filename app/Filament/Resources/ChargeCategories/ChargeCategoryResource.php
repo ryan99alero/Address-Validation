@@ -15,6 +15,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use UnitEnum;
 
 /**
  * Fee Categories — the canonical "what kind of charge" catalog (Fuel, Base, DAS, Address
@@ -31,6 +32,8 @@ class ChargeCategoryResource extends Resource
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTag;
 
     protected static ?string $cluster = ChargeClassificationCluster::class;
+
+    protected static string|UnitEnum|null $navigationGroup = 'Views';
 
     protected static ?string $navigationLabel = 'Fee Categories';
 
