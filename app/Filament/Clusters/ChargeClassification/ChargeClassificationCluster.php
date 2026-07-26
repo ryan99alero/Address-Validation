@@ -26,5 +26,5 @@ class ChargeClassificationCluster extends Cluster
 
     protected static ?int $navigationSort = 1;
 
-    protected static ?SubNavigationPosition $subNavigationPosition = SubNavigationPosition::Start;
+    protected static ?SubNavigationPosition $subNavigationPosition = SubNavigationPosition::Top;
 }
