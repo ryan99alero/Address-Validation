@@ -14,7 +14,6 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
-use UnitEnum;
 
 /**
  * The "Carrier Chargeback Codes" catalog — the operator-editable layer over the ChargeDriver enum:
@@ -30,8 +29,6 @@ class ChargeDriverResource extends Resource
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedReceiptPercent;
 
     protected static ?string $cluster = ChargeClassificationCluster::class;
-
-    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
 
     protected static ?string $navigationLabel = 'Carrier Chargeback Codes';
 
