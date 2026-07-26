@@ -25,7 +25,7 @@ class CarrierResource extends Resource
 
     protected static ?string $cluster = IntegrationsCluster::class;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
+    protected static string|UnitEnum|null $navigationGroup = 'Views';
 
     protected static ?string $navigationLabel = 'API Integrations';
 
