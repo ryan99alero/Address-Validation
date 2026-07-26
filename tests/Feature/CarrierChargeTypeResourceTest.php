@@ -3,11 +3,13 @@
 use App\Filament\Pages\CarrierChargeCatalog;
 use App\Filament\Resources\CarrierChargeTypes\Pages\CreateCarrierChargeType;
 use App\Filament\Resources\CarrierChargeTypes\Pages\ListCarrierChargeTypes;
+use App\Jobs\RebuildCarrierRollup;
 use App\Jobs\RecategorizeChargesJob;
 use App\Models\Carrier;
 use App\Models\CarrierChargeType;
 use App\Models\ChargeCategory;
 use App\Models\User;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
@@ -69,6 +71,18 @@ test('mapping a pdf charge creates a pdf-scoped crosswalk row and re-applies it'
         ->and($type->csv_label)->toBeNull()
         ->and($type->charge_category_id)->toBe($this->fuel->id);
     Queue::assertPushed(RecategorizeChargesJob::class);
+});
+
+test('the Apply & Rebuild Stats button chains a full re-resolve then a rollup rebuild', function () {
+    Bus::fake();
+
+    Livewire::test(ListCarrierChargeTypes::class)
+        ->callAction('applyReclassification');
+
+    Bus::assertChained([
+        RecategorizeChargesJob::class,
+        RebuildCarrierRollup::class,
+    ]);
 });
 
 test('remapping the same charge updates the existing row rather than duplicating', function () {

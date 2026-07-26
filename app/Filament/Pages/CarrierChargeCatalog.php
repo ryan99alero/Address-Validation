@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Enums\ChargeDriver;
+use App\Filament\Concerns\HasApplyReclassificationAction;
 use App\Filament\Resources\CarrierCharges\CarrierChargeResource;
 use App\Models\Carrier;
 use App\Models\CarrierCharge;
@@ -33,6 +34,7 @@ use UnitEnum;
  */
 class CarrierChargeCatalog extends Page implements HasTable
 {
+    use HasApplyReclassificationAction;
     use InteractsWithTable;
 
     protected string $view = 'filament.pages.carrier-charge-catalog';
@@ -50,6 +52,7 @@ class CarrierChargeCatalog extends Page implements HasTable
     protected function getHeaderActions(): array
     {
         return [
+            $this->applyReclassificationAction(),
             Action::make('adjustments')
                 ->label('Back to Adjustments')
                 ->icon(Heroicon::OutlinedArrowLeft)

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CarrierChargeTypes\Pages;
 
+use App\Filament\Concerns\HasApplyReclassificationAction;
 use App\Filament\Pages\CarrierChargeCatalog;
 use App\Filament\Resources\CarrierChargeTypes\CarrierChargeTypeResource;
 use App\Models\Carrier;
@@ -14,11 +15,14 @@ use Illuminate\Database\Eloquent\Builder;
 
 class ListCarrierChargeTypes extends ListRecords
 {
+    use HasApplyReclassificationAction;
+
     protected static string $resource = CarrierChargeTypeResource::class;
 
     protected function getHeaderActions(): array
     {
         return [
+            $this->applyReclassificationAction(),
             CreateAction::make(),
             Action::make('catalog')
                 ->label('Review unmapped charges')
