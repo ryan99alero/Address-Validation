@@ -31,11 +31,11 @@ class ExportTemplateBuilder extends Page implements HasSchemas
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentPlus;
 
-    protected static ?string $navigationLabel = 'Export Template Builder';
+    protected static ?string $navigationLabel = 'Template Builder';
 
     protected static ?string $cluster = TemplatesCluster::class;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
+    protected static string|UnitEnum|null $navigationGroup = 'Views';
 
     protected static ?int $navigationSort = 3;
 
