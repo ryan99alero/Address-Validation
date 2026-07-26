@@ -4,6 +4,7 @@ namespace App\Filament\Resources\ChargeCategories;
 
 use App\Filament\Clusters\ChargeClassification\ChargeClassificationCluster;
 use App\Filament\Concerns\AdminOnly;
+use App\Filament\Resources\ChargeCategories\Pages\CreateChargeCategory;
 use App\Filament\Resources\ChargeCategories\Pages\EditChargeCategory;
 use App\Filament\Resources\ChargeCategories\Pages\ListChargeCategories;
 use App\Filament\Resources\ChargeCategories\Schemas\ChargeCategoryForm;
@@ -18,8 +19,9 @@ use UnitEnum;
 
 /**
  * Fee Categories — the canonical "what kind of charge" catalog (Fuel, Base, DAS, Address
- * Correction…). Each category carries the Pace cost center the recoup push posts it to. Edit-only:
- * categories are seeded and referenced by name in code, so no create/delete/rename here.
+ * Correction…). Each category carries the Pace cost center the recoup push posts it to, and is the
+ * dropdown source for the carrier charge crosswalk. Operator-editable CRUD; the handful of
+ * categories referenced by name in code are flagged is_system (name locked, delete blocked).
  */
 class ChargeCategoryResource extends Resource
 {
@@ -37,11 +39,6 @@ class ChargeCategoryResource extends Resource
 
     protected static ?int $navigationSort = 1;
 
-    public static function canCreate(): bool
-    {
-        return false;
-    }
-
     public static function form(Schema $schema): Schema
     {
         return ChargeCategoryForm::configure($schema);
@@ -56,6 +53,7 @@ class ChargeCategoryResource extends Resource
     {
         return [
             'index' => ListChargeCategories::route('/'),
+            'create' => CreateChargeCategory::route('/create'),
             'edit' => EditChargeCategory::route('/{record}/edit'),
         ];
     }

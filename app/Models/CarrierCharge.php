@@ -20,6 +20,7 @@ class CarrierCharge extends Model
         'raw_charge_code',
         'raw_charge_description',
         'charge_category_id',
+        'charge_type_id',
         'driver',
         'driver_source',
         'amount',
@@ -59,6 +60,14 @@ class CarrierCharge extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(ChargeCategory::class, 'charge_category_id');
+    }
+
+    /**
+     * The crosswalk row that classified this charge (which carrier charge type it matched).
+     */
+    public function chargeType(): BelongsTo
+    {
+        return $this->belongsTo(CarrierChargeType::class, 'charge_type_id');
     }
 
     /**

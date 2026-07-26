@@ -6,8 +6,14 @@ use App\Enums\ChargeDriver;
 use App\Filament\Resources\CarrierCharges\CarrierChargeResource;
 use App\Models\Carrier;
 use App\Models\CarrierCharge;
+use App\Models\CarrierChargeType;
+use App\Models\ChargeCategory;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
@@ -61,6 +67,8 @@ class CarrierChargeCatalog extends Page implements HasTable
                     ->color(fn (?string $state): string => match ($state) {
                         'FedEx' => 'purple', 'UPS' => 'warning', default => 'gray',
                     }),
+                TextColumn::make('source_type')->label('Format')->badge()->color('gray')
+                    ->formatStateUsing(fn (?string $state): string => strtoupper((string) $state))->placeholder('—'),
                 TextColumn::make('code')->label('Raw Code')->fontFamily('mono')->placeholder('—')
                     ->searchable(query: fn (Builder $q, string $s): Builder => $q->orWhere('carrier_charges.code', 'like', "%{$s}%")),
                 TextColumn::make('description')->label('Carrier Description')->wrap()->limit(48)
@@ -89,9 +97,69 @@ class CarrierChargeCatalog extends Page implements HasTable
                         blank: fn (Builder $q): Builder => $q,
                     ),
             ])
+            ->recordActions([
+                $this->mapChargeAction(),
+            ])
             ->defaultSort('total', 'desc')
             ->paginated([50, 100])
             ->emptyStateHeading('No charges imported yet');
+    }
+
+    /**
+     * Map a charge to a category from the catalog: create (or update) the crosswalk row for this
+     * carrier + label in the format it appeared, then re-categorize its existing charges. Hidden for
+     * parser reconciliation residuals, which have no charge identity.
+     */
+    protected function mapChargeAction(): Action
+    {
+        return Action::make('map')
+            ->label('Map')
+            ->icon(Heroicon::OutlinedArrowsRightLeft)
+            ->modalHeading('Map charge to a category')
+            ->modalSubmitActionLabel('Save mapping')
+            ->hidden(fn (CarrierCharge $record): bool => $this->isResidual((string) $record->description))
+            ->fillForm(fn (CarrierCharge $record): array => [
+                'display_name' => $record->description,
+                'charge_category_id' => $record->charge_category_id,
+            ])
+            ->schema([
+                Placeholder::make('context')
+                    ->label('Carrier charge')
+                    ->content(fn (CarrierCharge $record): string => trim(sprintf(
+                        '%s · %s · %s',
+                        $record->carrier ?? 'Carrier',
+                        strtoupper((string) ($record->source_type ?? '—')),
+                        $record->description ?? '—',
+                    ))),
+                TextInput::make('display_name')->label('Name')->required()->maxLength(255),
+                Select::make('charge_category_id')
+                    ->label('Our Category')
+                    ->options(fn (): array => ChargeCategory::query()->where('is_active', true)->orderBy('name')->pluck('name', 'id')->all())
+                    ->placeholder('— Needs review —')
+                    ->searchable()
+                    ->native(false),
+            ])
+            ->action(function (array $data, CarrierCharge $record): void {
+                CarrierChargeType::mapCharge(
+                    $record->carrier_id,
+                    trim((string) $record->description),
+                    $record->source_type === 'pdf',
+                    trim((string) ($data['display_name'] ?? '')),
+                    $data['charge_category_id'] ?? null,
+                );
+
+                Notification::make()
+                    ->title('Charge mapped')
+                    ->body('Re-categorizing existing charges of this type in the background.')
+                    ->success()
+                    ->send();
+            });
+    }
+
+    private function isResidual(string $description): bool
+    {
+        return str_starts_with($description, 'UPS charge (unclassified')
+            || str_starts_with($description, 'UPS credit/adjustment (unclassified');
     }
 
     /**
@@ -111,6 +179,7 @@ class CarrierChargeCatalog extends Page implements HasTable
                 'ca.name',
                 'carrier_charges.raw_charge_code',
                 'carrier_charges.raw_charge_description',
+                'carrier_charges.source_type',
                 'carrier_charges.charge_category_id',
                 'c.abbreviation',
                 'carrier_charges.driver',
@@ -121,6 +190,7 @@ class CarrierChargeCatalog extends Page implements HasTable
                 ca.name AS carrier,
                 carrier_charges.raw_charge_code AS code,
                 carrier_charges.raw_charge_description AS description,
+                carrier_charges.source_type AS source_type,
                 carrier_charges.charge_category_id AS charge_category_id,
                 c.abbreviation AS category,
                 carrier_charges.driver AS driver,

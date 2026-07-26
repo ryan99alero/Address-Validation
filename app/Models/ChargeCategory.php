@@ -15,6 +15,7 @@ class ChargeCategory extends Model
         'parent_id',
         'sort_order',
         'is_active',
+        'is_system',
     ];
 
     /**
@@ -33,6 +34,7 @@ class ChargeCategory extends Model
         return [
             'sort_order' => 'integer',
             'is_active' => 'boolean',
+            'is_system' => 'boolean',
         ];
     }
 
@@ -54,5 +56,10 @@ class ChargeCategory extends Model
     public function charges(): HasMany
     {
         return $this->hasMany(CarrierCharge::class);
+    }
+
+    public function chargeTypes(): HasMany
+    {
+        return $this->hasMany(CarrierChargeType::class);
     }
 }

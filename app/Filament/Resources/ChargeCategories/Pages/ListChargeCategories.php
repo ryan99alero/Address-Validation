@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\ChargeCategories\Pages;
 
 use App\Filament\Resources\ChargeCategories\ChargeCategoryResource;
+use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 
 class ListChargeCategories extends ListRecords
@@ -11,6 +12,8 @@ class ListChargeCategories extends ListRecords
 
     protected function getHeaderActions(): array
     {
-        return [];
+        return [
+            CreateAction::make(),
+        ];
     }
 }

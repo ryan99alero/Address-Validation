@@ -866,6 +866,9 @@ class CarrierInvoiceParserService
 
         [$driver, $driverSource] = $this->chargeDriverResolver->resolve($code, $data['section'] ?? null, $description);
 
+        $sourceType = $data['source_type'] ?? $this->importSourceType;
+        [$categoryId, $chargeTypeId] = $this->chargeCategoryResolver->resolveDetailed($invoice->carrier_id, $code, $description, $sourceType);
+
         CarrierCharge::create([
             'carrier_invoice_id' => $invoice->id,
             'carrier_shipment_id' => $data['carrier_shipment_id'] ?? null,
@@ -876,7 +879,8 @@ class CarrierInvoiceParserService
             'tracking_number' => $data['tracking_number'] ?? null,
             'raw_charge_code' => $code,
             'raw_charge_description' => $description,
-            'charge_category_id' => $this->chargeCategoryResolver->resolve($invoice->carrier_id, $code, $description),
+            'charge_category_id' => $categoryId,
+            'charge_type_id' => $chargeTypeId,
             'driver' => $driver,
             'driver_source' => $driverSource,
             'amount' => $amount,
@@ -885,7 +889,7 @@ class CarrierInvoiceParserService
             'service' => $data['service'] ?? null,
             'zone' => $data['zone'] ?? null,
             'weight' => $data['weight'] ?? null,
-            'source_type' => $data['source_type'] ?? $this->importSourceType,
+            'source_type' => $sourceType,
         ]);
     }
 
@@ -1764,7 +1768,7 @@ class CarrierInvoiceParserService
         if ($amount === 0.0) {
             return;
         }
-        $categoryId = $this->chargeCategoryResolver->resolve($carrierId, $data['charge_code'] ?? null, $data['charge_description'] ?? null);
+        $categoryId = $this->chargeCategoryResolver->resolve($carrierId, $data['charge_code'] ?? null, $data['charge_description'] ?? null, $data['source_type'] ?? $this->importSourceType);
         $key = $this->chargeKey($data['tracking_number'] ?? null, $categoryId, $amount, $data['ship_date'] ?? null);
 
         if (($seen[$key] ?? 0) > 0) {
@@ -1800,7 +1804,7 @@ class CarrierInvoiceParserService
         if ($amount === 0.0) {
             return;
         }
-        $categoryId = $this->chargeCategoryResolver->resolve($carrierId, null, $description);
+        $categoryId = $this->chargeCategoryResolver->resolve($carrierId, null, $description, $this->importSourceType);
         $key = $this->chargeKey($tracking, $categoryId, $amount, $shipDate);
 
         if (($seen[$key] ?? 0) > 0) {
