@@ -25,7 +25,7 @@ class ImportFieldTemplateResource extends Resource
 
     protected static ?string $cluster = TemplatesCluster::class;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Configuration';
+    protected static string|UnitEnum|null $navigationGroup = 'Views';
 
     protected static ?string $navigationLabel = 'Import Templates';
 
