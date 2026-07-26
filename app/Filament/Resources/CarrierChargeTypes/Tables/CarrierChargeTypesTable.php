@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CarrierChargeTypes\Tables;
 
+use App\Models\Carrier;
 use App\Models\CarrierChargeType;
 use App\Models\ChargeCategory;
 use Filament\Actions\BulkActionGroup;
@@ -12,6 +13,7 @@ use Filament\Notifications\Notification;
 use Filament\Tables\Columns\SelectColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -47,6 +49,20 @@ class CarrierChargeTypesTable
                 ToggleColumn::make('is_active')->label('Active'),
             ])
             ->filters([
+                SelectFilter::make('carrier')
+                    ->label('Carrier')
+                    // Generic = a row that applies to any carrier (carrier_id is null), not UPS/FedEx specific.
+                    ->options(fn (): array => Carrier::query()->orderBy('name')->pluck('name', 'id')->all() + ['generic' => 'Generic (any carrier)'])
+                    ->query(function (Builder $query, array $data): Builder {
+                        $value = $data['value'] ?? null;
+                        if ($value === null || $value === '') {
+                            return $query;
+                        }
+
+                        return $value === 'generic'
+                            ? $query->whereNull('carrier_id')
+                            : $query->where('carrier_id', $value);
+                    }),
                 TernaryFilter::make('charge_category_id')
                     ->label('Categorization')
                     ->placeholder('All')

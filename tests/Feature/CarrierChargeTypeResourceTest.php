@@ -20,14 +20,27 @@ beforeEach(function () {
     $this->actingAs(User::factory()->create(['is_admin' => true]));
 });
 
-test('the crosswalk list renders with its carrier tabs', function () {
+test('the crosswalk list renders its rows', function () {
     CarrierChargeType::create(['carrier_id' => $this->ups->id, 'display_name' => 'Ground Fuel', 'csv_label' => 'Ground Fuel', 'charge_category_id' => $this->fuel->id]);
 
     Livewire::test(ListCarrierChargeTypes::class)
         ->assertOk()
         ->assertSee('Ground Fuel')
-        ->assertSee('UPS')
-        ->assertSee('Generic');
+        ->assertSee('UPS');
+});
+
+test('the carrier filter narrows to a carrier, and Generic to any-carrier rows', function () {
+    $upsRow = CarrierChargeType::create(['carrier_id' => $this->ups->id, 'display_name' => 'Ground Fuel', 'csv_label' => 'Ground Fuel', 'charge_category_id' => $this->fuel->id]);
+    $genericRow = CarrierChargeType::create(['carrier_id' => null, 'display_name' => 'Late Fee', 'csv_label' => 'Late Fee', 'charge_category_id' => $this->fuel->id]);
+
+    Livewire::test(ListCarrierChargeTypes::class)
+        ->assertCanSeeTableRecords([$upsRow, $genericRow])
+        ->filterTable('carrier', 'generic')
+        ->assertCanSeeTableRecords([$genericRow])
+        ->assertCanNotSeeTableRecords([$upsRow])
+        ->filterTable('carrier', $this->ups->id)
+        ->assertCanSeeTableRecords([$upsRow])
+        ->assertCanNotSeeTableRecords([$genericRow]);
 });
 
 test('an operator can create a crosswalk row and it re-applies to existing charges', function () {
