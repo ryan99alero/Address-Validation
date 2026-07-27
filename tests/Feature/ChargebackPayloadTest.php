@@ -30,6 +30,17 @@ test('the Pace ioID is truncated to 50 chars (Pace 500s on longer)', function ()
         ->and($payload['ioID'])->toBe(substr($txnId, 0, 50));
 });
 
+test('the Pace notes are truncated to 255 chars, keeping the recovery token', function () {
+    $long = '[CB:CB1-abc123] '.str_repeat('Ship-to corrected. ', 40);
+    $payload = (new ChargebackPusher)->buildJobCostPayload([
+        'job' => 'M1', 'jobPart' => '01', 'activityCode' => '72530',
+        'amount' => 20.20, 'tracking' => '1Z9', 'notes' => $long, 'txnId' => 'CB1-abc123',
+    ]);
+
+    expect(mb_strlen($payload['notes']))->toBe(255)
+        ->and($payload['notes'])->toStartWith('[CB:CB1-abc123]'); // token at the front survives
+});
+
 test('the human notes token is the txn_id, not a DB row id', function () {
     $notes = (new ChargebackPusher)->buildNotes('CB1-abc123', ['carrier' => 'UPS', 'label' => 'Address Correction']);
 

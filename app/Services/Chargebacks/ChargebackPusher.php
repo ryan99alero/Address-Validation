@@ -216,7 +216,9 @@ class ChargebackPusher
             // the existing JobCost instead of posting a second one. Truncated to Pace's 50-char ioID
             // limit (Pace 500s on longer) — the probe truncates identically.
             'ioID' => ChargebackPush::paceIoId((string) $a['txnId']),
-            'notes' => $a['notes'],
+            // Pace caps notes at 255 chars (500s on longer). The [CB:…] recovery token is at the
+            // front, so a tail truncation keeps it intact; the full note stays on the ledger row.
+            'notes' => mb_substr((string) $a['notes'], 0, 255),
             'startDateTime' => $now->format('Y-m-d\TH:i:s'),
             'endDateTime' => $now->format('Y-m-d\TH:i:s'),
             'postedDate' => $now->format('Y-m-d'),
