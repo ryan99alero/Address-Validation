@@ -15,16 +15,20 @@ use Illuminate\Support\Facades\DB;
 class HeatmapService
 {
     /**
-     * Shipping destinations from carrier_shipments (UPS-sourced today).
+     * Shipping destinations from carrier_shipments, optionally limited to a single carrier slug so
+     * UPS and FedEx can be compared.
      *
      * @return array{points: list<array{0: float, 1: float, 2: int}>, meta: array{matched: int, total: int, unmatched: int, max: float}}
      */
-    public function shipments(?int $year, ?int $month): array
+    public function shipments(?int $year, ?int $month, ?string $carrierSlug = null): array
     {
+        $base = DB::table('carrier_shipments as s')
+            ->when($carrierSlug, fn (Builder $q): Builder => $q->join('carriers as c', 'c.id', '=', 's.carrier_id')->where('c.slug', $carrierSlug));
+
         return $this->aggregate(
-            'shipments',
+            'shipments:'.($carrierSlug ?? 'all'),
             'carrier_shipments',
-            DB::table('carrier_shipments as s'),
+            $base,
             's.zip',
             's.ship_date',
             $year,

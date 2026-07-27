@@ -17,8 +17,9 @@ Supporting pieces:
 - Index `carrier_shipments.ship_date` (period filter over ~1M rows uses a date range, not `YEAR()`, so the index applies and the SQL stays portable).
 
 ### Data coverage (as of build)
-- `carrier_shipments`: **1.02M rows with a ZIP, UPS only** (FedEx doesn't populate this table). 17k distinct ZIPs, 2016–2026.
-- `carrier_invoice_lines`: **UPS 24k + FedEx 1.6k** corrections — both carriers, which is why the *correction* map can compare carriers and the *shipping* map (v1) is UPS-only.
+- `carrier_shipments`: 1.02M UPS/PDF rows. **FedEx capture added** — `importFedExCsv`/`importFedExPdf` now persist FedEx shipments here too (destination ZIP + ship-method `service`, `source_type='csv'|'pdf'`), so both the Shipping and Correction maps toggle UPS vs FedEx. FedEx **historical** rows only appear as FedEx invoices are (re)imported — the raw files aren't retained (0 of 1,514 FedEx invoices archived), so history is best-effort via re-import.
+- FedEx CSV **ship-method column name** is export-specific; the importer tries known names (`Service Type`, `Ground Service`, …) and logs the header if none match, so the exact column can be pinned from the first real import. The shipment still records (carrier + ZIP) regardless.
+- `carrier_invoice_lines`: UPS 24k + FedEx 1.6k corrections — both carriers (the correction map's source).
 
 ## Answers to the open questions
 

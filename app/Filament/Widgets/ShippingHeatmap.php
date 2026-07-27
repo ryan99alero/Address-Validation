@@ -9,9 +9,10 @@ use Filament\Widgets\Concerns\InteractsWithPageFilters;
 use Filament\Widgets\Widget;
 
 /**
- * US heatmap of where packages shipped, from carrier_shipments (UPS-sourced) destinations, resolved
- * ZIP → centroid (no geocoding). Honours the dashboard year/month filter. Count = shipments; red is
- * the highest-volume ZIPs.
+ * US heatmap of where packages shipped, from carrier_shipments destinations, resolved ZIP → centroid
+ * (no geocoding). UPS and FedEx are separate overlaid heat layers, each toggleable via the map's
+ * layer control. Honours the dashboard year/month filter. Count = shipments; the color scale peaks
+ * at each carrier's busiest ZIP.
  */
 class ShippingHeatmap extends Widget
 {
@@ -24,14 +25,17 @@ class ShippingHeatmap extends Widget
 
     protected static ?int $sort = 20;
 
-    /** Blue → red gradient; red = the busiest ZIPs. */
-    private const GRADIENT = ['0.2' => '#2c7bb6', '0.4' => '#abd9e9', '0.6' => '#ffffbf', '0.8' => '#fdae61', '1.0' => '#d7191c'];
+    /** UPS = blue → red. */
+    private const GRADIENT_UPS = ['0.2' => '#2c7bb6', '0.4' => '#abd9e9', '0.6' => '#ffffbf', '0.8' => '#fdae61', '1.0' => '#d7191c'];
 
-    /** @var array{year: ?int, month: ?int, data: array{points: array<int, mixed>, meta: array<string, mixed>}}|null */
+    /** FedEx = blue → purple, so the two carriers read apart when overlaid. */
+    private const GRADIENT_FEDEX = ['0.3' => '#9ebcda', '0.6' => '#8c6bb1', '1.0' => '#6e016b'];
+
+    /** @var array<string, mixed>|null */
     private ?array $resolved = null;
 
     /**
-     * @return array{year: ?int, month: ?int, data: array{points: array<int, mixed>, meta: array<string, mixed>}}
+     * @return array<string, mixed>
      */
     private function resolve(): array
     {
@@ -39,11 +43,13 @@ class ShippingHeatmap extends Widget
             return $this->resolved;
         }
         [$year, $month] = $this->selectedPeriod(app(CostAnalyticsService::class));
+        $svc = app(HeatmapService::class);
 
         return $this->resolved = [
             'year' => $year,
             'month' => $month,
-            'data' => app(HeatmapService::class)->shipments($year, $month),
+            'ups' => $svc->shipments($year, $month, 'ups'),
+            'fedex' => $svc->shipments($year, $month, 'fedex'),
         ];
     }
 
@@ -56,7 +62,7 @@ class ShippingHeatmap extends Widget
     {
         $r = $this->resolve();
 
-        return 'Where UPS packages shipped · '.$this->periodLabel($r['year'], $r['month']);
+        return 'Where packages shipped, UPS vs FedEx · '.$this->periodLabel($r['year'], $r['month']).' · toggle a carrier top-right';
     }
 
     public function heatMapId(): string
@@ -76,7 +82,7 @@ class ShippingHeatmap extends Widget
      */
     public function heatMapConfig(): array
     {
-        $data = $this->resolve()['data'];
+        $r = $this->resolve();
 
         return [
             'center' => [39.5, -98.35],
@@ -85,12 +91,10 @@ class ShippingHeatmap extends Widget
                 'url' => 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
                 'attribution' => '&copy; OpenStreetMap &copy; CARTO',
             ],
-            'layers' => [[
-                'name' => 'Shipments',
-                'points' => $data['points'],
-                'max' => $data['meta']['max'],
-                'gradient' => self::GRADIENT,
-            ]],
+            'layers' => [
+                ['name' => 'UPS', 'points' => $r['ups']['points'], 'max' => $r['ups']['meta']['max'], 'gradient' => self::GRADIENT_UPS],
+                ['name' => 'FedEx', 'points' => $r['fedex']['points'], 'max' => $r['fedex']['meta']['max'], 'gradient' => self::GRADIENT_FEDEX],
+            ],
         ];
     }
 
@@ -99,11 +103,12 @@ class ShippingHeatmap extends Widget
      */
     public function heatLegends(): array
     {
-        return [[
-            'label' => 'Shipments',
-            'stops' => array_values(self::GRADIENT),
-            'max' => (float) $this->resolve()['data']['meta']['max'],
-        ]];
+        $r = $this->resolve();
+
+        return [
+            ['label' => 'UPS', 'stops' => array_values(self::GRADIENT_UPS), 'max' => (float) $r['ups']['meta']['max']],
+            ['label' => 'FedEx', 'stops' => array_values(self::GRADIENT_FEDEX), 'max' => (float) $r['fedex']['meta']['max']],
+        ];
     }
 
     /**
@@ -111,6 +116,12 @@ class ShippingHeatmap extends Widget
      */
     public function heatMeta(): array
     {
-        return $this->resolve()['data']['meta'];
+        $r = $this->resolve();
+
+        return [
+            'matched' => $r['ups']['meta']['matched'] + $r['fedex']['meta']['matched'],
+            'unmatched' => $r['ups']['meta']['unmatched'] + $r['fedex']['meta']['unmatched'],
+            'max' => max($r['ups']['meta']['max'], $r['fedex']['meta']['max']),
+        ];
     }
 }

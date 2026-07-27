@@ -1004,6 +1004,19 @@ class CarrierInvoiceParserService
         $shipDateCol = $col['Shipment Date'] ?? $col['Ship Date'] ?? $col['Tendered Date'] ?? $col['Pickup Date'] ?? null;
         $deliveryDateCol = $col['POD Delivery Date'] ?? $col['Delivery Date'] ?? null;
 
+        // Ship-method column name varies by export; try the known ones. If none match, log the
+        // header once so the real column can be added — the shipment still records (carrier + ZIP).
+        $serviceCol = null;
+        foreach (['Service Type', 'Ground Service', 'Service', 'Net Service', 'Service Description', 'Product', 'FedEx Service'] as $name) {
+            if (isset($col[$name])) {
+                $serviceCol = $col[$name];
+                break;
+            }
+        }
+        if ($serviceCol === null) {
+            Log::info('FedEx CSV: no known ship-method column; shipments recorded without service.', ['headers' => array_keys($col)]);
+        }
+
         $this->chargeCategoryResolver ??= new ChargeCategoryResolver;
 
         /** @var array<string, CarrierInvoice> $invoices */
@@ -1014,6 +1027,8 @@ class CarrierInvoiceParserService
         $corr = [];
         /** @var array<int, float> $fileTotals sum of the file's charge rows, per invoice */
         $fileTotals = [];
+        /** @var array<int, array<string, array<string, mixed>>> $fedexShipments per-invoice, per-tracking destination */
+        $fedexShipments = [];
 
         while (($row = fgetcsv($handle, 0, ',', '"', '')) !== false) {
             $number = InvoiceIdentity::number($row[$col['Invoice Number'] ?? 3] ?? null);
@@ -1035,6 +1050,23 @@ class CarrierInvoiceParserService
             $shipDate = $shipDateCol !== null ? $this->parseDate($row[$shipDateCol] ?? '') : null;
             $deliveryDate = $deliveryDateCol !== null ? $this->parseDate($row[$deliveryDateCol] ?? '') : null;
             $weight = $this->parseWeight($row[21] ?? '');
+
+            // Capture the destination (ZIP + ship method) for the shipment map, once per tracking.
+            // Recipient columns are the same ones the correction path reads.
+            if ($tracking !== null && ! isset($fedexShipments[$invoice->id][$tracking])) {
+                $zip = trim((string) ($row[$col['Recipient Zip Code'] ?? 39] ?? ''));
+                $name = trim((string) ($row[$col['Recipient Name'] ?? 33] ?? ''));
+                $addr1 = trim((string) ($row[$col['Recipient Address Line 1'] ?? 35] ?? ''));
+                $city = trim((string) ($row[$col['Recipient City'] ?? 37] ?? ''));
+                $state = trim((string) ($row[$col['Recipient State'] ?? 38] ?? ''));
+                $fedexShipments[$invoice->id][$tracking] = [
+                    'zip' => $zip !== '' ? $zip : null,
+                    'service' => $serviceCol !== null ? (trim((string) ($row[$serviceCol] ?? '')) ?: null) : null,
+                    'receiver' => trim($name.' '.$addr1.' '.$city.' '.$state.' '.$zip) ?: null,
+                    'weight' => $weight,
+                    'ship_date' => $shipDate,
+                ];
+            }
 
             $items = [];
             $base = $this->parseAmount($row[10] ?? '0');
@@ -1059,9 +1091,42 @@ class CarrierInvoiceParserService
         }
         fclose($handle);
 
+        // Persist the FedEx shipments (destination ZIP + ship method) into carrier_shipments — the
+        // same table as UPS, so the shipment map/reports break out by carrier + service.
+        foreach ($invoices as $inv) {
+            if (! empty($fedexShipments[$inv->id])) {
+                $this->persistFedExShipments($inv, $fedexShipments[$inv->id], 'csv');
+            }
+        }
+
         // CSV prints no single grand total, so reconcile against the file's own charge rows:
         // confirms we stored every charge line we read (an import-completeness check).
         return $this->finalizeInvoices($invoices, $fileTotals);
+    }
+
+    /**
+     * Persist FedEx shipments into carrier_shipments (delete-then-insert per invoice + source,
+     * mirroring persistUpsPdf's idempotency — carrier_shipments has no unique key).
+     *
+     * @param  array<string, array<string, mixed>>  $shipments  keyed by tracking number
+     */
+    protected function persistFedExShipments(CarrierInvoice $invoice, array $shipments, string $sourceType): void
+    {
+        CarrierShipment::where('carrier_invoice_id', $invoice->id)->where('source_type', $sourceType)->delete();
+
+        foreach ($shipments as $tracking => $s) {
+            CarrierShipment::create([
+                'carrier_invoice_id' => $invoice->id,
+                'carrier_id' => $invoice->carrier_id,
+                'tracking_number' => (string) $tracking,
+                'service' => $s['service'] ?? null,
+                'zip' => $s['zip'] ?? null,
+                'weight' => $s['weight'] ?? null,
+                'ship_date' => $s['ship_date'] ?? null,
+                'receiver' => $s['receiver'] ?? null,
+                'source_type' => $sourceType,
+            ]);
+        }
     }
 
     /**
@@ -1152,6 +1217,8 @@ class CarrierInvoiceParserService
         $trackingToInvoice = [];
         /** @var array<string, ?string> $trackingShipDate */
         $trackingShipDate = [];
+        /** @var array<int, array<string, array<string, mixed>>> $fedexPdfShipments per-invoice destinations */
+        $fedexPdfShipments = [];
 
         foreach ($parsed['invoices'] as $section) {
             $number = InvoiceIdentity::number($section['number']);
@@ -1203,9 +1270,27 @@ class CarrierInvoiceParserService
                     foreach ($shipment['charge_ledger'] as $charge) {
                         $this->mergeCharge($invoice, $seen, $carrierId, $tracking, (string) $charge['description'], (float) $charge['amount'], $shipDate, null);
                     }
+
+                    // Capture destination ZIP + ship method for the shipment map (PDF-owned invoices
+                    // only; a CSV-owned invoice already recorded its shipments from the CSV).
+                    $recvText = trim(implode(' ', array_map('trim', $shipment['recipient'] ?? [])));
+                    $zip = preg_match_all('/\b\d{5}\b/', $recvText, $mm) ? end($mm[0]) : null;
+                    $fedexPdfShipments[$invoice->id][$tracking] = [
+                        'zip' => $zip,
+                        'service' => $shipment['service_type'] ?? null,
+                        'receiver' => $recvText ?: null,
+                        'ship_date' => $shipDate,
+                    ];
                 }
                 $trackingToInvoice[$tracking] = $invoice;
                 $trackingShipDate[$tracking] = $shipDate;
+            }
+        }
+
+        // Persist FedEx PDF shipments (destination ZIP + ship method) for the invoices this PDF owns.
+        foreach ($touched as $inv) {
+            if (! empty($fedexPdfShipments[$inv->id])) {
+                $this->persistFedExShipments($inv, $fedexPdfShipments[$inv->id], 'pdf');
             }
         }
 

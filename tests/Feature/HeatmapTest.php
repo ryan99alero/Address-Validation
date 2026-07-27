@@ -4,6 +4,7 @@ use App\Filament\Widgets\ShippingHeatmap;
 use App\Models\Carrier;
 use App\Models\User;
 use App\Services\Analytics\HeatmapService;
+use App\Services\CarrierInvoiceParserService;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
@@ -77,6 +78,57 @@ test('the shipping heatmap widget renders server-side with its heading and legen
         ->assertOk()
         ->assertSee('Shipping Destinations')
         ->assertSee('plotted');
+});
+
+test('FedEx CSV import persists shipments (dest ZIP + service) into carrier_shipments', function () {
+    $header = array_fill(0, 110, '');
+    $header[1] = 'Bill to Account Number';
+    $header[2] = 'Invoice Date';
+    $header[3] = 'Invoice Number';
+    $header[9] = 'Express or Ground Tracking ID';
+    $header[10] = 'Transportation Charge Amount';
+    $header[21] = 'Rated Weight Amount';
+    $header[33] = 'Recipient Name';
+    $header[35] = 'Recipient Address Line 1';
+    $header[37] = 'Recipient City';
+    $header[38] = 'Recipient State';
+    $header[39] = 'Recipient Zip Code';
+    $header[50] = 'Service Type';
+    $header[60] = 'Ship Date';
+    $header[107] = 'Tracking ID Charge Description';
+    $header[108] = 'Tracking ID Charge Amount';
+
+    $row = array_fill(0, 110, '');
+    $row[1] = 'ACCT1';
+    $row[2] = '01/15/2026';
+    $row[3] = '990000001';
+    $row[9] = '794600000001';
+    $row[10] = '12.50';
+    $row[21] = '5.0';
+    $row[33] = 'Acme Co';
+    $row[35] = '123 Main St';
+    $row[37] = 'Austin';
+    $row[38] = 'TX';
+    $row[39] = '78701';
+    $row[50] = 'FedEx Ground';
+    $row[60] = '01/10/2026';
+    $row[107] = 'Fuel Surcharge';
+    $row[108] = '2.00';
+
+    $path = tempnam(sys_get_temp_dir(), 'fx_').'.csv';
+    $fh = fopen($path, 'w');
+    fputcsv($fh, $header, ',', '"', '');
+    fputcsv($fh, $row, ',', '"', '');
+    fclose($fh);
+
+    app(CarrierInvoiceParserService::class)->importFedExCsv($this->fedex->id, $path);
+
+    $s = DB::table('carrier_shipments')->where('tracking_number', '794600000001')->first();
+    expect($s)->not->toBeNull();
+    expect((int) $s->carrier_id)->toBe($this->fedex->id)
+        ->and($s->zip)->toBe('78701')
+        ->and($s->service)->toBe('FedEx Ground')
+        ->and($s->source_type)->toBe('csv');
 });
 
 test('the zipcentroids:import command parses a GeoNames file and is re-runnable', function () {
