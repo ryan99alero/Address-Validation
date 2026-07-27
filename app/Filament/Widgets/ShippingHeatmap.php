@@ -98,16 +98,38 @@ class ShippingHeatmap extends Widget
         ];
     }
 
+    public function heatUnit(): string
+    {
+        return 'shipments';
+    }
+
     /**
-     * @return list<array{label: string, stops: list<string>, max: float}>
+     * @return list<array{label: string, stops: list<string>, max: float, plotted: int, zips: int, unmapped: int}>
      */
     public function heatLegends(): array
     {
         $r = $this->resolve();
 
         return [
-            ['label' => 'UPS', 'stops' => array_values(self::GRADIENT_UPS), 'max' => (float) $r['ups']['meta']['max']],
-            ['label' => 'FedEx', 'stops' => array_values(self::GRADIENT_FEDEX), 'max' => (float) $r['fedex']['meta']['max']],
+            $this->legendRow('UPS', self::GRADIENT_UPS, $r['ups']),
+            $this->legendRow('FedEx', self::GRADIENT_FEDEX, $r['fedex']),
+        ];
+    }
+
+    /**
+     * @param  array<string, string>  $gradient
+     * @param  array{points: array<int, mixed>, meta: array<string, mixed>}  $data
+     * @return array{label: string, stops: list<string>, max: float, plotted: int, zips: int, unmapped: int}
+     */
+    private function legendRow(string $label, array $gradient, array $data): array
+    {
+        return [
+            'label' => $label,
+            'stops' => array_values($gradient),
+            'max' => (float) $data['meta']['max'],
+            'plotted' => (int) $data['meta']['matched'],
+            'zips' => count($data['points']),
+            'unmapped' => (int) $data['meta']['unmatched'],
         ];
     }
 

@@ -125,7 +125,8 @@ test('the shipping heatmap widget renders server-side with its heading and legen
     Livewire::test(ShippingHeatmap::class)
         ->assertOk()
         ->assertSee('Shipping Destinations')
-        ->assertSee('plotted');
+        ->assertSee('shipments')      // per-carrier count line
+        ->assertSee('busiest ZIP');
 });
 
 test('FedEx CSV import persists shipments (dest ZIP + service) into carrier_shipments', function () {

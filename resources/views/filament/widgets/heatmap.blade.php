@@ -66,23 +66,24 @@
             >
                 <div wire:ignore x-ref="map" style="height: 30rem; width: 100%; border-radius: 0.5rem; overflow: hidden; z-index: 0; background: #e5e7eb;"></div>
 
-                <div class="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
+                <div class="mt-3 space-y-1.5 text-xs">
                     @foreach ($this->heatLegends() as $legend)
-                        <div class="flex items-center gap-2">
-                            <span class="font-medium text-gray-700 dark:text-gray-200">{{ $legend['label'] }} per ZIP:</span>
-                            <span class="text-gray-400">fewer</span>
-                            <span class="inline-block h-2.5 w-28 rounded-full" style="background: linear-gradient(to right, {{ implode(',', $legend['stops']) }});"></span>
-                            <span class="text-gray-400">more</span>
-                            <span class="text-gray-500 dark:text-gray-400">busiest ZIP: {{ number_format($legend['max']) }}</span>
+                        <div class="flex items-center gap-3">
+                            <span class="w-16 shrink-0 font-semibold text-gray-700 dark:text-gray-200">{{ $legend['label'] }}</span>
+                            <span class="inline-block h-2.5 w-24 shrink-0 rounded-full" style="background: linear-gradient(to right, {{ implode(',', $legend['stops']) }});"></span>
+                            <span class="text-gray-600 dark:text-gray-300">
+                                <span class="font-medium">{{ number_format($legend['plotted']) }}</span> {{ $this->heatUnit() }}
+                                across <span class="font-medium">{{ number_format($legend['zips']) }}</span> ZIPs
+                                · busiest ZIP {{ number_format($legend['max']) }}
+                                @if ($legend['unmapped'] > 0)
+                                    · {{ number_format($legend['unmapped']) }} unmapped
+                                @endif
+                            </span>
                         </div>
                     @endforeach
-                </div>
-
-                <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    {{ number_format($meta['matched']) }} plotted
-                    @if (($meta['unmatched'] ?? 0) > 0)
-                        · {{ number_format($meta['unmatched']) }} unmapped (non-US / bad ZIP)
-                    @endif
+                    <div class="pt-0.5 text-gray-400 dark:text-gray-500">
+                        Color shows {{ $this->heatUnit() }} density per ZIP — light = fewer, dark = the busiest ZIP. Toggle a carrier top-right. "Unmapped" = non-US or bad ZIP.
+                    </div>
                 </div>
             </div>
         @endif
