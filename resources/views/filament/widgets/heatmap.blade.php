@@ -3,12 +3,6 @@
         <x-slot name="heading">{{ $this->heatHeading() }}</x-slot>
         <x-slot name="description">{{ $this->heatDescription() }}</x-slot>
 
-        @assets
-            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-            <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-        @endassets
-
         @php($meta = $this->heatMeta())
 
         @if (($meta['matched'] ?? 0) === 0)
@@ -22,6 +16,34 @@
                     cfg: @js($this->heatMapConfig()),
                     map: null,
                     init() {
+                        this.ensureLeaflet(() => this.render());
+                    },
+                    ensureLeaflet(cb) {
+                        if (! document.getElementById('leaflet-css')) {
+                            const l = document.createElement('link');
+                            l.id = 'leaflet-css'; l.rel = 'stylesheet';
+                            l.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+                            document.head.appendChild(l);
+                        }
+                        if (! document.getElementById('leaflet-js') && ! window.L) {
+                            const s = document.createElement('script');
+                            s.id = 'leaflet-js';
+                            s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+                            s.onload = () => {
+                                const h = document.createElement('script');
+                                h.id = 'leaflet-heat-js';
+                                h.src = 'https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js';
+                                document.head.appendChild(h);
+                            };
+                            document.head.appendChild(s);
+                        }
+                        let tries = 0;
+                        const timer = setInterval(() => {
+                            if (window.L && window.L.heatLayer) { clearInterval(timer); cb(); }
+                            else if (++tries > 200) { clearInterval(timer); }
+                        }, 50);
+                    },
+                    render() {
                         this.map = L.map(this.$refs.map, { scrollWheelZoom: false, worldCopyJump: true }).setView(this.cfg.center, this.cfg.zoom);
                         L.tileLayer(this.cfg.tiles.url, { attribution: this.cfg.tiles.attribution, subdomains: 'abcd', maxZoom: 12 }).addTo(this.map);
                         const overlays = {};
@@ -30,7 +52,7 @@
                             const max = layer.max || 1;
                             const heat = L.heatLayer(
                                 layer.points.map((p) => [p[0], p[1], p[2] / max]),
-                                { radius: 22, blur: 18, maxZoom: 9, minOpacity: 0.28, gradient: layer.gradient }
+                                { radius: 22, blur: 18, maxZoom: 9, minOpacity: 0.3, gradient: layer.gradient }
                             );
                             heat.addTo(this.map);
                             overlays[layer.name] = heat;
@@ -38,20 +60,20 @@
                         if (this.cfg.layers.length > 1) {
                             L.control.layers(null, overlays, { collapsed: false, position: 'topright' }).addTo(this.map);
                         }
-                        setTimeout(() => this.map && this.map.invalidateSize(), 200);
+                        setTimeout(() => this.map && this.map.invalidateSize(), 250);
                     },
                 }"
             >
-                <div wire:ignore x-ref="map" style="height: 30rem; width: 100%; border-radius: 0.5rem; overflow: hidden; z-index: 0;"></div>
+                <div wire:ignore x-ref="map" style="height: 30rem; width: 100%; border-radius: 0.5rem; overflow: hidden; z-index: 0; background: #e5e7eb;"></div>
 
                 <div class="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
                     @foreach ($this->heatLegends() as $legend)
                         <div class="flex items-center gap-2">
-                            <span class="font-medium text-gray-700 dark:text-gray-200">{{ $legend['label'] }}</span>
+                            <span class="font-medium text-gray-700 dark:text-gray-200">{{ $legend['label'] }} per ZIP:</span>
                             <span class="text-gray-400">fewer</span>
                             <span class="inline-block h-2.5 w-28 rounded-full" style="background: linear-gradient(to right, {{ implode(',', $legend['stops']) }});"></span>
                             <span class="text-gray-400">more</span>
-                            <span class="text-gray-500 dark:text-gray-400">(max {{ number_format($legend['max']) }})</span>
+                            <span class="text-gray-500 dark:text-gray-400">busiest ZIP: {{ number_format($legend['max']) }}</span>
                         </div>
                     @endforeach
                 </div>
