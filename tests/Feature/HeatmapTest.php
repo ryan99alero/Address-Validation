@@ -105,15 +105,17 @@ test('the period filter constrains shipments to the selected year/month', functi
         ->and(app(HeatmapService::class)->shipments(2026, 7)['meta']['matched'])->toBe(0);
 });
 
-test('corrections split by carrier', function () {
+test('corrections split by carrier, filtered by INVOICE date (not the unreliable line ship_date)', function () {
+    // Both UPS invoices are dated 2026 (see beforeEach); the line ship_dates are deliberately stale/
+    // null — the map must still count them in 2026 via the invoice date.
     DB::table('carrier_invoice_lines')->insert([
-        ['carrier_invoice_id' => $this->upsInv, 'tracking_number' => 'U1', 'original_postal' => '78701', 'ship_date' => '2026-02-01', 'created_at' => now(), 'updated_at' => now()],
-        ['carrier_invoice_id' => $this->upsInv, 'tracking_number' => 'U2', 'original_postal' => '78701', 'ship_date' => '2026-02-02', 'created_at' => now(), 'updated_at' => now()],
+        ['carrier_invoice_id' => $this->upsInv, 'tracking_number' => 'U1', 'original_postal' => '78701', 'ship_date' => '2013-05-01', 'created_at' => now(), 'updated_at' => now()],
+        ['carrier_invoice_id' => $this->upsInv, 'tracking_number' => 'U2', 'original_postal' => '78701', 'ship_date' => null, 'created_at' => now(), 'updated_at' => now()],
         ['carrier_invoice_id' => $this->fedexInv, 'tracking_number' => 'F1', 'original_postal' => '90001', 'ship_date' => '2026-02-01', 'created_at' => now(), 'updated_at' => now()],
     ]);
 
     $svc = app(HeatmapService::class);
-    expect($svc->corrections(2026, null, 'ups')['meta']['matched'])->toBe(2)
+    expect($svc->corrections(2026, null, 'ups')['meta']['matched'])->toBe(2)   // both, despite stale/null ship_date
         ->and($svc->corrections(2026, null, 'fedex')['meta']['matched'])->toBe(1)
         ->and($svc->corrections(2026, null, null)['meta']['matched'])->toBe(3);
 });

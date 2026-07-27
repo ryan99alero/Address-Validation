@@ -49,12 +49,16 @@ class HeatmapService
             ->join('carriers as c', 'c.id', '=', 'ci.carrier_id')
             ->when($carrierSlug, fn (Builder $q): Builder => $q->where('c.slug', $carrierSlug));
 
+        // Filter by the invoice date, not the correction line's ship_date — UPS correction lines
+        // frequently carry a null or stale (old-shipment) ship_date, which would drop nearly all of
+        // them from a year filter; the invoice date (when the correction was billed) is reliable for
+        // both carriers.
         return $this->aggregate(
             'corrections:'.($carrierSlug ?? 'all'),
             'carrier_invoice_lines',
             $base,
             's.original_postal',
-            's.ship_date',
+            'ci.invoice_date',
             $year,
             $month,
         );
@@ -66,7 +70,7 @@ class HeatmapService
     private function aggregate(string $tag, string $versionTable, Builder $base, string $zipCol, string $dateCol, ?int $year, ?int $month): array
     {
         $version = DB::table($versionTable)->max('id');
-        $cacheKey = 'heatmap:'.$tag.':'.md5($version.'|'.$year.'|'.$month);
+        $cacheKey = 'heatmap:v2:'.$tag.':'.md5($version.'|'.$year.'|'.$month);
 
         return Cache::remember($cacheKey, now()->addHours(6), function () use ($base, $zipCol, $dateCol, $year, $month): array {
             // A date range (not YEAR()/MONTH()) so the ship_date index is used and the SQL is
