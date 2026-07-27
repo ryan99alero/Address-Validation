@@ -102,7 +102,7 @@ class PushChargeback implements ShouldQueue
         // stamp on every JobCost — an exact structured match), falling back to the legacy notes token for
         // any JobCost created before ioID was populated.
         if ($ledger->attempts > 1) {
-            $existingId = $client->findJobCostIdByIoId($txnId)
+            $existingId = $client->findJobCostIdByIoId(ChargebackPush::paceIoId($txnId))
                 ?? $client->findJobCostIdByToken('[CB:'.$ledger->id.']');
             if ($existingId !== null) {
                 $ledger->update(['status' => ChargebackPush::STATUS_PUSHED, 'pace_jobcost_id' => $existingId, 'pushed_at' => now()]);

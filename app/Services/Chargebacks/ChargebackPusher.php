@@ -2,6 +2,7 @@
 
 namespace App\Services\Chargebacks;
 
+use App\Models\ChargebackPush;
 use App\Models\IntegrationConnection;
 use App\Services\Integrations\PaceApiClient;
 use Illuminate\Support\Carbon;
@@ -212,8 +213,9 @@ class ChargebackPusher
             'sourceID' => $a['tracking'],
             // The stable txn_id in Pace's external-transaction field: an exact structured idempotency
             // key the recovery probe matches on, so a crash between Pace-commit and our-save can adopt
-            // the existing JobCost instead of posting a second one.
-            'ioID' => $a['txnId'],
+            // the existing JobCost instead of posting a second one. Truncated to Pace's 50-char ioID
+            // limit (Pace 500s on longer) — the probe truncates identically.
+            'ioID' => ChargebackPush::paceIoId((string) $a['txnId']),
             'notes' => $a['notes'],
             'startDateTime' => $now->format('Y-m-d\TH:i:s'),
             'endDateTime' => $now->format('Y-m-d\TH:i:s'),

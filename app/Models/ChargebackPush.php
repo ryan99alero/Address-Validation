@@ -99,6 +99,16 @@ class ChargebackPush extends Model
     }
 
     /**
+     * The txn_id truncated to Pace's 50-character `ioID` limit. The full 52-char txn_id stays the
+     * internal dedup/idempotency key (never sent verbatim to Pace, which 500s on >50 chars). Both
+     * the JobCost we post and the recovery probe use this same truncation, so idempotency holds.
+     */
+    public static function paceIoId(string $txnId): string
+    {
+        return substr($txnId, 0, 50);
+    }
+
+    /**
      * Carrier slug (UPS/FEDEX), memoised — a business code, stable across a reference-data reseed
      * where the numeric id is not. Falls back to the id if the carrier can't be resolved.
      */
