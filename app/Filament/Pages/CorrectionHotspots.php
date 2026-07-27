@@ -16,6 +16,7 @@ use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
@@ -117,58 +118,92 @@ class CorrectionHotspots extends Page implements HasTable
         $min = $searching ? 1 : (int) ($filters['min'] ?? 5);
         $limit = $searching ? 1000 : 300;
 
-        // The real correction fee lives in carrier_charges (category "Address Correction"),
-        // NOT on the invoice line (line.charge_amount is 0 for PDF/FedEx-sourced corrections).
-        // Join the per-(carrier, tracking) address-correction fee so the numbers are honest.
+        // Cache keyed by a data-version stamp (row count + latest id of the corrections table):
+        // when new corrections are imported the stamp changes and the result recomputes; otherwise
+        // repeat loads, re-sorts and pagination are served from cache. The recompute itself is two
+        // small indexed queries merged in PHP (~0.2s) — the previous derived-table join ran ~87s
+        // because MySQL re-scanned the fee subquery once per correction line.
+        $version = DB::table('carrier_invoice_lines')->count().':'.(DB::table('carrier_invoice_lines')->max('id') ?? 0);
+        $cacheKey = 'correction-hotspots:'.md5($version.'|'.json_encode([$carrierId, $min, $limit, $address, $tracking]));
+
+        return Cache::remember($cacheKey, now()->addHours(6), fn (): Collection => self::buildHotspots($carrierId, $address, $tracking, $min, $limit));
+    }
+
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
+    protected static function buildHotspots(?int $carrierId, string $address, string $tracking, int $min, int $limit): Collection
+    {
+        // The real correction fee lives in carrier_charges (category "Address Correction"), NOT on
+        // the invoice line (line.charge_amount is 0 for PDF/FedEx-sourced corrections). Pull the
+        // per-(carrier, tracking) fee once into a map and look it up per line in PHP — the SQL join
+        // between this and the line aggregation is what made the page unusable.
         $adcCategoryId = DB::table('charge_categories')->where('name', 'Address Correction')->value('id');
-        $feeSub = DB::table('carrier_charges')
+        $feeMap = DB::table('carrier_charges')
             ->select('carrier_id', 'tracking_number', DB::raw('SUM(amount) AS fee'))
             ->where('charge_category_id', $adcCategoryId)
             ->whereNotNull('tracking_number')
-            ->groupBy('carrier_id', 'tracking_number');
+            ->groupBy('carrier_id', 'tracking_number')
+            ->get()
+            ->mapWithKeys(fn ($r): array => [$r->carrier_id.'|'.$r->tracking_number => (float) $r->fee]);
 
-        $rows = DB::table('carrier_invoice_lines as l')
+        $lines = DB::table('carrier_invoice_lines as l')
             ->join('carrier_invoices as ci', 'ci.id', '=', 'l.carrier_invoice_id')
             ->join('carriers as c', 'c.id', '=', 'ci.carrier_id')
-            ->leftJoinSub($feeSub, 'f', fn ($join) => $join
-                ->on('f.carrier_id', '=', 'ci.carrier_id')
-                ->on('f.tracking_number', '=', 'l.tracking_number'))
             ->whereNotNull('l.original_address_1')->where('l.original_address_1', '<>', '')
             ->when($carrierId, fn ($q) => $q->where('ci.carrier_id', $carrierId))
-            ->selectRaw('
-                l.original_postal AS zip,
-                UPPER(SUBSTRING(TRIM(l.original_address_1), 1, 16)) AS cluster,
-                MAX(l.original_city) AS city,
-                MAX(l.original_state) AS state,
-                COUNT(*) AS corrections,
-                ROUND(SUM(COALESCE(f.fee, l.charge_amount)), 2) AS fees,
-                GROUP_CONCAT(DISTINCT c.slug) AS carriers,
-                GROUP_CONCAT(l.change_type) AS change_types
-            ')
-            ->groupBy('zip', 'cluster')
-            ->havingRaw('COUNT(*) >= ?', [$min])
-            ->when($address !== '', fn ($q) => $q->havingRaw(
-                'SUM(CASE WHEN l.original_address_1 LIKE ? OR l.original_city LIKE ? OR l.original_state LIKE ? OR l.original_postal LIKE ? THEN 1 ELSE 0 END) > 0',
-                ["%{$address}%", "%{$address}%", "%{$address}%", "%{$address}%"]
-            ))
-            ->when($tracking !== '', fn ($q) => $q->havingRaw(
-                'SUM(CASE WHEN l.tracking_number LIKE ? THEN 1 ELSE 0 END) > 0',
-                ["%{$tracking}%"]
-            ))
-            ->orderByDesc('fees')
-            ->limit($limit)
-            ->get();
+            ->get(['ci.carrier_id', 'c.slug as carrier_slug', 'l.tracking_number', 'l.original_postal as zip',
+                'l.original_address_1', 'l.original_city', 'l.original_state', 'l.change_type', 'l.charge_amount']);
 
-        return $rows->values()->map(fn ($r, int $i): array => [
-            'id' => $i,
-            'location' => $r->cluster,
-            'city_state_zip' => trim((string) ($r->city ?? '').', '.($r->state ?? '').' '.($r->zip ?? '')),
-            'carriers' => strtoupper((string) $r->carriers),
-            'corrections' => (int) $r->corrections,
-            'fees' => (float) $r->fees,
-            'avg_fee' => $r->corrections ? (float) $r->fees / (int) $r->corrections : 0.0,
-            'main_issue' => self::dominant((string) $r->change_types),
-        ]);
+        // Aggregate by (zip, 16-char street cluster) in PHP.
+        $groups = [];
+        foreach ($lines as $l) {
+            $cluster = strtoupper(substr(trim((string) $l->original_address_1), 0, 16));
+            $key = ((string) $l->zip).'|'.$cluster;
+            if (! isset($groups[$key])) {
+                $groups[$key] = [
+                    'zip' => $l->zip, 'cluster' => $cluster,
+                    'city' => (string) ($l->original_city ?? ''), 'state' => (string) ($l->original_state ?? ''),
+                    'corrections' => 0, 'fees' => 0.0, 'carriers' => [], 'change_types' => [],
+                    'match_addr' => false, 'match_track' => false,
+                ];
+            }
+            $groups[$key]['corrections']++;
+            $groups[$key]['fees'] += $feeMap[$l->carrier_id.'|'.$l->tracking_number] ?? (float) $l->charge_amount;
+            if ($l->carrier_slug) {
+                $groups[$key]['carriers'][$l->carrier_slug] = true;
+            }
+            if ($l->change_type) {
+                $groups[$key]['change_types'][] = $l->change_type;
+            }
+            if ($address !== '' && ! $groups[$key]['match_addr']) {
+                $hay = strtolower(($l->original_address_1 ?? '').' '.($l->original_city ?? '').' '.($l->original_state ?? '').' '.($l->zip ?? ''));
+                if (str_contains($hay, strtolower($address))) {
+                    $groups[$key]['match_addr'] = true;
+                }
+            }
+            if ($tracking !== '' && ! $groups[$key]['match_track'] && $l->tracking_number !== null && stripos((string) $l->tracking_number, $tracking) !== false) {
+                $groups[$key]['match_track'] = true;
+            }
+        }
+
+        return collect($groups)
+            ->filter(fn (array $g): bool => $g['corrections'] >= $min
+                && ($address === '' || $g['match_addr'])
+                && ($tracking === '' || $g['match_track']))
+            ->sortByDesc('fees')
+            ->take($limit)
+            ->values()
+            ->map(fn (array $g, int $i): array => [
+                'id' => $i,
+                'location' => $g['cluster'],
+                'city_state_zip' => trim($g['city'].', '.$g['state'].' '.((string) ($g['zip'] ?? ''))),
+                'carriers' => strtoupper(implode(',', array_keys($g['carriers']))),
+                'corrections' => (int) $g['corrections'],
+                'fees' => round((float) $g['fees'], 2),
+                'avg_fee' => $g['corrections'] ? (float) $g['fees'] / (int) $g['corrections'] : 0.0,
+                'main_issue' => self::dominant(implode(',', $g['change_types'])),
+            ]);
     }
 
     /**
