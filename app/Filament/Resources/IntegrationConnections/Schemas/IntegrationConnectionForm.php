@@ -139,15 +139,21 @@ class IntegrationConnectionForm
                                         ->options(fn (): array => Carrier::query()->orderBy('name')->pluck('name', 'slug')->all())
                                         ->helperText('e.g. Smarty → UPS → FedEx. Leave empty to use all active carriers (Smarty preferred).'),
                                     Toggle::make('dry_run')
-                                        ->label('Shadow / dry-run mode (no write-back)')
-                                        ->helperText('When ON: the engine validates and logs exactly what it WOULD change, but does NOT push anything back to Pace. Use to observe corrections for a while before going live.'),
+                                        ->label('Audit only — don\'t write corrections back to Pace')
+                                        ->helperText('ON: we receive the shipment and calculate the corrected address, and log exactly what we WOULD change — but nothing is written back to Pace (safe; Pace is untouched). OFF: corrected addresses are written back to Pace (live).'),
                                 ]),
                             Section::make('Customer Chargeback Push')
-                                ->description('Push eligible carrier charges (a Carrier Chargeback Code flagged to push, with a cost center) back to Pace as JobCost records.')
+                                ->description('Charge eligible carrier fees (a Carrier Chargeback Code flagged to push, with a cost center) back to the customer\'s job in Pace as JobCost records.')
                                 ->schema([
                                     Toggle::make('chargeback_push_enabled')
-                                        ->label('Enable chargeback push')
-                                        ->helperText('OFF (default) ignores records — nothing is pushed. Turning ON pushes only newly imported invoices going forward; earlier charges are released deliberately via the backfill command, never automatically.'),
+                                        ->label('Enable chargebacks')
+                                        ->live()
+                                        ->helperText('OFF (default): carrier charges are never charged back — nothing happens. ON: eligible charges are processed. Whether they actually post to Pace depends on the "Audit only" toggle below.'),
+                                    Toggle::make('chargeback_record_only')
+                                        ->label('Audit only — record, don\'t post to Pace')
+                                        ->default(true)
+                                        ->visible(fn (Get $get): bool => (bool) $get('chargeback_push_enabled'))
+                                        ->helperText('ON (safe): eligible charges are written to the chargeback ledger for review, but NO JobCost is posted to Pace and no customer is billed (status shows "recorded"). OFF: charges post as real JobCosts to the customer\'s job in Pace — live billing. Already-recorded charges are released deliberately via the backfill command, never automatically.'),
                                 ]),
                             Section::make('Sync')
                                 ->schema([
