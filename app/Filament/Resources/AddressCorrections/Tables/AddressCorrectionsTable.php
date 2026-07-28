@@ -9,6 +9,7 @@ use App\Support\AddressComparison;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -72,6 +73,11 @@ class AddressCorrectionsTable
                     ->badge()
                     ->placeholder('—')
                     ->sortable(),
+                TextColumn::make('status')
+                    ->label('Status')
+                    ->state(fn (CorrectedAddress $record): string => $record->isSuperseded() ? 'Superseded' : 'Active')
+                    ->badge()
+                    ->color(fn (CorrectedAddress $record): string => $record->isSuperseded() ? 'gray' : 'success'),
             ])
             ->defaultSort('correction_count', 'desc')
             ->modifyQueryUsing(fn (Builder $query): Builder => $query
@@ -84,6 +90,17 @@ class AddressCorrectionsTable
                 SelectFilter::make('first_carrier_id')
                     ->label('First Carrier')
                     ->options(Carrier::whereIn('slug', ['ups', 'fedex'])->pluck('name', 'id')),
+                TernaryFilter::make('superseded')
+                    ->label('Records')
+                    ->placeholder('All')
+                    ->trueLabel('Superseded only')
+                    ->falseLabel('Active only')
+                    ->default(false) // hide dead/superseded forms unless asked
+                    ->queries(
+                        true: fn (Builder $q): Builder => $q->whereNotNull('superseded_by_id'),
+                        false: fn (Builder $q): Builder => $q->whereNull('superseded_by_id'),
+                        blank: fn (Builder $q): Builder => $q,
+                    ),
             ])
             ->recordActions([
                 ViewAction::make()

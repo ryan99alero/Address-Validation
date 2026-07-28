@@ -110,6 +110,28 @@ test('threader breaks a reversal instead of forming a cycle', function () {
         ->and($a->fresh()->resolveTerminal()->id)->toBe($a->id);
 });
 
+test('applyPending supersedes and flips the review event to applied', function () {
+    $a = chainGood('1 old rd', 'austin', 'tx', '78701');
+    $b = chainGood('1 new rd', 'austin', 'tx', '78702');
+    $bad = chainVariant($a->id, '9 bad st', 'austin', 'tx', '78701', 3);
+    $a->update(['variant_count' => 1]);
+    $event = app(CorrectionThreader::class)->recordEvent($a, $b, AddressSupersession::TRIGGER_MANUAL, AddressSupersession::STATUS_PENDING_REVIEW);
+
+    expect(app(CorrectionThreader::class)->applyPending($event, null))->toBeTrue()
+        ->and($event->fresh()->status)->toBe('applied')
+        ->and($a->fresh()->superseded_by_id)->toBe($b->id)
+        ->and($bad->fresh()->corrected_address_id)->toBe($b->id);
+});
+
+test('applyPending is a no-op on a non-pending event', function () {
+    $a = chainGood('2 old rd', 'austin', 'tx', '78701');
+    $b = chainGood('2 new rd', 'austin', 'tx', '78702');
+    $event = app(CorrectionThreader::class)->recordEvent($a, $b, AddressSupersession::TRIGGER_BACKFILL, AddressSupersession::STATUS_REJECTED_GARBAGE);
+
+    expect(app(CorrectionThreader::class)->applyPending($event, null))->toBeFalse()
+        ->and($a->fresh()->superseded_by_id)->toBeNull();
+});
+
 // --- Backfill ---------------------------------------------------------------
 
 test('backfill threads a re-corrected address (APPLY) and marks it superseded', function () {

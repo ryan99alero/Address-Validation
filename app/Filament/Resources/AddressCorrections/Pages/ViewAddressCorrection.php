@@ -17,6 +17,23 @@ class ViewAddressCorrection extends ViewRecord
     {
         return $schema
             ->schema([
+                Section::make('Superseded')
+                    ->icon('heroicon-o-exclamation-triangle')
+                    ->iconColor('warning')
+                    ->visible(fn ($record): bool => $record->isSuperseded())
+                    ->schema([
+                        TextEntry::make('superseded_notice')
+                            ->hiddenLabel()
+                            ->state(function ($record): string {
+                                $date = $record->superseded_at?->format('M j, Y');
+
+                                return 'This form was superseded'.($date ? ' on '.$date : '')
+                                    .' — the engine now resolves to '.$record->resolveTerminal()->full_address.'.';
+                            })
+                            ->color('warning')
+                            ->weight('bold'),
+                    ]),
+
                 Section::make('Corrected (Good) Address')
                     ->description('The single correct address. Every bad variation below was corrected to this.')
                     ->icon('heroicon-o-check-circle')
@@ -67,6 +84,49 @@ class ViewAddressCorrection extends ViewRecord
                                     ->placeholder('—')
                                     ->tooltip('Ship date of the most recent correction (falls back to the invoice date)'),
                             ]),
+                    ]),
+
+                Section::make('Correction Chain')
+                    ->description('Every form this address was corrected through, oldest to current.')
+                    ->icon('heroicon-o-arrow-path-rounded-square')
+                    ->collapsible()
+                    ->visible(fn ($record): bool => count($record->chainToTerminal()) > 1 || $record->supersedes()->exists())
+                    ->schema([
+                        TextEntry::make('chain')
+                            ->hiddenLabel()
+                            ->html()
+                            ->state(function ($record): string {
+                                $parts = [];
+                                foreach ($record->chainToTerminal() as $node) {
+                                    $label = e($node->full_address);
+                                    $parts[] = $node->superseded_by_id === null ? "<strong>{$label} — current</strong>" : $label;
+                                }
+                                $line = implode(' &rarr; ', $parts);
+                                $into = $record->supersedes()->count();
+
+                                return $into > 0 ? $line.'<br>'.$into.' earlier form(s) resolve into this address.' : $line;
+                            }),
+                    ]),
+
+                Section::make('Carrier Verification')
+                    ->description('When each carrier last confirmed this address ships without a correction fee.')
+                    ->icon('heroicon-o-shield-check')
+                    ->schema([
+                        TextEntry::make('verification')
+                            ->hiddenLabel()
+                            ->html()
+                            ->state(function ($record): string {
+                                $rows = $record->verifications()->with('carrier')->get();
+                                if ($rows->isEmpty()) {
+                                    return 'Not yet verified against any carrier.';
+                                }
+
+                                return $rows->map(function ($v): string {
+                                    $when = $v->verified_at?->format('M j, Y') ?? '—';
+
+                                    return e(($v->carrier->name ?? 'Carrier').': '.$v->status.' ('.$when.')');
+                                })->implode('<br>');
+                            }),
                     ]),
             ]);
     }
