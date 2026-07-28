@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Observers\CarrierInvoiceLineObserver;
+use App\Services\Invoices\CorrectionGuard;
+use App\Services\Invoices\CorrectionThreader;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -169,12 +171,27 @@ class CarrierInvoiceLine extends Model
         $correctedAddress = $result['address'];
         $isNewVariant = false;
 
+        $teachVariant = $this->original_address_1 && $this->original_postal && ! $this->originalIsOwnAddress();
+
+        // Phase 3 — detect a re-correction as we ingest it and thread it (or queue it for review /
+        // reject garbage) so the cache converges instead of fragmenting. Returns the good address the
+        // variant should bind to, or null when the correction is garbage and must not be taught.
+        if ($teachVariant && config('correction_cache.ingest_threading', true)) {
+            $target = $this->applyIngestThreading($correctedAddress);
+            if ($target === null) {
+                $this->update(['corrected_address_id' => $correctedAddress->id]);
+
+                return false;
+            }
+            $correctedAddress = $target;
+        }
+
         // Create variant mapping for the original (bad) address — but NOT when the
         // "original" is our own address. Carriers sometimes encode the shipper (RAND)
         // as the original recipient on returns/undeliverables; the invoice line keeps
         // that factual data, but teaching the validation cache to "correct" our own
         // address to a customer's would poison every future lookup of our address.
-        if ($this->original_address_1 && $this->original_postal && ! $this->originalIsOwnAddress()) {
+        if ($teachVariant) {
             $variantResult = AddressVariant::createOrUpdateVariant(
                 $correctedAddress->id,
                 $this->original_address_1,
@@ -191,6 +208,90 @@ class CarrierInvoiceLine extends Model
         $this->update(['corrected_address_id' => $correctedAddress->id]);
 
         return $isNewVariant;
+    }
+
+    /**
+     * Phase 3 ingest-time threading. The corrected (good) address for this line is $corrected; the
+     * bad address we shipped to is original_*. Detects the two re-correction shapes and threads /
+     * reviews / rejects via the shared guard + threader:
+     *   - garbage: the carrier "corrected" us to a different place / our own dock — refuse it
+     *   - T1: original is itself a good address we already hold — it was re-corrected to $corrected
+     *   - T2: original already resolves to a DIFFERENT good than $corrected — fragmentation drift
+     * Returns the good address the variant + line should bind to (the live terminal), or null when
+     * the correction is garbage and must not be taught to the cache.
+     */
+    private function applyIngestThreading(CorrectedAddress $corrected): ?CorrectedAddress
+    {
+        $terminal = $corrected->resolveTerminal();
+        $guard = new CorrectionGuard;
+        $threader = app(CorrectionThreader::class);
+        $carrierId = $this->carrierInvoice?->carrier_id;
+        $date = $this->ship_date ?? $this->carrierInvoice?->invoice_date;
+
+        $originalForm = [
+            'address_1' => $this->original_address_1, 'city' => $this->original_city,
+            'state' => $this->original_state, 'postal' => $this->original_postal,
+        ];
+
+        // Garbage: don't teach it — the carrier corrected our shipment to somewhere it doesn't belong.
+        $verdict = $guard->evaluate($originalForm, $this->addressForm($terminal));
+        if ($verdict['verdict'] === CorrectionGuard::REJECT) {
+            $threader->recordEvent(null, $terminal, AddressSupersession::TRIGGER_RECORRECTION,
+                AddressSupersession::STATUS_REJECTED_GARBAGE,
+                ['carrier_id' => $carrierId, 'carrier_invoice_line_id' => $this->id, 'guard_result' => $verdict]);
+
+            return null;
+        }
+
+        $originalHash = CorrectedAddress::computeHash(
+            $this->original_address_1, $this->original_city, $this->original_state,
+            $this->original_postal, $this->original_country ?? 'us'
+        );
+
+        // T1: original is a good address we already hold, now re-corrected to $terminal.
+        $heldGood = CorrectedAddress::query()->where('address_hash', $originalHash)->whereNull('superseded_by_id')->first();
+        if ($heldGood !== null && $heldGood->id !== $terminal->id) {
+            $this->guardedThread($heldGood, $terminal, AddressSupersession::TRIGGER_RECORRECTION, $guard, $threader, $carrierId, $date);
+
+            return $terminal->fresh();
+        }
+
+        // T2: the same bad input already resolves to a different good than $terminal (fragmentation).
+        $existing = AddressVariant::query()
+            ->where('input_postal', CorrectedAddress::normalizePostal($this->original_postal))
+            ->where('input_hash', $originalHash)
+            ->first();
+        if ($existing !== null) {
+            $currentTerminal = CorrectedAddress::find($existing->corrected_address_id)?->resolveTerminal();
+            if ($currentTerminal !== null && $currentTerminal->id !== $terminal->id) {
+                $this->guardedThread($currentTerminal, $terminal, AddressSupersession::TRIGGER_VARIANT_CONFLICT, $guard, $threader, $carrierId, $date);
+            }
+        }
+
+        return $terminal->fresh();
+    }
+
+    private function guardedThread(CorrectedAddress $from, CorrectedAddress $to, string $trigger, CorrectionGuard $guard, CorrectionThreader $threader, ?int $carrierId, mixed $date): void
+    {
+        $verdict = $guard->evaluate($this->addressForm($from), $this->addressForm($to));
+        $evidence = [
+            'trigger' => $trigger, 'carrier_id' => $carrierId, 'carrier_invoice_line_id' => $this->id,
+            'date' => $date, 'guard_result' => $verdict,
+        ];
+
+        match ($verdict['verdict']) {
+            CorrectionGuard::APPLY => $threader->thread($from, $to, $evidence),
+            CorrectionGuard::REJECT => $threader->recordEvent($from, $to, $trigger, AddressSupersession::STATUS_REJECTED_GARBAGE, $evidence),
+            default => $threader->recordEvent($from, $to, $trigger, AddressSupersession::STATUS_PENDING_REVIEW, $evidence),
+        };
+    }
+
+    /**
+     * @return array{address_1: ?string, city: ?string, state: ?string, postal: ?string}
+     */
+    private function addressForm(CorrectedAddress $a): array
+    {
+        return ['address_1' => $a->address_1, 'city' => $a->city, 'state' => $a->state, 'postal' => $a->postal];
     }
 
     /**

@@ -4,10 +4,12 @@ use App\Models\AddressSupersession;
 use App\Models\AddressVariant;
 use App\Models\AddressVerification;
 use App\Models\Carrier;
+use App\Models\CarrierInvoiceLine;
 use App\Models\CorrectedAddress;
 use App\Models\ZipCentroid;
 use App\Services\Invoices\CorrectionGuard;
 use App\Services\Invoices\CorrectionThreader;
+use Illuminate\Support\Facades\DB;
 
 function chainGood(string $addr1, string $city, string $state, string $postal): CorrectedAddress
 {
@@ -168,4 +170,86 @@ test('backfill --dry-run changes nothing', function () {
 
     expect($a->fresh()->superseded_by_id)->toBeNull()
         ->and(AddressSupersession::count())->toBe(0);
+});
+
+// --- Phase 3: ingest-time threading -----------------------------------------
+
+function ingestInvoiceId(): int
+{
+    $carrier = Carrier::factory()->create(['slug' => 'ups', 'name' => 'UPS']);
+
+    return DB::table('carrier_invoices')->insertGetId([
+        'carrier_id' => $carrier->id, 'invoice_number' => 'INV'.$carrier->id, 'invoice_date' => '2026-05-01',
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+}
+
+/**
+ * @param  array{0: string, 1: string, 2: string, 3: string}  $orig
+ * @param  array{0: string, 1: string, 2: string, 3: string}  $corr
+ */
+function ingestCorrection(int $invId, array $orig, array $corr): CarrierInvoiceLine
+{
+    $line = CarrierInvoiceLine::create([
+        'carrier_invoice_id' => $invId,
+        'tracking_number' => 'TRK-'.$orig[3].'-'.$corr[3],
+        'original_address_1' => $orig[0], 'original_city' => $orig[1], 'original_state' => $orig[2], 'original_postal' => $orig[3], 'original_country' => 'US',
+        'corrected_address_1' => $corr[0], 'corrected_city' => $corr[1], 'corrected_state' => $corr[2], 'corrected_postal' => $corr[3], 'corrected_country' => 'US',
+        'charge_code' => 'ADC', 'charge_amount' => 11, 'ship_date' => '2026-05-01',
+    ]);
+    $line->linkToCorrectionCache();
+
+    return $line;
+}
+
+function findGood(string $a, string $c, string $s, string $p): ?CorrectedAddress
+{
+    return CorrectedAddress::where('address_hash', CorrectedAddress::computeHash($a, $c, $s, $p, 'us'))->first();
+}
+
+test('ingest T2: a conflicting correction threads the old good into the new (Culver drift caught live)', function () {
+    $invId = ingestInvoiceId();
+    $g = chainGood('14431 culver dr', 'irvine', 'ca', '92614');
+    chainVariant($g->id, '14431 culver dr', 'irvine', 'ca', '92714', 5);
+
+    ingestCorrection($invId, ['14431 culver dr', 'irvine', 'ca', '92714'], ['14431 culver dr', 'irvine', 'ca', '92604']);
+
+    $c = findGood('14431 culver dr', 'irvine', 'ca', '92604');
+    expect($c)->not->toBeNull()
+        ->and($g->fresh()->superseded_by_id)->toBe($c->id);
+});
+
+test('ingest T1: re-correction of a held-good address threads it and re-points its variants', function () {
+    $invId = ingestInvoiceId();
+    $a = chainGood('100 main st', 'austin', 'tx', '78701');
+    $bad = chainVariant($a->id, '55 bad ave', 'austin', 'tx', '78701', 3);
+
+    ingestCorrection($invId, ['100 main st', 'austin', 'tx', '78701'], ['100 main st', 'austin', 'tx', '78702']);
+
+    $c = findGood('100 main st', 'austin', 'tx', '78702');
+    expect($a->fresh()->superseded_by_id)->toBe($c->id)
+        ->and($bad->fresh()->corrected_address_id)->toBe($c->id);
+});
+
+test('ingest garbage: a far different-state correction is refused, not taught to the cache', function () {
+    $invId = ingestInvoiceId();
+    ZipCentroid::create(['zip' => '77042', 'lat' => 29.74, 'lng' => -95.55]);
+    ZipCentroid::create(['zip' => '72634', 'lat' => 36.23, 'lng' => -92.68]);
+
+    ingestCorrection($invId, ['10 main st', 'houston', 'tx', '77042'], ['10 main st', 'x', 'ar', '72634']);
+
+    $badHash = AddressVariant::computeHash('10 main st', 'houston', 'tx', '77042', 'us');
+    expect(AddressVariant::where('input_hash', $badHash)->count())->toBe(0)
+        ->and(AddressSupersession::where('status', 'rejected_garbage')->count())->toBe(1);
+});
+
+test('ingest kill-switch off falls back to the old file-and-forget behavior', function () {
+    config(['correction_cache.ingest_threading' => false]);
+    $invId = ingestInvoiceId();
+    $g = chainGood('14431 culver dr', 'irvine', 'ca', '92614');
+    chainVariant($g->id, '14431 culver dr', 'irvine', 'ca', '92714', 5);
+
+    ingestCorrection($invId, ['14431 culver dr', 'irvine', 'ca', '92714'], ['14431 culver dr', 'irvine', 'ca', '92604']);
+
+    expect($g->fresh()->superseded_by_id)->toBeNull();
 });
