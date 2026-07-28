@@ -39,6 +39,11 @@ class CartonCostSyncService
         'ship_date' => '@actualDate',
         'pace_job_number' => 'shipment/job/@job',
         'pace_customer_id' => 'shipment/job/@customer',
+        // Customer/CSR/salesperson NAMES traverse the job's FKs in the same query (verified against
+        // Pace) — so a carton row carries the full "who owns this" set for the correction-cache view.
+        'pace_customer_name' => 'shipment/job/customer/@custName',
+        'pace_csr_name' => 'shipment/job/csr/@name',
+        'pace_salesperson_name' => 'shipment/job/salesPerson/@name',
         // Custom JobShipment reference fields. Pace stores u_ fields in a parallel extension table,
         // and the FindObjects descriptor is CASE-SENSITIVE: it must be the uppercase "U_reference"
         // (lowercase "u_reference" is rejected as an invalid xpath). U_reference2 mirrors the job #.
@@ -93,6 +98,9 @@ class CartonCostSyncService
                 'ship_date' => $shipDate,
                 'pace_job_number' => $row['pace_job_number'] ?? null,
                 'pace_customer_id' => $row['pace_customer_id'] ?? null,
+                'pace_customer_name' => $row['pace_customer_name'] ?? null,
+                'pace_csr_name' => $row['pace_csr_name'] ?? null,
+                'pace_salesperson_name' => $row['pace_salesperson_name'] ?? null,
                 'U_reference' => $row['U_reference'] ?? null,
                 'U_reference2' => $row['U_reference2'] ?? null,
                 'U_reference3' => $row['U_reference3'] ?? null,

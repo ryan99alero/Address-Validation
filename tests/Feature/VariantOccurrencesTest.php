@@ -62,6 +62,34 @@ test('variantOccurrences links each bad address to its most recent tracking + Pa
         ->and($o['salesperson'])->toBe('Bob');
 });
 
+test('latestOccurrence returns the most recent tracking + reference date for a bad address', function () {
+    $variant = makeVariant($this->corrected->id, '55 REPEAT AVE', 'AUSTIN', 'TX', '78701');
+    makeCorrectionLine($this->invId, $this->corrected->id, 'OLD', '55 REPEAT AVE', 'AUSTIN', 'TX', '78701', '2025-01-01');
+    makeCorrectionLine($this->invId, $this->corrected->id, 'NEW', '55 REPEAT AVE', 'AUSTIN', 'TX', '78701', '2026-03-15');
+
+    $occ = $variant->latestOccurrence();
+    expect($occ['tracking'])->toBe('NEW')
+        ->and($occ['date'])->toStartWith('2026-03-15');
+});
+
+test('variantOccurrences prefers the carton rep names over chargeback names', function () {
+    $variant = makeVariant($this->corrected->id, '77 CARTON WAY', 'AUSTIN', 'TX', '78701');
+    makeCorrectionLine($this->invId, $this->corrected->id, 'C1', '77 CARTON WAY', 'AUSTIN', 'TX', '78701', '2026-02-01');
+    CartonCost::create([
+        'tracking_number' => 'C1', 'pace_job_number' => 'J', 'pace_customer_id' => 'CID',
+        'pace_customer_name' => 'Carton Cust', 'pace_csr_name' => 'Carton CSR', 'pace_salesperson_name' => 'Carton Rep',
+    ]);
+    ChargebackPush::create([
+        'dedupe_key' => 'k2', 'carrier_id' => $this->carrier->id, 'tracking_number' => 'C1', 'amount' => 1, 'status' => 'pushed',
+        'pace_customer_name' => 'Push Cust',
+    ]);
+
+    $o = $this->corrected->variantOccurrences()[$variant->input_hash];
+    expect($o['customer_name'])->toBe('Carton Cust')     // carton wins over the chargeback name
+        ->and($o['csr'])->toBe('Carton CSR')
+        ->and($o['salesperson'])->toBe('Carton Rep');
+});
+
 test('variantOccurrences returns tracking with null rep data when Pace has nothing', function () {
     $variant = makeVariant($this->corrected->id, '9 UNKNOWN RD', 'AUSTIN', 'TX', '78701');
     makeCorrectionLine($this->invId, $this->corrected->id, 'T5', '9 UNKNOWN RD', 'AUSTIN', 'TX', '78701', '2026-03-01');

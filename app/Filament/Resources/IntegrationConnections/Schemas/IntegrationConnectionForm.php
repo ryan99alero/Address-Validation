@@ -155,6 +155,16 @@ class IntegrationConnectionForm
                                         ->visible(fn (Get $get): bool => (bool) $get('chargeback_push_enabled'))
                                         ->helperText('ON (safe): eligible charges are written to the chargeback ledger for review, but NO JobCost is posted to Pace and no customer is billed (status shows "recorded"). OFF: charges post as real JobCosts to the customer\'s job in Pace — live billing. Already-recorded charges are released deliberately via the backfill command, never automatically.'),
                                 ]),
+                            Section::make('Correction Cache')
+                                ->description('Enrichment for the address-correction cache.')
+                                ->schema([
+                                    TextInput::make('correction_cache_min_lookup')
+                                        ->label('Minimum times-corrected for Pace lookup')
+                                        ->numeric()
+                                        ->default(5)
+                                        ->minValue(1)
+                                        ->helperText('A bad address corrected at least this many times gets a live Pace Carton lookup (run `correction-cache:pace-lookup`) to resolve its Job / Customer / CSR / Sales Rep onto the carton. Higher = fewer Pace calls. Default 5.'),
+                                ]),
                             Section::make('Sync')
                                 ->schema([
                                     TextInput::make('sync_interval_minutes')

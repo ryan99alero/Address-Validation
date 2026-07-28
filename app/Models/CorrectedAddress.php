@@ -102,9 +102,9 @@ class CorrectedAddress extends Model
                 'tracking' => $tracking,
                 'job' => $carton?->pace_job_number ?? $push?->pace_job ?? null,
                 'customer_id' => $carton?->pace_customer_id ?? $push?->pace_customer_id ?? null,
-                'customer_name' => $push?->pace_customer_name ?? null,
-                'csr' => $push?->pace_csr_name ?? null,
-                'salesperson' => $push?->pace_salesperson_name ?? null,
+                'customer_name' => $carton?->pace_customer_name ?? $push?->pace_customer_name ?? null,
+                'csr' => $carton?->pace_csr_name ?? $push?->pace_csr_name ?? null,
+                'salesperson' => $carton?->pace_salesperson_name ?? $push?->pace_salesperson_name ?? null,
             ];
         }
 

@@ -39,6 +39,7 @@ class IntegrationConnection extends Model
         'dry_run',
         'chargeback_push_enabled',
         'chargeback_record_only',
+        'correction_cache_min_lookup',
         'is_active',
         'last_connected_at',
         'last_error_at',
@@ -71,6 +72,7 @@ class IntegrationConnection extends Model
             'dry_run' => 'boolean',
             'chargeback_push_enabled' => 'boolean',
             'chargeback_record_only' => 'boolean',
+            'correction_cache_min_lookup' => 'integer',
             'sync_interval_minutes' => 'integer',
             'last_synced_at' => 'datetime',
         ];
