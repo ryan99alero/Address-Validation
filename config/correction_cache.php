@@ -17,4 +17,12 @@ return [
     // fragmenting. Kill-switch — set CORRECTION_INGEST_THREADING=false to fall back to the old
     // file-and-forget behavior instantly (no deploy).
     'ingest_threading' => (bool) env('CORRECTION_INGEST_THREADING', true),
+
+    // Phase 4: a good address is trusted as fee-free for a carrier until this many days after its last
+    // clean confirmation; past that the nightly reverify job re-checks it against the carrier's API.
+    'verification_max_age_days' => (int) env('CORRECTION_VERIFICATION_MAX_AGE_DAYS', 365),
+
+    // Max addresses the nightly reverify dispatches per carrier per run (drains a big backlog over time
+    // without API-storming). 0 = disable the reverify job entirely.
+    'verification_daily_limit' => (int) env('CORRECTION_VERIFICATION_DAILY_LIMIT', 50),
 ];

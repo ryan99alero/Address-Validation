@@ -79,6 +79,15 @@ Schedule::command('chargebacks:reconcile')
     ->name('chargebacks-reconcile')
     ->withoutOverlapping();
 
+// Re-verify stale cached good addresses against the carrier that charges the fees (fee-avoidance,
+// not USPS-correctness). Capped per run (verification_daily_limit) so a big backlog drains over time;
+// prioritizes the most-used addresses. Set CORRECTION_VERIFICATION_DAILY_LIMIT=0 to disable.
+Schedule::command('correction-cache:reverify')
+    ->dailyAt('02:30')
+    ->name('correction-cache-reverify')
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/correction-reverify.log'));
+
 // Prune Telescope debug entries nightly (keep 48h). telescope_entries is otherwise the largest
 // table and grows unbounded; Telescope stays on for now but doesn't need weeks of history.
 Schedule::command('telescope:prune --hours=48')
