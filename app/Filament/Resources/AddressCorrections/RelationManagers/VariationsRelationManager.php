@@ -17,6 +17,24 @@ class VariationsRelationManager extends RelationManager
 
     protected static ?string $title = 'Bad Address Variations';
 
+    /** @var array<string, array<string, mixed>>|null memoized per-variant tracking + Pace rep data */
+    private ?array $occ = null;
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function occ(): array
+    {
+        return $this->occ ??= $this->getOwnerRecord()->variantOccurrences();
+    }
+
+    private function occField(AddressVariant $record, string $key): ?string
+    {
+        $value = $this->occ()[$record->input_hash][$key] ?? null;
+
+        return ($value === null || $value === '') ? null : (string) $value;
+    }
+
     public function table(Table $table): Table
     {
         return $table
@@ -50,6 +68,36 @@ class VariationsRelationManager extends RelationManager
                     ->date('M j, Y')
                     ->placeholder('—')
                     ->sortable(),
+                TextColumn::make('recent_tracking')
+                    ->label('Recent Tracking')
+                    ->state(fn (AddressVariant $record): ?string => $this->occField($record, 'tracking'))
+                    ->fontFamily('mono')
+                    ->copyable()
+                    ->placeholder('—'),
+                TextColumn::make('job')
+                    ->label('Job #')
+                    ->state(fn (AddressVariant $record): ?string => $this->occField($record, 'job'))
+                    ->placeholder('—'),
+                TextColumn::make('customer')
+                    ->label('Customer')
+                    ->state(function (AddressVariant $record): ?string {
+                        $id = $this->occField($record, 'customer_id');
+                        $name = $this->occField($record, 'customer_name');
+
+                        return trim(($id ?? '').($id !== null && $name !== null ? ' · ' : '').($name ?? '')) ?: null;
+                    })
+                    ->wrap()
+                    ->placeholder('—'),
+                TextColumn::make('csr')
+                    ->label('CSR')
+                    ->state(fn (AddressVariant $record): ?string => $this->occField($record, 'csr'))
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('salesperson')
+                    ->label('Sales Rep')
+                    ->state(fn (AddressVariant $record): ?string => $this->occField($record, 'salesperson'))
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->defaultSort('times_seen', 'desc')
             ->filters([

@@ -57,6 +57,60 @@ class CorrectedAddress extends Model
         return $this->hasMany(CarrierInvoiceLine::class);
     }
 
+    /**
+     * Per-variant occurrence data for the "Bad Address Variations" table: the newest correction
+     * line per original-address hash gives the most recent tracking number, then CartonCost (Pace
+     * job #, customer id) and ChargebackPush (customer name, CSR, salesperson) enrich it by tracking.
+     * Keyed by the variant's input_hash so the table can look up each row in O(1).
+     *
+     * @return array<string, array{tracking: string, job: ?string, customer_id: ?string, customer_name: ?string, csr: ?string, salesperson: ?string}>
+     */
+    public function variantOccurrences(): array
+    {
+        $lines = $this->invoiceLines()
+            ->whereNotNull('tracking_number')->where('tracking_number', '<>', '')
+            ->orderByDesc('ship_date')->orderByDesc('id')
+            ->get(['tracking_number', 'original_address_1', 'original_city', 'original_state', 'original_postal', 'original_country']);
+
+        // Newest tracking per variant (its original-address hash matches AddressVariant::computeHash).
+        $byHash = [];
+        foreach ($lines as $line) {
+            if (($line->original_address_1 ?? '') === '') {
+                continue;
+            }
+            $hash = AddressVariant::computeHash(
+                $line->original_address_1, $line->original_city, $line->original_state,
+                (string) $line->original_postal, $line->original_country ?? 'us'
+            );
+            $byHash[$hash] ??= $line->tracking_number; // first seen = most recent (ordered desc)
+        }
+
+        if ($byHash === []) {
+            return [];
+        }
+
+        $trackings = array_values(array_unique($byHash));
+        $cartons = CartonCost::whereIn('tracking_number', $trackings)->get()->keyBy('tracking_number');
+        $pushes = ChargebackPush::whereIn('tracking_number', $trackings)
+            ->orderByDesc('id')->get()->unique('tracking_number')->keyBy('tracking_number');
+
+        $out = [];
+        foreach ($byHash as $hash => $tracking) {
+            $carton = $cartons->get($tracking);
+            $push = $pushes->get($tracking);
+            $out[$hash] = [
+                'tracking' => $tracking,
+                'job' => $carton?->pace_job_number ?? $push?->pace_job ?? null,
+                'customer_id' => $carton?->pace_customer_id ?? $push?->pace_customer_id ?? null,
+                'customer_name' => $push?->pace_customer_name ?? null,
+                'csr' => $push?->pace_csr_name ?? null,
+                'salesperson' => $push?->pace_salesperson_name ?? null,
+            ];
+        }
+
+        return $out;
+    }
+
     // Static Methods
 
     /**
