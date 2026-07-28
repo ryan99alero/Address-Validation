@@ -74,6 +74,12 @@ class VariationsRelationManager extends RelationManager
                     ->fontFamily('mono')
                     ->copyable()
                     ->placeholder('—'),
+                TextColumn::make('shipment_date')
+                    ->label('Shipment Date')
+                    ->state(fn (AddressVariant $record): ?string => $this->occField($record, 'date'))
+                    ->date('M j, Y')
+                    ->placeholder('—')
+                    ->tooltip('Ship date of the most recent correction (falls back to the invoice date)'),
                 TextColumn::make('job')
                     ->label('Job #')
                     ->state(fn (AddressVariant $record): ?string => $this->occField($record, 'job'))

@@ -58,7 +58,7 @@ class AddressVariant extends Model
             ->join('carrier_invoices as ci', 'ci.id', '=', 'l.carrier_invoice_id')
             ->where('l.corrected_address_id', $this->corrected_address_id)
             ->whereNotNull('l.tracking_number')->where('l.tracking_number', '<>', '')
-            ->orderByDesc('l.ship_date')->orderByDesc('l.id')
+            ->orderByRaw('COALESCE(l.ship_date, ci.invoice_date) DESC')->orderByDesc('l.id')
             ->get(['l.tracking_number', 'l.ship_date', 'ci.invoice_date',
                 'l.original_address_1', 'l.original_city', 'l.original_state', 'l.original_postal', 'l.original_country']);
 

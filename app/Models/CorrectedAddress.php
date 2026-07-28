@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 class CorrectedAddress extends Model
 {
@@ -63,16 +64,23 @@ class CorrectedAddress extends Model
      * job #, customer id) and ChargebackPush (customer name, CSR, salesperson) enrich it by tracking.
      * Keyed by the variant's input_hash so the table can look up each row in O(1).
      *
-     * @return array<string, array{tracking: string, job: ?string, customer_id: ?string, customer_name: ?string, csr: ?string, salesperson: ?string}>
+     * @return array<string, array{tracking: string, date: ?string, job: ?string, customer_id: ?string, customer_name: ?string, csr: ?string, salesperson: ?string}>
      */
     public function variantOccurrences(): array
     {
-        $lines = $this->invoiceLines()
-            ->whereNotNull('tracking_number')->where('tracking_number', '<>', '')
-            ->orderByDesc('ship_date')->orderByDesc('id')
-            ->get(['tracking_number', 'original_address_1', 'original_city', 'original_state', 'original_postal', 'original_country']);
+        $lines = DB::table('carrier_invoice_lines as l')
+            ->join('carrier_invoices as ci', 'ci.id', '=', 'l.carrier_invoice_id')
+            ->where('l.corrected_address_id', $this->id)
+            ->whereNotNull('l.tracking_number')->where('l.tracking_number', '<>', '')
+            // Most recent by a REAL date — the shipment date, or the invoice date when the line's
+            // ship_date is missing/stale (UPS corrections often carry a null or old ship_date). Never
+            // the import date.
+            ->orderByRaw('COALESCE(l.ship_date, ci.invoice_date) DESC')
+            ->orderByDesc('l.id')
+            ->get(['l.tracking_number', 'l.ship_date', 'ci.invoice_date',
+                'l.original_address_1', 'l.original_city', 'l.original_state', 'l.original_postal', 'l.original_country']);
 
-        // Newest tracking per variant (its original-address hash matches AddressVariant::computeHash).
+        // Newest tracking + its shipment/invoice date per variant (original-address hash).
         $byHash = [];
         foreach ($lines as $line) {
             if (($line->original_address_1 ?? '') === '') {
@@ -82,24 +90,26 @@ class CorrectedAddress extends Model
                 $line->original_address_1, $line->original_city, $line->original_state,
                 (string) $line->original_postal, $line->original_country ?? 'us'
             );
-            $byHash[$hash] ??= $line->tracking_number; // first seen = most recent (ordered desc)
+            $byHash[$hash] ??= ['tracking' => $line->tracking_number, 'date' => $line->ship_date ?: ($line->invoice_date ?: null)];
         }
 
         if ($byHash === []) {
             return [];
         }
 
-        $trackings = array_values(array_unique($byHash));
+        $trackings = array_values(array_unique(array_column($byHash, 'tracking')));
         $cartons = CartonCost::whereIn('tracking_number', $trackings)->get()->keyBy('tracking_number');
         $pushes = ChargebackPush::whereIn('tracking_number', $trackings)
             ->orderByDesc('id')->get()->unique('tracking_number')->keyBy('tracking_number');
 
         $out = [];
-        foreach ($byHash as $hash => $tracking) {
+        foreach ($byHash as $hash => $occurrence) {
+            $tracking = $occurrence['tracking'];
             $carton = $cartons->get($tracking);
             $push = $pushes->get($tracking);
             $out[$hash] = [
                 'tracking' => $tracking,
+                'date' => $occurrence['date'],
                 'job' => $carton?->pace_job_number ?? $push?->pace_job ?? null,
                 'customer_id' => $carton?->pace_customer_id ?? $push?->pace_customer_id ?? null,
                 'customer_name' => $carton?->pace_customer_name ?? $push?->pace_customer_name ?? null,

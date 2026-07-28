@@ -55,6 +55,7 @@ test('variantOccurrences links each bad address to its most recent tracking + Pa
     expect($map)->toHaveKey($variant->input_hash);
     $o = $map[$variant->input_hash];
     expect($o['tracking'])->toBe('1Z9')          // most recent, not OLD9
+        ->and($o['date'])->toStartWith('2026-02-10') // the newer occurrence's ship date
         ->and($o['job'])->toBe('JOB1')
         ->and($o['customer_id'])->toBe('CUST1')
         ->and($o['customer_name'])->toBe('Acme Co')
@@ -88,6 +89,19 @@ test('variantOccurrences prefers the carton rep names over chargeback names', fu
     expect($o['customer_name'])->toBe('Carton Cust')     // carton wins over the chargeback name
         ->and($o['csr'])->toBe('Carton CSR')
         ->and($o['salesperson'])->toBe('Carton Rep');
+});
+
+test('the occurrence date falls back to the invoice date when the line ship_date is null', function () {
+    $variant = makeVariant($this->corrected->id, '88 NODATE ST', 'AUSTIN', 'TX', '78701');
+    DB::table('carrier_invoice_lines')->insert([
+        'carrier_invoice_id' => $this->invId, 'corrected_address_id' => $this->corrected->id, 'tracking_number' => 'ND1',
+        'original_address_1' => '88 NODATE ST', 'original_city' => 'AUSTIN', 'original_state' => 'TX', 'original_postal' => '78701', 'original_country' => 'US',
+        'ship_date' => null, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    $o = $this->corrected->variantOccurrences()[$variant->input_hash];
+    expect($o['tracking'])->toBe('ND1')
+        ->and($o['date'])->toStartWith('2026-01-01'); // the invoice_date (beforeEach), not the import time
 });
 
 test('variantOccurrences returns tracking with null rep data when Pace has nothing', function () {

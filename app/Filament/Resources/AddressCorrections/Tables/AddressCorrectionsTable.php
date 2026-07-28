@@ -71,11 +71,6 @@ class AddressCorrectionsTable
                     ->badge()
                     ->placeholder('—')
                     ->sortable(),
-                TextColumn::make('last_used_at')
-                    ->label('Last Seen')
-                    ->dateTime('M j, Y')
-                    ->placeholder('—')
-                    ->sortable(),
             ])
             ->defaultSort('variants_sum_times_seen', 'desc')
             ->modifyQueryUsing(fn (Builder $query): Builder => $query
