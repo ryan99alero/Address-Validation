@@ -5,7 +5,6 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 
 class AddressVariant extends Model
 {
@@ -43,42 +42,6 @@ class AddressVariant extends Model
     public function correctedAddress(): BelongsTo
     {
         return $this->belongsTo(CorrectedAddress::class);
-    }
-
-    /**
-     * The most recent correction occurrence of THIS bad address: the newest carrier_invoice_line
-     * whose original address hashes to this variant, giving the tracking number and a reference date
-     * (ship_date, else invoice_date) for a recycled-tracking-safe Pace Carton lookup.
-     *
-     * @return array{tracking: string, date: ?string}|null
-     */
-    public function latestOccurrence(): ?array
-    {
-        $lines = DB::table('carrier_invoice_lines as l')
-            ->join('carrier_invoices as ci', 'ci.id', '=', 'l.carrier_invoice_id')
-            ->where('l.corrected_address_id', $this->corrected_address_id)
-            ->whereNotNull('l.tracking_number')->where('l.tracking_number', '<>', '')
-            ->orderByRaw('COALESCE(l.ship_date, ci.invoice_date) DESC')->orderByDesc('l.id')
-            ->get(['l.tracking_number', 'l.ship_date', 'ci.invoice_date',
-                'l.original_address_1', 'l.original_city', 'l.original_state', 'l.original_postal', 'l.original_country']);
-
-        foreach ($lines as $line) {
-            if (($line->original_address_1 ?? '') === '') {
-                continue;
-            }
-            $hash = self::computeHash(
-                $line->original_address_1, $line->original_city, $line->original_state,
-                (string) $line->original_postal, $line->original_country ?? 'us'
-            );
-            if ($hash === $this->input_hash) {
-                return [
-                    'tracking' => (string) $line->tracking_number,
-                    'date' => $line->ship_date ?: ($line->invoice_date ?: null),
-                ];
-            }
-        }
-
-        return null;
     }
 
     // Static Methods

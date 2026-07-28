@@ -56,6 +56,7 @@ test('variantOccurrences links each bad address to its most recent tracking + Pa
     $o = $map[$variant->input_hash];
     expect($o['tracking'])->toBe('1Z9')          // most recent, not OLD9
         ->and($o['date'])->toStartWith('2026-02-10') // the newer occurrence's ship date
+        ->and($o['count'])->toBe(2)                   // charged a correction fee twice
         ->and($o['job'])->toBe('JOB1')
         ->and($o['customer_id'])->toBe('CUST1')
         ->and($o['customer_name'])->toBe('Acme Co')
@@ -63,14 +64,25 @@ test('variantOccurrences links each bad address to its most recent tracking + Pa
         ->and($o['salesperson'])->toBe('Bob');
 });
 
-test('latestOccurrence returns the most recent tracking + reference date for a bad address', function () {
-    $variant = makeVariant($this->corrected->id, '55 REPEAT AVE', 'AUSTIN', 'TX', '78701');
+test('correctionOccurrencesByHash counts invoice corrections and keeps the newest tracking + date per bad address', function () {
+    makeVariant($this->corrected->id, '55 REPEAT AVE', 'AUSTIN', 'TX', '78701');
     makeCorrectionLine($this->invId, $this->corrected->id, 'OLD', '55 REPEAT AVE', 'AUSTIN', 'TX', '78701', '2025-01-01');
+    makeCorrectionLine($this->invId, $this->corrected->id, 'MID', '55 REPEAT AVE', 'AUSTIN', 'TX', '78701', '2025-06-01');
     makeCorrectionLine($this->invId, $this->corrected->id, 'NEW', '55 REPEAT AVE', 'AUSTIN', 'TX', '78701', '2026-03-15');
 
-    $occ = $variant->latestOccurrence();
-    expect($occ['tracking'])->toBe('NEW')
+    $hash = AddressVariant::computeHash('55 REPEAT AVE', 'AUSTIN', 'TX', '78701', 'us');
+    $occ = $this->corrected->correctionOccurrencesByHash()[$hash];
+
+    expect($occ['count'])->toBe(3)                 // three real invoice corrections
+        ->and($occ['tracking'])->toBe('NEW')       // newest by ship date
         ->and($occ['date'])->toStartWith('2026-03-15');
+});
+
+test('latestCorrectionDate returns the most recent real correction date, not the import time', function () {
+    makeCorrectionLine($this->invId, $this->corrected->id, 'A', '1 A ST', 'AUSTIN', 'TX', '78701', '2024-01-01');
+    makeCorrectionLine($this->invId, $this->corrected->id, 'B', '2 B ST', 'AUSTIN', 'TX', '78701', '2026-05-20');
+
+    expect($this->corrected->latestCorrectionDate())->toStartWith('2026-05-20');
 });
 
 test('variantOccurrences prefers the carton rep names over chargeback names', function () {
@@ -102,6 +114,15 @@ test('the occurrence date falls back to the invoice date when the line ship_date
     $o = $this->corrected->variantOccurrences()[$variant->input_hash];
     expect($o['tracking'])->toBe('ND1')
         ->and($o['date'])->toStartWith('2026-01-01'); // the invoice_date (beforeEach), not the import time
+});
+
+test('invoiceLines count is the real Times Corrected for the good address (all its bad variants combined)', function () {
+    makeCorrectionLine($this->invId, $this->corrected->id, 'X1', '10 FIRST BAD ST', 'AUSTIN', 'TX', '78701', '2026-01-02');
+    makeCorrectionLine($this->invId, $this->corrected->id, 'X2', '10 FIRST BAD ST', 'AUSTIN', 'TX', '78701', '2026-01-03');
+    makeCorrectionLine($this->invId, $this->corrected->id, 'X3', '20 OTHER BAD RD', 'AUSTIN', 'TX', '78701', '2026-01-04');
+
+    expect($this->corrected->invoiceLines()->count())->toBe(3)
+        ->and($this->corrected->correctionOccurrencesByHash())->toHaveCount(2); // two distinct bad addresses
 });
 
 test('variantOccurrences returns tracking with null rep data when Pace has nothing', function () {

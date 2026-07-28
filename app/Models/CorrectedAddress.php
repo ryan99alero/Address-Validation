@@ -59,28 +59,27 @@ class CorrectedAddress extends Model
     }
 
     /**
-     * Per-variant occurrence data for the "Bad Address Variations" table: the newest correction
-     * line per original-address hash gives the most recent tracking number, then CartonCost (Pace
-     * job #, customer id) and ChargebackPush (customer name, CSR, salesperson) enrich it by tracking.
-     * Keyed by the variant's input_hash so the table can look up each row in O(1).
+     * How many times each distinct bad address (variant) was actually charged a correction fee on a
+     * real carrier invoice — the count of carrier_invoice_lines whose original address hashes to that
+     * variant — plus the newest tracking number and a real reference date (ship_date, else the
+     * invoice date; never the import date) for that occurrence. This is the honest "Times Corrected"
+     * value, as opposed to AddressVariant::$times_seen, which only counts validation-cache lookups.
+     * Keyed by the variant's input_hash so a table row can look itself up in O(1).
      *
-     * @return array<string, array{tracking: string, date: ?string, job: ?string, customer_id: ?string, customer_name: ?string, csr: ?string, salesperson: ?string}>
+     * @return array<string, array{count: int, tracking: ?string, date: ?string}>
      */
-    public function variantOccurrences(): array
+    public function correctionOccurrencesByHash(): array
     {
         $lines = DB::table('carrier_invoice_lines as l')
             ->join('carrier_invoices as ci', 'ci.id', '=', 'l.carrier_invoice_id')
             ->where('l.corrected_address_id', $this->id)
-            ->whereNotNull('l.tracking_number')->where('l.tracking_number', '<>', '')
-            // Most recent by a REAL date — the shipment date, or the invoice date when the line's
-            // ship_date is missing/stale (UPS corrections often carry a null or old ship_date). Never
-            // the import date.
+            // Newest first, so the first line seen per hash is also the most recent one — by a REAL
+            // date (shipment date, or invoice date when ship_date is missing/stale).
             ->orderByRaw('COALESCE(l.ship_date, ci.invoice_date) DESC')
             ->orderByDesc('l.id')
             ->get(['l.tracking_number', 'l.ship_date', 'ci.invoice_date',
                 'l.original_address_1', 'l.original_city', 'l.original_state', 'l.original_postal', 'l.original_country']);
 
-        // Newest tracking + its shipment/invoice date per variant (original-address hash).
         $byHash = [];
         foreach ($lines as $line) {
             if (($line->original_address_1 ?? '') === '') {
@@ -90,24 +89,64 @@ class CorrectedAddress extends Model
                 $line->original_address_1, $line->original_city, $line->original_state,
                 (string) $line->original_postal, $line->original_country ?? 'us'
             );
-            $byHash[$hash] ??= ['tracking' => $line->tracking_number, 'date' => $line->ship_date ?: ($line->invoice_date ?: null)];
+
+            if (! isset($byHash[$hash])) {
+                // First (newest) line for this bad address — capture its tracking + reference date.
+                $tracking = ($line->tracking_number ?? '') !== '' ? (string) $line->tracking_number : null;
+                $byHash[$hash] = [
+                    'count' => 0,
+                    'tracking' => $tracking,
+                    'date' => $line->ship_date ?: ($line->invoice_date ?: null),
+                ];
+            }
+            $byHash[$hash]['count']++;
         }
+
+        return $byHash;
+    }
+
+    /**
+     * The date of the most recent time this address was corrected on a real carrier invoice — the
+     * shipment date, or the invoice date when the line's ship_date is missing. Null if it has never
+     * appeared on an invoice. Unlike last_used_at (a validation-cache timestamp) this is a real date.
+     */
+    public function latestCorrectionDate(): ?string
+    {
+        return DB::table('carrier_invoice_lines as l')
+            ->join('carrier_invoices as ci', 'ci.id', '=', 'l.carrier_invoice_id')
+            ->where('l.corrected_address_id', $this->id)
+            ->selectRaw('MAX(COALESCE(l.ship_date, ci.invoice_date)) as d')
+            ->value('d');
+    }
+
+    /**
+     * Per-variant occurrence data for the "Bad Address Variations" table: the invoice-correction
+     * count and newest tracking (see correctionOccurrencesByHash()), then CartonCost (Pace job #,
+     * customer id) and ChargebackPush (customer name, CSR, salesperson) enrich it by tracking.
+     * Keyed by the variant's input_hash so the table can look up each row in O(1).
+     *
+     * @return array<string, array{count: int, tracking: ?string, date: ?string, job: ?string, customer_id: ?string, customer_name: ?string, csr: ?string, salesperson: ?string}>
+     */
+    public function variantOccurrences(): array
+    {
+        $byHash = $this->correctionOccurrencesByHash();
 
         if ($byHash === []) {
             return [];
         }
 
-        $trackings = array_values(array_unique(array_column($byHash, 'tracking')));
-        $cartons = CartonCost::whereIn('tracking_number', $trackings)->get()->keyBy('tracking_number');
-        $pushes = ChargebackPush::whereIn('tracking_number', $trackings)
+        $trackings = array_values(array_unique(array_filter(array_column($byHash, 'tracking'))));
+        $cartons = $trackings === [] ? collect() : CartonCost::whereIn('tracking_number', $trackings)->get()->keyBy('tracking_number');
+        $pushes = $trackings === [] ? collect() : ChargebackPush::whereIn('tracking_number', $trackings)
             ->orderByDesc('id')->get()->unique('tracking_number')->keyBy('tracking_number');
 
         $out = [];
         foreach ($byHash as $hash => $occurrence) {
             $tracking = $occurrence['tracking'];
-            $carton = $cartons->get($tracking);
-            $push = $pushes->get($tracking);
+            $carton = $tracking !== null ? $cartons->get($tracking) : null;
+            $push = $tracking !== null ? $pushes->get($tracking) : null;
             $out[$hash] = [
+                'count' => $occurrence['count'],
                 'tracking' => $tracking,
                 'date' => $occurrence['date'],
                 'job' => $carton?->pace_job_number ?? $push?->pace_job ?? null,

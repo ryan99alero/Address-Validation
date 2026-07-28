@@ -35,6 +35,11 @@ class VariationsRelationManager extends RelationManager
         return ($value === null || $value === '') ? null : (string) $value;
     }
 
+    private function correctionCount(AddressVariant $record): int
+    {
+        return (int) ($this->occ()[$record->input_hash]['count'] ?? 0);
+    }
+
     public function table(Table $table): Table
     {
         return $table
@@ -52,13 +57,14 @@ class VariationsRelationManager extends RelationManager
                         $record->input_address_2, $record->input_city, $record->input_state, $record->input_postal,
                     ]))) ?: null)
                     ->searchable(['input_address_1', 'input_address_2', 'input_city', 'input_state', 'input_postal']),
-                TextColumn::make('times_seen')
-                    ->label('Times Seen')
+                TextColumn::make('times_corrected')
+                    ->label('Times Corrected')
+                    ->state(fn (AddressVariant $record): int => $this->correctionCount($record))
                     ->badge()
-                    ->color('warning')
+                    ->color(fn (AddressVariant $record): string => $this->correctionCount($record) > 0 ? 'warning' : 'gray')
                     ->numeric()
                     ->alignEnd()
-                    ->sortable(),
+                    ->tooltip('Times this exact bad address was charged a correction fee on a real carrier invoice'),
                 TextColumn::make('inactive_reason')
                     ->label('Status')
                     ->placeholder('Usable')
@@ -100,7 +106,7 @@ class VariationsRelationManager extends RelationManager
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
-            ->defaultSort('times_seen', 'desc')
+            ->defaultSort('input_address_1', 'asc')
             ->filters([
                 TernaryFilter::make('is_active')->label('Usable'),
             ])

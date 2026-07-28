@@ -60,21 +60,22 @@ class AddressCorrectionsTable
                             ->orWhere('input_state', 'like', "%{$search}%")
                             ->orWhere('input_postal', 'like', "%{$search}%")
                     )),
-                TextColumn::make('variants_sum_times_seen')
+                TextColumn::make('correction_count')
                     ->label('Times Corrected')
                     ->numeric()
                     ->sortable()
                     ->alignEnd()
-                    ->placeholder('0'),
+                    ->placeholder('0')
+                    ->tooltip('Address-correction fees charged for this address across all carrier invoices'),
                 TextColumn::make('firstCarrier.name')
                     ->label('First Carrier')
                     ->badge()
                     ->placeholder('—')
                     ->sortable(),
             ])
-            ->defaultSort('variants_sum_times_seen', 'desc')
+            ->defaultSort('correction_count', 'desc')
             ->modifyQueryUsing(fn (Builder $query): Builder => $query
-                ->withSum('variants as variants_sum_times_seen', 'times_seen')
+                ->withCount('invoiceLines as correction_count')
                 ->with([
                     'firstCarrier',
                     'variants' => fn ($q) => $q->orderByDesc('times_seen')->limit(1),

@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\Models\AddressVariant;
 use App\Models\CartonCost;
+use App\Models\CorrectedAddress;
 use App\Models\IntegrationConnection;
 use App\Services\Chargebacks\ChargebackPusher;
 use App\Services\Integrations\PaceApiClient;
@@ -40,27 +40,39 @@ class PaceLookupCorrectionCache extends Command
         $limit = (int) $this->option('limit');
         $dryRun = (bool) $this->option('dry-run');
 
-        $variants = AddressVariant::query()
-            ->where('is_active', true)
-            ->where('times_seen', '>=', $min)
-            ->orderByDesc('times_seen')
-            ->when($limit > 0, fn ($q) => $q->limit($limit))
-            ->get();
+        // Real "Times Corrected" = the number of address-correction lines on carrier invoices for a
+        // given bad address (not the validation-cache counter). Gather every still-usable bad address
+        // corrected >= $min times, newest tracking + reference date in hand for the Pace lookup.
+        $targets = [];
+        CorrectedAddress::query()
+            ->whereHas('invoiceLines')
+            ->with(['variants' => fn ($q) => $q->where('is_active', true)])
+            ->chunkById(300, function ($addresses) use (&$targets, $min): void {
+                foreach ($addresses as $address) {
+                    $activeHashes = $address->variants->keyBy('input_hash');
+                    foreach ($address->correctionOccurrencesByHash() as $hash => $occ) {
+                        if ($occ['count'] < $min || $occ['tracking'] === null || ! $activeHashes->has($hash)) {
+                            continue;
+                        }
+                        $targets[] = ['tracking' => $occ['tracking'], 'date' => $occ['date'], 'count' => $occ['count']];
+                    }
+                }
+            });
 
-        $this->info("Correction-cache Pace lookup: {$variants->count()} bad address(es) corrected >= {$min} times.");
+        usort($targets, fn (array $a, array $b): int => $b['count'] <=> $a['count']);
+        if ($limit > 0) {
+            $targets = array_slice($targets, 0, $limit);
+        }
+
+        $this->info('Correction-cache Pace lookup: '.count($targets)." bad address(es) corrected >= {$min} times.");
 
         $client = new PaceApiClient($connection);
         $pusher = new ChargebackPusher;
         $done = $skip = $miss = $fail = 0;
 
-        foreach ($variants as $variant) {
-            $occ = $variant->latestOccurrence();
-            if ($occ === null) {
-                $skip++;
-
-                continue;
-            }
-            $tracking = $occ['tracking'];
+        foreach ($targets as $target) {
+            $tracking = $target['tracking'];
+            $occ = $target;
 
             $carton = CartonCost::firstOrNew(['tracking_number' => $tracking]);
             if ($carton->exists && $carton->pace_customer_name) {
@@ -71,7 +83,7 @@ class PaceLookupCorrectionCache extends Command
 
             if ($dryRun) {
                 $done++;
-                $this->line("  would look up {$tracking} (ref date ".($occ['date'] ?? '—').", seen {$variant->times_seen}x)");
+                $this->line("  would look up {$tracking} (ref date ".($occ['date'] ?? '—').", corrected {$target['count']}x)");
 
                 continue;
             }

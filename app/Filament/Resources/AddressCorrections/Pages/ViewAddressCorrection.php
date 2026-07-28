@@ -50,7 +50,8 @@ class ViewAddressCorrection extends ViewRecord
                                     ->color('warning'),
                                 TextEntry::make('times_corrected')
                                     ->label('Times Corrected')
-                                    ->state(fn ($record): int => (int) $record->variants()->sum('times_seen')),
+                                    ->state(fn ($record): int => (int) $record->invoiceLines()->count())
+                                    ->tooltip('Address-correction fees charged for this address across all carrier invoices'),
                                 TextEntry::make('is_residential')
                                     ->label('Type')
                                     ->badge()
@@ -59,10 +60,12 @@ class ViewAddressCorrection extends ViewRecord
                                     ->label('First Carrier')
                                     ->badge()
                                     ->placeholder('—'),
-                                TextEntry::make('last_used_at')
-                                    ->label('Last Seen')
+                                TextEntry::make('last_corrected')
+                                    ->label('Last Corrected')
+                                    ->state(fn ($record): ?string => $record->latestCorrectionDate())
                                     ->date('M j, Y')
-                                    ->placeholder('—'),
+                                    ->placeholder('—')
+                                    ->tooltip('Ship date of the most recent correction (falls back to the invoice date)'),
                             ]),
                     ]),
             ]);
