@@ -63,11 +63,6 @@ class VariationsRelationManager extends RelationManager
                     ->label('Status')
                     ->placeholder('Usable')
                     ->color('gray'),
-                TextColumn::make('last_seen_at')
-                    ->label('Last Seen')
-                    ->date('M j, Y')
-                    ->placeholder('—')
-                    ->sortable(),
                 TextColumn::make('recent_tracking')
                     ->label('Recent Tracking')
                     ->state(fn (AddressVariant $record): ?string => $this->occField($record, 'tracking'))
