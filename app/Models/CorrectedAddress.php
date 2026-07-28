@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class CorrectedAddress extends Model
 {
@@ -20,6 +22,9 @@ class CorrectedAddress extends Model
         'country',
         'address_hash',
         'first_carrier_id',
+        'superseded_by_id',
+        'superseded_at',
+        'supersede_reason',
         'is_residential',
         'usage_count',
         'variant_count',
@@ -38,7 +43,17 @@ class CorrectedAddress extends Model
             'variant_count' => 'integer',
             'first_seen_at' => 'datetime',
             'last_used_at' => 'datetime',
+            'superseded_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Active = a live (non-superseded) good address. Superseded rows are dead forms the engine
+     * resolves past.
+     */
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->whereNull('superseded_by_id');
     }
 
     // Relationships
@@ -56,6 +71,96 @@ class CorrectedAddress extends Model
     public function invoiceLines(): HasMany
     {
         return $this->hasMany(CarrierInvoiceLine::class);
+    }
+
+    /**
+     * The good address this one was superseded by (null = this is a live/terminal form).
+     */
+    public function supersededBy(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'superseded_by_id');
+    }
+
+    /**
+     * The good addresses that were superseded INTO this one.
+     */
+    public function supersedes(): HasMany
+    {
+        return $this->hasMany(self::class, 'superseded_by_id');
+    }
+
+    public function verifications(): HasMany
+    {
+        return $this->hasMany(AddressVerification::class);
+    }
+
+    /**
+     * Supersession events where this record is the old (superseded-from) side.
+     */
+    public function supersessionEvents(): HasMany
+    {
+        return $this->hasMany(AddressSupersession::class, 'old_corrected_address_id');
+    }
+
+    public function isSuperseded(): bool
+    {
+        return $this->superseded_by_id !== null;
+    }
+
+    /**
+     * Walk the supersession pointer to the live terminal address. Bounded + visited-guarded so a
+     * malformed cycle logs and returns the current node rather than looping forever (MySQL cannot
+     * enforce acyclicity). Only ever used off the hot path (UI, guards, backfill).
+     */
+    public function resolveTerminal(int $maxHops = 10): self
+    {
+        $node = $this;
+        $seen = [$node->id => true];
+
+        for ($hop = 0; $hop < $maxHops; $hop++) {
+            if ($node->superseded_by_id === null) {
+                return $node;
+            }
+            $next = self::find($node->superseded_by_id);
+            if ($next === null || isset($seen[$next->id])) {
+                Log::warning('Supersession chain anomaly', [
+                    'from' => $this->id, 'stuck_at' => $node->id, 'next' => $node->superseded_by_id,
+                ]);
+
+                return $node;
+            }
+            $seen[$next->id] = true;
+            $node = $next;
+        }
+
+        Log::warning('Supersession chain exceeded max hops', ['from' => $this->id]);
+
+        return $node;
+    }
+
+    /**
+     * This node then each successor up to the terminal (for the UI chain view). Never includes a
+     * repeat.
+     *
+     * @return array<int, self>
+     */
+    public function chainToTerminal(int $maxHops = 10): array
+    {
+        $chain = [$this];
+        $node = $this;
+        $seen = [$node->id => true];
+
+        for ($hop = 0; $hop < $maxHops && $node->superseded_by_id !== null; $hop++) {
+            $next = self::find($node->superseded_by_id);
+            if ($next === null || isset($seen[$next->id])) {
+                break;
+            }
+            $chain[] = $next;
+            $seen[$next->id] = true;
+            $node = $next;
+        }
+
+        return $chain;
     }
 
     /**

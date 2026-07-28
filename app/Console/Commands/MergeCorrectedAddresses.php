@@ -89,11 +89,15 @@ class MergeCorrectedAddresses extends Command
 
         DB::transaction(function () use ($canonical, $sources, $targetBase, $targetExt, $matches): void {
             foreach ($sources as $source) {
-                $this->repointVariants($source, $canonical);
+                AddressVariant::repointAll($source->id, $canonical->id);
                 DB::table('carrier_invoice_lines')->where('corrected_address_id', $source->id)
                     ->update(['corrected_address_id' => $canonical->id]);
                 DB::table('address_candidates')->where('corrected_address_id', $source->id)
                     ->update(['corrected_address_id' => $canonical->id]);
+                // Keep any chain + verification rows coherent when a superseded/source row is deleted.
+                DB::table('corrected_addresses')->where('superseded_by_id', $source->id)
+                    ->update(['superseded_by_id' => $canonical->id]);
+                $this->coalesceVerifications($source->id, $canonical->id);
             }
 
             $canonical->postal = $targetBase;
@@ -133,31 +137,29 @@ class MergeCorrectedAddresses extends Command
     }
 
     /**
-     * Move a source record's variants to the canonical record, honouring the global
-     * (input_postal, input_hash) uniqueness: if the canonical already has that bad address,
-     * fold the counters in and drop the duplicate instead of re-pointing.
+     * Move a source record's per-carrier verification rows to the canonical, keeping the newest
+     * verified_at per carrier (the unique (corrected_address_id, carrier_id) means at most one each).
      */
-    private function repointVariants(CorrectedAddress $source, CorrectedAddress $canonical): void
+    private function coalesceVerifications(int $fromId, int $toId): void
     {
-        foreach ($source->variants()->get() as $variant) {
-            $existing = AddressVariant::query()
-                ->where('corrected_address_id', $canonical->id)
-                ->where('input_postal', $variant->input_postal)
-                ->where('input_hash', $variant->input_hash)
-                ->first();
+        foreach (DB::table('address_verifications')->where('corrected_address_id', $fromId)->get() as $ver) {
+            $existing = DB::table('address_verifications')
+                ->where('corrected_address_id', $toId)->where('carrier_id', $ver->carrier_id)->first();
 
-            if ($existing !== null) {
-                $existing->times_seen += $variant->times_seen;
-                if ($variant->last_seen_at !== null && ($existing->last_seen_at === null || $variant->last_seen_at->gt($existing->last_seen_at))) {
-                    $existing->last_seen_at = $variant->last_seen_at;
-                }
-                $existing->save();
-                $variant->delete();
+            if ($existing === null) {
+                DB::table('address_verifications')->where('id', $ver->id)
+                    ->update(['corrected_address_id' => $toId]);
 
                 continue;
             }
 
-            $variant->update(['corrected_address_id' => $canonical->id]);
+            if ($ver->verified_at !== null && ($existing->verified_at === null || $ver->verified_at > $existing->verified_at)) {
+                DB::table('address_verifications')->where('id', $existing->id)->update([
+                    'status' => $ver->status, 'verified_at' => $ver->verified_at,
+                    'checked_at' => $ver->checked_at, 'source' => $ver->source, 'updated_at' => now(),
+                ]);
+            }
+            DB::table('address_verifications')->where('id', $ver->id)->delete();
         }
     }
 }

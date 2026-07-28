@@ -216,4 +216,39 @@ class AddressVariant extends Model
 
         return ['variant' => $variant, 'created' => true];
     }
+
+    /**
+     * Move every variant from one corrected (good) address to another — used when consolidating
+     * duplicates or threading a re-correction so bad addresses always resolve to the terminal good
+     * form. The global (input_postal, input_hash) uniqueness normally makes a straight FK update
+     * safe; the fold branch is a defensive guard (sum the counters, keep the newest last_seen_at)
+     * should that ever be relaxed. Does NOT recompute variant_count on either side — the caller does.
+     */
+    public static function repointAll(int $fromCorrectedId, int $toCorrectedId): void
+    {
+        if ($fromCorrectedId === $toCorrectedId) {
+            return;
+        }
+
+        foreach (self::where('corrected_address_id', $fromCorrectedId)->get() as $variant) {
+            $existing = self::query()
+                ->where('corrected_address_id', $toCorrectedId)
+                ->where('input_postal', $variant->input_postal)
+                ->where('input_hash', $variant->input_hash)
+                ->first();
+
+            if ($existing !== null) {
+                $existing->times_seen += $variant->times_seen;
+                if ($variant->last_seen_at !== null && ($existing->last_seen_at === null || $variant->last_seen_at->gt($existing->last_seen_at))) {
+                    $existing->last_seen_at = $variant->last_seen_at;
+                }
+                $existing->save();
+                $variant->delete();
+
+                continue;
+            }
+
+            $variant->update(['corrected_address_id' => $toCorrectedId]);
+        }
+    }
 }
