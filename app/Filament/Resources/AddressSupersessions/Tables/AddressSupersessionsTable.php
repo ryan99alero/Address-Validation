@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\AddressSupersessions\Tables;
 
 use App\Models\AddressSupersession;
+use App\Models\Carrier;
 use App\Services\Invoices\CorrectionThreader;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
@@ -11,6 +12,7 @@ use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
 
@@ -31,7 +33,10 @@ class AddressSupersessionsTable
                     ->label('Was (good) →')
                     ->state(fn (AddressSupersession $record): string => self::formatSnapshot($record->old_snapshot))
                     ->color('danger')
-                    ->wrap(),
+                    ->wrap()
+                    // Global search box matches the denormalized index: tracking, invoice #, Pace
+                    // job/customer, and either correction's addresses.
+                    ->searchable(query: fn (Builder $query, string $search): Builder => $query->where('search_text', 'like', '%'.mb_strtolower(trim($search)).'%')),
                 TextColumn::make('to')
                     ->label('Carrier corrected to')
                     ->state(fn (AddressSupersession $record): string => self::formatSnapshot($record->new_snapshot))
@@ -81,7 +86,11 @@ class AddressSupersessionsTable
                         'backfill' => 'Backfill',
                         'manual' => 'Manual',
                     ]),
+                SelectFilter::make('carrier_id')
+                    ->label('Carrier')
+                    ->options(fn (): array => Carrier::query()->orderBy('name')->pluck('name', 'id')->all()),
             ])
+            ->searchPlaceholder('Tracking, job #, invoice, or address…')
             ->recordActions([
                 Action::make('apply')
                     ->label('Apply')

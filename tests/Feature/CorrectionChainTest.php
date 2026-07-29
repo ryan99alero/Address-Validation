@@ -5,6 +5,7 @@ use App\Models\AddressVariant;
 use App\Models\AddressVerification;
 use App\Models\Carrier;
 use App\Models\CarrierInvoiceLine;
+use App\Models\CartonCost;
 use App\Models\CorrectedAddress;
 use App\Models\ZipCentroid;
 use App\Services\Invoices\CorrectionGuard;
@@ -170,6 +171,39 @@ test('backfill --dry-run changes nothing', function () {
 
     expect($a->fresh()->superseded_by_id)->toBeNull()
         ->and(AddressSupersession::count())->toBe(0);
+});
+
+test('rebuildSearchText indexes tracking, job, invoice and both addresses for the search box', function () {
+    $carrier = Carrier::factory()->create(['slug' => 'ups', 'name' => 'UPS']);
+    $invId = DB::table('carrier_invoices')->insertGetId([
+        'carrier_id' => $carrier->id, 'invoice_number' => 'INVX9', 'invoice_date' => '2026-01-01', 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $b = chainGood('100 main st', 'austin', 'tx', '78701');
+    $c = chainGood('100 main st', 'austin', 'tx', '78702');
+
+    // Correction 1: something -> B
+    DB::table('carrier_invoice_lines')->insert([
+        'carrier_invoice_id' => $invId, 'corrected_address_id' => $b->id, 'tracking_number' => 'TRKONE',
+        'original_address_1' => '99 old rd', 'original_city' => 'austin', 'original_state' => 'tx', 'original_postal' => '78701', 'original_country' => 'US',
+        'ship_date' => '2020-01-01', 'charge_code' => 'ADC', 'charge_amount' => 11, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    // Correction 2: B -> C  (original is B)
+    DB::table('carrier_invoice_lines')->insert([
+        'carrier_invoice_id' => $invId, 'corrected_address_id' => $c->id, 'tracking_number' => 'TRKTWO',
+        'original_address_1' => '100 Main St', 'original_city' => 'Austin', 'original_state' => 'TX', 'original_postal' => '78701', 'original_country' => 'US',
+        'ship_date' => '2026-01-01', 'charge_code' => 'ADC', 'charge_amount' => 12, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    CartonCost::create(['tracking_number' => 'TRKTWO', 'pace_job_number' => 'JOB777', 'pace_customer_name' => 'Acme Co']);
+
+    $ev = app(CorrectionThreader::class)->recordEvent($b, $c, AddressSupersession::TRIGGER_BACKFILL, AddressSupersession::STATUS_PENDING_REVIEW);
+
+    $txt = $ev->fresh()->search_text;
+    expect($txt)->toContain('trkone')       // correction 1 tracking
+        ->toContain('trktwo')               // correction 2 tracking
+        ->toContain('job777')               // Pace job
+        ->toContain('acme co')              // Pace customer
+        ->toContain('invx9')                // invoice number
+        ->toContain('100 main st');         // address
 });
 
 // --- Phase 3: ingest-time threading -----------------------------------------

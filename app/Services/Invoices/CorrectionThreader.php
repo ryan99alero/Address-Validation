@@ -50,7 +50,7 @@ class CorrectionThreader
 
             $this->applySupersede($from, $terminal, $trigger, $date, $evidence['carrier_id'] ?? null);
 
-            return AddressSupersession::create([
+            $event = AddressSupersession::create([
                 'old_corrected_address_id' => $from->id,
                 'new_corrected_address_id' => $terminal->id,
                 'old_snapshot' => $oldSnapshot,
@@ -64,6 +64,9 @@ class CorrectionThreader
                 'applied_at' => now(),
                 'applied_by' => $evidence['applied_by'] ?? null,
             ]);
+            $this->safeReindex($event);
+
+            return $event;
         });
     }
 
@@ -151,7 +154,7 @@ class CorrectionThreader
      */
     public function recordEvent(?CorrectedAddress $from, ?CorrectedAddress $to, string $trigger, string $status, array $evidence = []): AddressSupersession
     {
-        return AddressSupersession::create([
+        $event = AddressSupersession::create([
             'old_corrected_address_id' => $from?->id,
             'new_corrected_address_id' => $to?->id,
             'old_snapshot' => $from ? $this->snapshot($from) : null,
@@ -163,6 +166,18 @@ class CorrectionThreader
             'guard_result' => $evidence['guard_result'] ?? null,
             'detected_at' => now(),
         ]);
+        $this->safeReindex($event);
+
+        return $event;
+    }
+
+    private function safeReindex(AddressSupersession $event): void
+    {
+        try {
+            $event->rebuildSearchText();
+        } catch (\Throwable $e) {
+            // The search index is best-effort — never let it break event creation or an import.
+        }
     }
 
     private function flips(int $a, int $b): int
