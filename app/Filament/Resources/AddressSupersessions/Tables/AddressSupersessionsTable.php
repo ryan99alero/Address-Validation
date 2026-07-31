@@ -11,6 +11,7 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -63,12 +64,14 @@ class AddressSupersessionsTable
                     ->badge()
                     ->color(fn (string $state): string => self::STATUS_COLORS[$state] ?? 'gray')
                     ->formatStateUsing(fn (string $state): string => str_replace('_', ' ', $state)),
-                TextColumn::make('detected_at')
-                    ->label('Detected')
-                    ->dateTime('M j, Y')
-                    ->sortable(),
+                TextColumn::make('reference_date')
+                    ->label('Shipment / Invoice Date')
+                    ->date('M j, Y')
+                    ->placeholder('—')
+                    ->sortable()
+                    ->tooltip('Ship date of the correction (falls back to the invoice date) — not the processing date'),
             ])
-            ->defaultSort('detected_at', 'desc')
+            ->defaultSort('reference_date', 'desc')
             ->filters([
                 SelectFilter::make('status')
                     ->options([
@@ -89,6 +92,16 @@ class AddressSupersessionsTable
                 SelectFilter::make('carrier_id')
                     ->label('Carrier')
                     ->options(fn (): array => Carrier::query()->orderBy('name')->pluck('name', 'id')->all()),
+                TernaryFilter::make('age')
+                    ->label('Age')
+                    ->placeholder('All ages')
+                    ->trueLabel('Within the last year')
+                    ->falseLabel('Older than a year')
+                    ->queries(
+                        true: fn (Builder $q): Builder => $q->where('reference_date', '>=', now()->subYear()->toDateString()),
+                        false: fn (Builder $q): Builder => $q->where('reference_date', '<', now()->subYear()->toDateString()),
+                        blank: fn (Builder $q): Builder => $q,
+                    ),
             ])
             ->searchPlaceholder('Tracking, job #, invoice, or address…')
             ->recordActions([

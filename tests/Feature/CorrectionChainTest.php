@@ -197,13 +197,15 @@ test('rebuildSearchText indexes tracking, job, invoice and both addresses for th
 
     $ev = app(CorrectionThreader::class)->recordEvent($b, $c, AddressSupersession::TRIGGER_BACKFILL, AddressSupersession::STATUS_PENDING_REVIEW);
 
-    $txt = $ev->fresh()->search_text;
-    expect($txt)->toContain('trkone')       // correction 1 tracking
+    $fresh = $ev->fresh();
+    expect($fresh->search_text)->toContain('trkone')       // correction 1 tracking
         ->toContain('trktwo')               // correction 2 tracking
         ->toContain('job777')               // Pace job
         ->toContain('acme co')              // Pace customer
         ->toContain('invx9')                // invoice number
         ->toContain('100 main st');         // address
+    // reference_date is the correction-2 ship date, not the processing timestamp.
+    expect($fresh->reference_date->toDateString())->toBe('2026-01-01');
 });
 
 // --- Phase 3: ingest-time threading -----------------------------------------

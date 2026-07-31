@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
 
 class AddressSupersession extends Model
 {
@@ -36,6 +37,7 @@ class AddressSupersession extends Model
         'status',
         'guard_result',
         'search_text',
+        'reference_date',
         'detected_at',
         'applied_at',
         'applied_by',
@@ -50,6 +52,7 @@ class AddressSupersession extends Model
             'old_snapshot' => 'array',
             'new_snapshot' => 'array',
             'guard_result' => 'array',
+            'reference_date' => 'date',
             'detected_at' => 'datetime',
             'applied_at' => 'datetime',
         ];
@@ -132,6 +135,14 @@ class AddressSupersession extends Model
                 $parts[] = $push->pace_job;
                 $parts[] = $push->pace_customer_name;
             }
+        }
+
+        // Real business date: the re-correction's (C2) shipment date, else its invoice date; fall back
+        // to correction 1. Never detected_at (the processing timestamp).
+        $refLine = $c2 ?? $c1;
+        if ($refLine !== null) {
+            $refDate = $refLine->ship_date ?: optional(CarrierInvoice::find($refLine->carrier_invoice_id))->invoice_date;
+            $this->reference_date = $refDate ? Carbon::parse($refDate)->toDateString() : null;
         }
 
         $this->search_text = mb_strtolower(trim((string) preg_replace('/\s+/', ' ', implode(' ', array_filter($parts)))));
