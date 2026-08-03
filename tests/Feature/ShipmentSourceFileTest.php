@@ -1,9 +1,12 @@
 <?php
 
 use App\Models\Carrier;
+use App\Models\CarrierCharge;
 use App\Models\CarrierInvoice;
 use App\Models\CarrierShipment;
+use App\Models\ChargeCategory;
 use App\Services\CarrierInvoiceParserService;
+use App\Services\Invoices\FedExShipmentDeriveService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -60,5 +63,24 @@ test('a FedEx CSV-sourced shipment records the CSV as its source_file', function
 
     $shipment = CarrierShipment::where('tracking_number', '999888777666')->first();
     expect($shipment->source_type)->toBe('csv')
+        ->and($shipment->source_file)->toBe('FedEx_invoice_2026-07-29_08_38.CSV');
+});
+
+test('a FedEx derived shipment records the invoice file as its source_file', function () {
+    $carrier = Carrier::factory()->create(['slug' => 'fedex']);
+    $invoice = CarrierInvoice::create([
+        'carrier_id' => $carrier->id, 'invoice_number' => 'D1', 'invoice_date' => '2026-07-24',
+        'filename' => 'FedEx_invoice_2026-07-29_08_38.CSV',
+    ]);
+    $base = ChargeCategory::create(['name' => 'Base Transportation', 'abbreviation' => 'BASE']);
+    CarrierCharge::create([
+        'carrier_invoice_id' => $invoice->id, 'carrier_id' => $carrier->id, 'tracking_number' => 'D-TRK',
+        'charge_category_id' => $base->id, 'amount' => 15, 'source_type' => 'pdf', 'service' => 'FedEx Ground',
+    ]);
+
+    app(FedExShipmentDeriveService::class)->deriveForInvoice($invoice);
+
+    $shipment = CarrierShipment::where('tracking_number', 'D-TRK')->first();
+    expect($shipment->source_type)->toBe('derived')
         ->and($shipment->source_file)->toBe('FedEx_invoice_2026-07-29_08_38.CSV');
 });

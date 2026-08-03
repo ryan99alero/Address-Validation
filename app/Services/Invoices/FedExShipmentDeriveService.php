@@ -47,6 +47,9 @@ class FedExShipmentDeriveService
                 'fee_abbrevs' => $r->fee_abbrevs,
                 'is_third_party' => $r->base_count > 0 ? 0 : 1,
                 'source_type' => self::SOURCE,
+                // Synthesized from this invoice's charges — the invoice's own file is the best source
+                // provenance for a derived row (keeps every shipment-creation path stamped).
+                'source_file' => $invoice->filename,
                 'created_at' => $now,
                 'updated_at' => $now,
             ])
