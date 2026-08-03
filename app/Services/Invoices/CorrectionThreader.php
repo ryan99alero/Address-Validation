@@ -82,8 +82,24 @@ class CorrectionThreader
             }
 
             $from = CorrectedAddress::query()->lockForUpdate()->find($event->old_corrected_address_id);
-            $to = CorrectedAddress::query()->lockForUpdate()->find($event->new_corrected_address_id);
-            if ($from === null || $to === null) {
+            if ($from === null) {
+                return false;
+            }
+
+            // A human-edited "corrected to" wins over the carrier's version: supersede to the edited
+            // address (find/create it) instead of new_corrected_address_id.
+            $to = null;
+            $override = $event->corrected_override;
+            if (is_array($override) && ($override['address_1'] ?? '') !== '' && ($override['city'] ?? '') !== '' && ($override['state'] ?? '') !== '' && ($override['postal'] ?? '') !== '') {
+                $to = CorrectedAddress::findOrCreateFromCorrection(
+                    $override['address_1'], $override['address_2'] ?? null, null,
+                    $override['city'], $override['state'], $override['postal'],
+                    $override['postal_ext'] ?? null, 'us', $event->carrier_id, null
+                )['address'];
+            } else {
+                $to = CorrectedAddress::query()->lockForUpdate()->find($event->new_corrected_address_id);
+            }
+            if ($to === null) {
                 return false;
             }
 

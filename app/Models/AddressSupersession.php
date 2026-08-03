@@ -38,6 +38,9 @@ class AddressSupersession extends Model
         'guard_result',
         'search_text',
         'reference_date',
+        'corrected_override',
+        'corrected_edited_at',
+        'corrected_edited_by',
         'detected_at',
         'applied_at',
         'applied_by',
@@ -52,7 +55,9 @@ class AddressSupersession extends Model
             'old_snapshot' => 'array',
             'new_snapshot' => 'array',
             'guard_result' => 'array',
+            'corrected_override' => 'array',
             'reference_date' => 'date',
+            'corrected_edited_at' => 'datetime',
             'detected_at' => 'datetime',
             'applied_at' => 'datetime',
         ];
@@ -83,6 +88,87 @@ class AddressSupersession extends Model
         return $this->belongsTo(User::class, 'applied_by');
     }
 
+    public function correctedEditedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'corrected_edited_by');
+    }
+
+    public function isManuallyEdited(): bool
+    {
+        return $this->corrected_edited_at !== null;
+    }
+
+    /**
+     * The recipient's company + contact for this shipment. Carriers correct only the address, so the
+     * name/company is the same on both sides — resolved from the linked invoice line, else the newest
+     * line under either corrected address.
+     *
+     * @return array{company: ?string, name: ?string}
+     */
+    public function contact(): array
+    {
+        $line = $this->carrier_invoice_line_id ? CarrierInvoiceLine::find($this->carrier_invoice_line_id) : null;
+
+        if ($line === null) {
+            $ids = array_values(array_filter([$this->new_corrected_address_id, $this->old_corrected_address_id]));
+            if ($ids !== []) {
+                $line = CarrierInvoiceLine::whereIn('corrected_address_id', $ids)
+                    ->where(fn ($q) => $q->whereNotNull('original_company')->orWhereNotNull('original_name'))
+                    ->orderByDesc('ship_date')->first();
+            }
+        }
+
+        return ['company' => $line?->original_company ?: null, 'name' => $line?->original_name ?: null];
+    }
+
+    /**
+     * The "Was" address as labeled fields (company/contact from the recipient, address from the old
+     * snapshot).
+     *
+     * @return array{company: ?string, name: ?string, address_1: ?string, address_2: ?string, city: ?string, state: ?string, postal: ?string, postal_ext: ?string}
+     */
+    public function wasFields(): array
+    {
+        return $this->fieldsFrom($this->old_snapshot ?? [], $this->contact());
+    }
+
+    /**
+     * The "Corrected to" address as labeled fields — the human override when present, else the
+     * carrier's corrected snapshot (with the recipient's company/contact).
+     *
+     * @return array{company: ?string, name: ?string, address_1: ?string, address_2: ?string, city: ?string, state: ?string, postal: ?string, postal_ext: ?string}
+     */
+    public function correctedFields(): array
+    {
+        if (is_array($this->corrected_override) && ($this->corrected_override['address_1'] ?? '') !== '') {
+            return $this->fieldsFrom($this->corrected_override, [
+                'company' => $this->corrected_override['company'] ?? null,
+                'name' => $this->corrected_override['name'] ?? null,
+            ]);
+        }
+
+        return $this->fieldsFrom($this->new_snapshot ?? [], $this->contact());
+    }
+
+    /**
+     * @param  array<string, mixed>  $snap
+     * @param  array{company: ?string, name: ?string}  $contact
+     * @return array{company: ?string, name: ?string, address_1: ?string, address_2: ?string, city: ?string, state: ?string, postal: ?string, postal_ext: ?string}
+     */
+    private function fieldsFrom(array $snap, array $contact): array
+    {
+        return [
+            'company' => $contact['company'],
+            'name' => $contact['name'],
+            'address_1' => $snap['address_1'] ?? null,
+            'address_2' => $snap['address_2'] ?? null,
+            'city' => $snap['city'] ?? null,
+            'state' => $snap['state'] ?? null,
+            'postal' => $snap['postal'] ?? null,
+            'postal_ext' => $snap['postal_ext'] ?? null,
+        ];
+    }
+
     /**
      * Rebuild the denormalized search haystack for this event: both corrections' addresses (original
      * and corrected), tracking numbers, invoice numbers, and Pace job/customer — so the Re-Corrections
@@ -93,11 +179,15 @@ class AddressSupersession extends Model
     {
         $parts = [];
 
-        foreach ([$this->old_snapshot, $this->new_snapshot] as $snap) {
+        foreach ([$this->old_snapshot, $this->new_snapshot, $this->corrected_override] as $snap) {
             if (is_array($snap)) {
-                $parts[] = implode(' ', array_filter([$snap['address_1'] ?? null, $snap['city'] ?? null, $snap['state'] ?? null, $snap['postal'] ?? null]));
+                $parts[] = implode(' ', array_filter([$snap['company'] ?? null, $snap['name'] ?? null, $snap['address_1'] ?? null, $snap['city'] ?? null, $snap['state'] ?? null, $snap['postal'] ?? null]));
             }
         }
+
+        $contact = $this->contact();
+        $parts[] = $contact['company'];
+        $parts[] = $contact['name'];
 
         $old = $this->old_corrected_address_id ? CorrectedAddress::find($this->old_corrected_address_id) : null;
         $new = $this->new_corrected_address_id ? CorrectedAddress::find($this->new_corrected_address_id) : null;

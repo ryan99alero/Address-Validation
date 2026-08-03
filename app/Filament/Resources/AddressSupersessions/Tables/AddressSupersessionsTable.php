@@ -8,7 +8,10 @@ use App\Services\Invoices\CorrectionThreader;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
+use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Section;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
@@ -31,20 +34,23 @@ class AddressSupersessionsTable
         return $table
             ->columns([
                 TextColumn::make('from')
-                    ->label('Was (good) →')
-                    ->state(fn (AddressSupersession $record): string => self::formatSnapshot($record->old_snapshot))
+                    ->label('Was (shipped / current good)')
+                    ->state(fn (AddressSupersession $record): string => self::fieldsToHtml($record->wasFields()))
                     ->html()
                     ->color('danger')
-                    ->wrap()
+                    ->extraAttributes(['class' => 'whitespace-nowrap'])
+                    ->action(self::detailsAction())
                     // Global search box matches the denormalized index: tracking, invoice #, Pace
-                    // job/customer, and either correction's addresses.
+                    // job/customer, company/contact, and either correction's addresses.
                     ->searchable(query: fn (Builder $query, string $search): Builder => $query->where('search_text', 'like', '%'.mb_strtolower(trim($search)).'%')),
                 TextColumn::make('to')
-                    ->label('Carrier corrected to')
-                    ->state(fn (AddressSupersession $record): string => self::formatSnapshot($record->new_snapshot))
+                    ->label('Corrected to')
+                    ->state(fn (AddressSupersession $record): string => self::fieldsToHtml($record->correctedFields())
+                        .($record->isManuallyEdited() ? '<br><span class="text-xs">✎ manually edited</span>' : ''))
                     ->html()
-                    ->color('success')
-                    ->wrap(),
+                    ->color(fn (AddressSupersession $record): string => $record->isManuallyEdited() ? 'info' : 'success')
+                    ->extraAttributes(['class' => 'whitespace-nowrap'])
+                    ->action(self::detailsAction()),
                 TextColumn::make('reason')
                     ->label('Why')
                     ->state(function (AddressSupersession $record): string {
@@ -104,9 +110,20 @@ class AddressSupersessionsTable
                         false: fn (Builder $q): Builder => $q->where('reference_date', '<', now()->subYear()->toDateString()),
                         blank: fn (Builder $q): Builder => $q,
                     ),
+                TernaryFilter::make('manually_edited')
+                    ->label('Manually edited')
+                    ->placeholder('All')
+                    ->trueLabel('Manually edited only')
+                    ->falseLabel('Not edited')
+                    ->queries(
+                        true: fn (Builder $q): Builder => $q->whereNotNull('corrected_edited_at'),
+                        false: fn (Builder $q): Builder => $q->whereNull('corrected_edited_at'),
+                        blank: fn (Builder $q): Builder => $q,
+                    ),
             ])
             ->searchPlaceholder('Tracking, job #, invoice, or address…')
             ->recordActions([
+                self::detailsAction(),
                 Action::make('apply')
                     ->label('Apply')
                     ->icon('heroicon-o-check')
@@ -172,25 +189,129 @@ class AddressSupersessionsTable
     }
 
     /**
-     * Address on separate lines (line 1, line 2/suite, then city/state/zip) so a suite-add correction
-     * is visible instead of collapsing to one blob where the suite (often on address_2) is dropped.
+     * Structured address as its own lines — Business Name, Contact, Address 1, Address 2/suite, then
+     * City, State ZIP — so a suite-add correction is visible instead of collapsing to one blob.
      *
-     * @param  array<string, mixed>|null  $snapshot
+     * @param  array{company: ?string, name: ?string, address_1: ?string, address_2: ?string, city: ?string, state: ?string, postal: ?string, postal_ext: ?string}  $f
      */
-    private static function formatSnapshot(?array $snapshot): string
+    private static function fieldsToHtml(array $f): string
     {
-        if ($snapshot === null) {
-            return '—';
-        }
-
-        $zip = ($snapshot['postal'] ?? '').(($snapshot['postal_ext'] ?? null) ? '-'.$snapshot['postal_ext'] : '');
+        $zip = ($f['postal'] ?? '').(($f['postal_ext'] ?? null) ? '-'.$f['postal_ext'] : '');
 
         $lines = array_filter([
-            $snapshot['address_1'] ?? null,
-            $snapshot['address_2'] ?? null,
-            trim(implode(' ', array_filter([$snapshot['city'] ?? null, $snapshot['state'] ?? null, $zip]))),
+            $f['company'] ?? null,
+            $f['name'] ?? null,
+            $f['address_1'] ?? null,
+            $f['address_2'] ?? null,
+            trim(implode(' ', array_filter([$f['city'] ?? null, $f['state'] ?? null, $zip]))),
         ], fn ($line): bool => $line !== null && trim((string) $line) !== '');
 
         return $lines === [] ? '—' : implode('<br>', array_map(fn ($line): string => e($line), $lines));
+    }
+
+    /**
+     * The click-through detail modal: labeled "Was" fields (read-only) and an editable "Corrected to".
+     * Saving stores a corrected_override + marks the event manually edited; Apply then supersedes to
+     * the edited address. Editing is admin-only; everyone can view.
+     */
+    private static function detailsAction(): Action
+    {
+        return Action::make('details')
+            ->label('View / Edit')
+            ->icon('heroicon-o-pencil-square')
+            ->color('gray')
+            ->modalHeading('Re-Correction detail')
+            ->modalSubmitActionLabel('Save corrected address')
+            ->fillForm(fn (AddressSupersession $record): array => self::correctedFormState($record))
+            ->schema([
+                Section::make('Was (shipped / current good)')
+                    ->description('The address we shipped to / currently hold as good.')
+                    ->schema(self::readonlyFields())
+                    ->columns(2),
+                Section::make('Corrected to')
+                    ->description('The address the engine will supersede to when applied. Edit to override the carrier.')
+                    ->schema(self::editableFields())
+                    ->columns(2),
+            ])
+            ->action(function (array $data, AddressSupersession $record): void {
+                abort_unless(Auth::user()?->isAdmin() ?? false, 403);
+
+                $record->update([
+                    'corrected_override' => [
+                        'company' => $data['company'] ?: null,
+                        'name' => $data['name'] ?: null,
+                        'address_1' => $data['address_1'] ?: null,
+                        'address_2' => $data['address_2'] ?: null,
+                        'city' => $data['city'] ?: null,
+                        'state' => $data['state'] ?: null,
+                        'postal' => $data['postal'] ?: null,
+                    ],
+                    'corrected_edited_at' => now(),
+                    'corrected_edited_by' => Auth::id(),
+                ]);
+                $record->rebuildSearchText();
+
+                Notification::make()->title('Corrected address saved (manually edited)')->success()->send();
+            });
+    }
+
+    /**
+     * @return array<int, Placeholder>
+     */
+    private static function readonlyFields(): array
+    {
+        $get = fn (string $key): callable => fn (AddressSupersession $record): string => (string) (self::wasFormState($record)[$key] ?? '') ?: '—';
+
+        return [
+            Placeholder::make('was_company')->label('Business Name')->content($get('company')),
+            Placeholder::make('was_name')->label('Contact')->content($get('name')),
+            Placeholder::make('was_address_1')->label('Address 1')->content($get('address_1')),
+            Placeholder::make('was_address_2')->label('Address 2')->content($get('address_2')),
+            Placeholder::make('was_city')->label('City')->content($get('city')),
+            Placeholder::make('was_state')->label('State')->content($get('state')),
+            Placeholder::make('was_postal')->label('ZIP')->content($get('postal')),
+        ];
+    }
+
+    /**
+     * @return array<int, TextInput>
+     */
+    private static function editableFields(): array
+    {
+        $editable = fn (): bool => Auth::user()?->isAdmin() ?? false;
+
+        return [
+            TextInput::make('company')->label('Business Name')->disabled(fn (): bool => ! $editable()),
+            TextInput::make('name')->label('Contact')->disabled(fn (): bool => ! $editable()),
+            TextInput::make('address_1')->label('Address 1')->disabled(fn (): bool => ! $editable()),
+            TextInput::make('address_2')->label('Address 2')->disabled(fn (): bool => ! $editable()),
+            TextInput::make('city')->label('City')->disabled(fn (): bool => ! $editable()),
+            TextInput::make('state')->label('State')->maxLength(2)->disabled(fn (): bool => ! $editable()),
+            TextInput::make('postal')->label('ZIP')->disabled(fn (): bool => ! $editable()),
+        ];
+    }
+
+    /**
+     * @return array<string, ?string>
+     */
+    private static function wasFormState(AddressSupersession $record): array
+    {
+        $f = $record->wasFields();
+
+        return ['company' => $f['company'], 'name' => $f['name'], 'address_1' => $f['address_1'],
+            'address_2' => $f['address_2'], 'city' => $f['city'], 'state' => $f['state'],
+            'postal' => ($f['postal'] ?? '').(($f['postal_ext'] ?? null) ? '-'.$f['postal_ext'] : '')];
+    }
+
+    /**
+     * @return array<string, ?string>
+     */
+    private static function correctedFormState(AddressSupersession $record): array
+    {
+        $f = $record->correctedFields();
+
+        return ['company' => $f['company'], 'name' => $f['name'], 'address_1' => $f['address_1'],
+            'address_2' => $f['address_2'], 'city' => $f['city'], 'state' => $f['state'],
+            'postal' => ($f['postal'] ?? '').(($f['postal_ext'] ?? null) ? '-'.$f['postal_ext'] : '')];
     }
 }

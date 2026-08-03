@@ -126,6 +126,28 @@ test('applyPending supersedes and flips the review event to applied', function (
         ->and($bad->fresh()->corrected_address_id)->toBe($b->id);
 });
 
+test('applyPending honors a manual corrected_override — supersedes to the edited address', function () {
+    $a = chainGood('1 shipped rd', 'austin', 'tx', '78701');
+    $b = chainGood('1 carrier rd', 'austin', 'tx', '78702'); // what the carrier said
+    $bad = chainVariant($a->id, '9 bad st', 'austin', 'tx', '78701', 3);
+    $a->update(['variant_count' => 1]);
+
+    $event = app(CorrectionThreader::class)->recordEvent($a, $b, AddressSupersession::TRIGGER_MANUAL, AddressSupersession::STATUS_PENDING_REVIEW);
+    // Human overrides the corrected address to a DIFFERENT (edited) form.
+    $event->update([
+        'corrected_override' => ['address_1' => '500 human st', 'address_2' => 'ste 9', 'city' => 'austin', 'state' => 'tx', 'postal' => '78703'],
+        'corrected_edited_at' => now(),
+    ]);
+
+    expect(app(CorrectionThreader::class)->applyPending($event->fresh(), null))->toBeTrue();
+
+    $edited = CorrectedAddress::where('address_hash', CorrectedAddress::computeHash('500 human st', 'austin', 'tx', '78703', 'us'))->first();
+    expect($edited)->not->toBeNull()
+        ->and($a->fresh()->superseded_by_id)->toBe($edited->id)   // superseded to the EDITED address, not the carrier's
+        ->and($b->fresh()->superseded_by_id)->toBeNull()          // carrier's version untouched
+        ->and($bad->fresh()->corrected_address_id)->toBe($edited->id);
+});
+
 test('applyPending is a no-op on a non-pending event', function () {
     $a = chainGood('2 old rd', 'austin', 'tx', '78701');
     $b = chainGood('2 new rd', 'austin', 'tx', '78702');
