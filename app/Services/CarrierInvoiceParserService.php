@@ -33,6 +33,13 @@ class CarrierInvoiceParserService
     protected ?string $importSourceType = null;
 
     /**
+     * The display filename of the file currently being imported (e.g. FedEx_invoice_2026-07-29.PDF),
+     * stamped onto each shipment as its source_file so a PDF-sourced shipment references the PDF it
+     * came in on — even when the invoice's own filename is the CSV (FedEx imports the CSV first).
+     */
+    protected ?string $importSourceFile = null;
+
+    /**
      * Why the most recent importFile() produced no invoices (e.g. 'legacy_format'), for the
      * ingest layer to record on the import-file row. Null when a file imported normally.
      */
@@ -943,6 +950,8 @@ class CarrierInvoiceParserService
     public function importFile(int $carrierId, string $path, ?string $displayName = null): array
     {
         $this->lastSkipReason = null;
+        // The real display name (not the random SMB temp path) — stamped onto shipments as source_file.
+        $this->importSourceFile = $displayName ?? basename($path);
         $slug = strtolower(Carrier::find($carrierId)?->slug ?? '');
         $isPdf = strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf';
 
@@ -1125,6 +1134,7 @@ class CarrierInvoiceParserService
                 'ship_date' => $s['ship_date'] ?? null,
                 'receiver' => $s['receiver'] ?? null,
                 'source_type' => $sourceType,
+                'source_file' => $this->importSourceFile,
             ]);
         }
     }
@@ -1628,6 +1638,7 @@ class CarrierInvoiceParserService
                 'is_third_party' => $s['is_third_party'],
                 'printed_total' => $s['printed_total'],
                 'source_type' => 'pdf',
+                'source_file' => $this->importSourceFile,
             ]);
 
             // Zero-amount shipments (e.g. third-party billed) get a shipment row for the

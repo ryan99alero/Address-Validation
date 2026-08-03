@@ -32,6 +32,7 @@ class CarrierShipment extends Model
         'fee_amount',
         'fee_abbrevs',
         'source_type',
+        'source_file',
     ];
 
     /**
