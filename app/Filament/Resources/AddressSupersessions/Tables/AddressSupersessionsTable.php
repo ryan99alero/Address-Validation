@@ -33,6 +33,7 @@ class AddressSupersessionsTable
                 TextColumn::make('from')
                     ->label('Was (good) →')
                     ->state(fn (AddressSupersession $record): string => self::formatSnapshot($record->old_snapshot))
+                    ->html()
                     ->color('danger')
                     ->wrap()
                     // Global search box matches the denormalized index: tracking, invoice #, Pace
@@ -41,6 +42,7 @@ class AddressSupersessionsTable
                 TextColumn::make('to')
                     ->label('Carrier corrected to')
                     ->state(fn (AddressSupersession $record): string => self::formatSnapshot($record->new_snapshot))
+                    ->html()
                     ->color('success')
                     ->wrap(),
                 TextColumn::make('reason')
@@ -170,6 +172,9 @@ class AddressSupersessionsTable
     }
 
     /**
+     * Address on separate lines (line 1, line 2/suite, then city/state/zip) so a suite-add correction
+     * is visible instead of collapsing to one blob where the suite (often on address_2) is dropped.
+     *
      * @param  array<string, mixed>|null  $snapshot
      */
     private static function formatSnapshot(?array $snapshot): string
@@ -180,9 +185,12 @@ class AddressSupersessionsTable
 
         $zip = ($snapshot['postal'] ?? '').(($snapshot['postal_ext'] ?? null) ? '-'.$snapshot['postal_ext'] : '');
 
-        return trim(implode('  ', array_filter([
+        $lines = array_filter([
             $snapshot['address_1'] ?? null,
+            $snapshot['address_2'] ?? null,
             trim(implode(' ', array_filter([$snapshot['city'] ?? null, $snapshot['state'] ?? null, $zip]))),
-        ]))) ?: '—';
+        ], fn ($line): bool => $line !== null && trim((string) $line) !== '');
+
+        return $lines === [] ? '—' : implode('<br>', array_map(fn ($line): string => e($line), $lines));
     }
 }
