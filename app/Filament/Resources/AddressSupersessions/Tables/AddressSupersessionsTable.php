@@ -51,6 +51,27 @@ class AddressSupersessionsTable
                     ->color(fn (AddressSupersession $record): string => $record->isManuallyEdited() ? 'info' : 'success')
                     ->extraAttributes(['class' => 'whitespace-nowrap'])
                     ->action(self::detailsAction()),
+                TextColumn::make('tracking')
+                    ->label('Tracking')
+                    ->fontFamily('mono')
+                    ->copyable()
+                    ->placeholder('—')
+                    ->toggleable(),
+                TextColumn::make('pace_job')
+                    ->label('Job #')
+                    ->placeholder('—')
+                    ->toggleable(),
+                TextColumn::make('customer')
+                    ->label('Customer')
+                    ->state(function (AddressSupersession $record): ?string {
+                        $id = $record->pace_customer_id;
+                        $name = $record->pace_customer_name;
+
+                        return trim(($id ?? '').($id !== null && $name !== null ? ' · ' : '').($name ?? '')) ?: null;
+                    })
+                    ->wrap()
+                    ->placeholder('—')
+                    ->toggleable(),
                 TextColumn::make('reason')
                     ->label('Why')
                     ->state(function (AddressSupersession $record): string {

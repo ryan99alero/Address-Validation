@@ -228,6 +228,10 @@ test('rebuildSearchText indexes tracking, job, invoice and both addresses for th
         ->toContain('100 main st');         // address
     // reference_date is the correction-2 ship date, not the processing timestamp.
     expect($fresh->reference_date->toDateString())->toBe('2026-01-01');
+    // The Re-Corrections columns get the tracking + Pace job/customer of the correction that made B->C.
+    expect($fresh->tracking)->toBe('TRKTWO')
+        ->and($fresh->pace_job)->toBe('JOB777')
+        ->and($fresh->pace_customer_name)->toBe('Acme Co');
 });
 
 // --- Phase 3: ingest-time threading -----------------------------------------

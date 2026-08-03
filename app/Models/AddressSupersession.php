@@ -38,6 +38,10 @@ class AddressSupersession extends Model
         'guard_result',
         'search_text',
         'reference_date',
+        'tracking',
+        'pace_job',
+        'pace_customer_id',
+        'pace_customer_name',
         'corrected_override',
         'corrected_edited_at',
         'corrected_edited_by',
@@ -227,12 +231,20 @@ class AddressSupersession extends Model
             }
         }
 
-        // Real business date: the re-correction's (C2) shipment date, else its invoice date; fall back
-        // to correction 1. Never detected_at (the processing timestamp).
+        // The correction that created this event (C2, B->C), falling back to C1, drives the display
+        // columns: its tracking + the Pace job/customer for that tracking (carton first, then push).
         $refLine = $c2 ?? $c1;
         if ($refLine !== null) {
             $refDate = $refLine->ship_date ?: optional(CarrierInvoice::find($refLine->carrier_invoice_id))->invoice_date;
             $this->reference_date = $refDate ? Carbon::parse($refDate)->toDateString() : null;
+
+            $tracking = ($refLine->tracking_number ?? '') !== '' ? (string) $refLine->tracking_number : null;
+            $this->tracking = $tracking;
+            $carton = $tracking !== null ? CartonCost::where('tracking_number', $tracking)->first() : null;
+            $push = $tracking !== null ? ChargebackPush::where('tracking_number', $tracking)->orderByDesc('id')->first() : null;
+            $this->pace_job = $carton?->pace_job_number ?: ($push?->pace_job ?: null);
+            $this->pace_customer_id = $carton?->pace_customer_id ?: ($push?->pace_customer_id ?: null);
+            $this->pace_customer_name = $carton?->pace_customer_name ?: ($push?->pace_customer_name ?: null);
         }
 
         $this->search_text = mb_strtolower(trim((string) preg_replace('/\s+/', ' ', implode(' ', array_filter($parts)))));
