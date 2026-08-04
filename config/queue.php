@@ -65,10 +65,11 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            // Must exceed the longest job timeout, else a long job (invoice folder chunks import
-            // huge batch PDFs and can run for minutes) is re-dispatched mid-run -> duplicate run
-            // -> MaxAttemptsExceeded. ProcessFolderChunk's timeout is 2400s, so keep this above it.
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 2700),
+            // Must exceed the LONGEST job timeout, else a long job is re-reserved mid-run -> a second
+            // worker runs the same job -> attempts climb past --tries -> MaxAttemptsExceeded (even
+            // though the work was still progressing). Longest job timeout is 3600s
+            // (ProcessImportBatchValidation, ProcessExportBatch), so keep this comfortably above it.
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 3900),
             'after_commit' => false,
         ],
 
@@ -96,7 +97,11 @@ return [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
+            // Must exceed the LONGEST job timeout (3600s: ProcessImportBatchValidation /
+            // ProcessExportBatch). At the Laravel default of 90s a big import (6k+ rows runs as ONE
+            // job) got re-reserved every 90s, ran on multiple workers at once, and was force-failed
+            // with MaxAttemptsExceeded after ~--tries re-reservations. Keep this above every timeout.
+            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 3900),
             'block_for' => null,
             'after_commit' => false,
         ],
