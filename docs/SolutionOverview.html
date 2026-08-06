@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shipping &amp; Carrier‑Cost Platform — Capabilities Overview</title>
+<style>
+  :root{
+    --ink:#1c2430; --muted:#5b6675; --line:#e3e8ef; --bg:#ffffff;
+    --brand:#1f4e79; --brand-soft:#eef3f9;
+    --live:#1a7f4b; --live-bg:#e6f4ec;
+    --prog:#9a6a00; --prog-bg:#fbf1dc;
+    --plan:#5b6675; --plan-bg:#eef1f5;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body{
+    margin:0;color:var(--ink);background:#f4f6f9;
+    font:16px/1.6 "Segoe UI",Helvetica,Arial,sans-serif;
+  }
+  .page{max-width:860px;margin:24px auto;background:var(--bg);
+    box-shadow:0 1px 4px rgba(20,30,50,.08);}
+  .masthead{background:var(--brand);color:#fff;padding:38px 48px 30px;}
+  .masthead h1{margin:0 0 6px;font-size:27px;font-weight:700;letter-spacing:.2px;}
+  .masthead .sub{margin:0;opacity:.9;font-size:14px;letter-spacing:.3px;text-transform:uppercase;}
+  .body{padding:34px 48px 46px;}
+  h2{font-size:20px;margin:34px 0 4px;padding-bottom:6px;border-bottom:2px solid var(--brand-soft);color:var(--brand);}
+  h3{font-size:16px;margin:20px 0 6px;color:var(--ink);}
+  p{margin:8px 0;}
+  .lead{font-size:16.5px;color:var(--ink);}
+  a{color:var(--brand);}
+  ul{margin:8px 0 8px 2px;padding-left:20px;}
+  li{margin:5px 0;}
+  strong{color:var(--ink);}
+  .muted{color:var(--muted);}
+  .badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.4px;
+    padding:2px 9px;border-radius:20px;vertical-align:middle;text-transform:uppercase;margin-left:8px;}
+  .b-live{color:var(--live);background:var(--live-bg);}
+  .b-prog{color:var(--prog);background:var(--prog-bg);}
+  .b-plan{color:var(--plan);background:var(--plan-bg);}
+  .glance{background:var(--brand-soft);border:1px solid var(--line);border-radius:10px;padding:14px 20px;margin:14px 0;}
+  .glance ul{margin:0;}
+  .cap{border:1px solid var(--line);border-radius:10px;padding:4px 20px 14px;margin:14px 0;page-break-inside:avoid;}
+  .cap h3{margin-top:14px;}
+  .flow{background:#0f1b2a;color:#d7e2f0;border-radius:10px;padding:18px 20px;
+    font:12.5px/1.5 "SF Mono",Menlo,Consolas,monospace;white-space:pre;overflow-x:auto;}
+  .foot{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;}
+  .legend{font-size:13px;color:var(--muted);margin:6px 0 0;}
+  @media print{
+    body{background:#fff;font-size:12.5px;}
+    .page{margin:0;max-width:none;box-shadow:none;}
+    .masthead{padding:26px 34px 20px;}
+    .body{padding:20px 34px 30px;}
+    h2{margin-top:22px;}
+    .cap,.glance{page-break-inside:avoid;}
+    @page{margin:14mm;}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="masthead">
+    <h1>Shipping &amp; Carrier‑Cost Platform</h1>
+    <p class="sub">RAND Graphics · Capabilities Overview · August 2026</p>
+  </div>
+
+  <div class="body">
+
+    <h2>What it is</h2>
+    <p class="lead">A single platform that makes shipping <strong>more accurate, cheaper, and self‑auditing</strong>.
+    It began as an address‑validation tool and has grown into a carrier‑cost intelligence system that:</p>
+    <ul>
+      <li><strong>Validates and cleans mailing addresses</strong> before packages ship — so fewer are corrected, delayed, or returned.</li>
+      <li><strong>Reads every carrier invoice</strong> (UPS and FedEx) and turns it into structured, queryable data.</li>
+      <li><strong>Recovers money</strong> — billing customers for carrier fees they caused, and surfacing carrier overcharges to dispute.</li>
+      <li><strong>Connects in real time to the Pace ERP</strong>, cleaning shipment addresses automatically as jobs are created.</li>
+    </ul>
+    <p>Everything runs in one secure internal web application. No spreadsheets, no manual invoice keying.</p>
+
+    <h2>At a glance</h2>
+    <div class="glance"><ul>
+      <li><strong>Two carriers, four ingestion paths.</strong> UPS and FedEx invoices arrive by email, watched folder, network share, or manual upload — all parsed automatically.</li>
+      <li><strong>Ten‑plus years of invoice history</strong> ingested and reconciled (2009–present), millions of charge lines classified by <em>what</em> the fee is and <em>why</em> it was billed.</li>
+      <li><strong>A proprietary correction cache</strong> — every address the carriers have corrected us on, learned once and reused so we stop paying for the same mistake twice.</li>
+      <li><strong>Automatic write‑back to Pace</strong> — corrected addresses and cost chargebacks flow back into the ERP without staff re‑keying.</li>
+      <li><strong>Guardrails throughout</strong> — nothing is double‑billed, no already‑shipped order is altered, and every automated action is logged and reversible.</li>
+    </ul></div>
+
+    <h2>Capabilities</h2>
+    <p class="legend">Status key:
+      <span class="badge b-live">Live</span> in production ·
+      <span class="badge b-prog">In progress</span> ·
+      <span class="badge b-plan">Planned</span>
+    </p>
+
+    <div class="cap">
+      <h3>1. Address validation &amp; cleansing <span class="badge b-live">Live</span></h3>
+      <p>Validate a single address on demand, or import a spreadsheet of thousands and validate them in bulk against UPS and FedEx.</p>
+      <ul>
+        <li><strong>What it does:</strong> checks each address against the carriers, returns the corrected form, flags residential vs. commercial, and highlights exactly what changed.</li>
+        <li><strong>Why it matters:</strong> a bad address means a correction fee, a delay, or a returned package. Catching it <em>before</em> shipping avoids all three.</li>
+        <li><strong>Extras:</strong> reusable field‑mapping templates for recurring import formats; export cleaned results straight back into the file's own columns; a "check both sources" mode compares our data against the carrier and flags disagreements for a person to resolve.</li>
+      </ul>
+    </div>
+
+    <div class="cap">
+      <h3>2. The correction cache — learned carrier accuracy <span class="badge b-live">Live</span></h3>
+      <p>The platform's proprietary asset: a growing memory of every address a carrier has charged us to correct.</p>
+      <ul>
+        <li><strong>What it does:</strong> mines correction fees out of the invoices to build a "bad address → the form the carrier accepts" lookup, and applies it to future shipments automatically.</li>
+        <li><strong>Why it matters:</strong> the goal isn't the textbook‑correct address — it's the address <strong>the carrier won't charge a fee on</strong>. That's often carrier‑specific, and it's knowledge we already paid to acquire. We reuse it instead of re‑buying it.</li>
+        <li><strong>Intelligence on top:</strong> severity scoring (cosmetic vs. genuinely wrong data), correction "hotspots," a carrier‑bias audit, and self‑verification that re‑checks stored addresses over time and flags when a carrier's preferred form has drifted.</li>
+      </ul>
+    </div>
+
+    <div class="cap">
+      <h3>3. Carrier invoice intelligence <span class="badge b-live">Live</span></h3>
+      <p>Every UPS and FedEx invoice becomes clean, structured data.</p>
+      <ul>
+        <li><strong>What it does:</strong> ingests CSV and PDF invoices from email, network folders, or upload; extracts charges, per‑shipment detail, dimensional‑weight audits, and message codes; and reconciles UPS invoices <strong>to the penny</strong>.</li>
+        <li><strong>Why it matters:</strong> invoices are where the money is hiding. Once they're structured, every fee can be counted, categorized, trended, billed back, or disputed.</li>
+        <li><strong>Robustness:</strong> invoice identity is recycling‑safe (carriers reuse invoice and tracking numbers over the years), duplicates are prevented, and each charge is tagged with <strong>what</strong> it is and <strong>why</strong> it happened.</li>
+      </ul>
+    </div>
+
+    <div class="cap">
+      <h3>4. Cost analytics — understand the spend <span class="badge b-live">Live</span></h3>
+      <p>Dashboards and reports that turn the invoice data into a clear picture of where money goes.</p>
+      <ul>
+        <li><strong>What it does:</strong> shows accessorial "bleed" (surcharges on top of base freight), fee mix by type and carrier, year‑over‑year trends, and inflation‑adjusted comparisons.</li>
+        <li><strong>Why it matters:</strong> you can't cut or recover a cost you can't see. This is the "where are we bleeding" view, sliced by carrier, year, and fee type.</li>
+        <li><strong>Fair comparisons:</strong> UPS vs. FedEx are normalized (per shipment, per fee, fee‑load %) so the numbers aren't misleading.</li>
+      </ul>
+    </div>
+
+    <div class="cap">
+      <h3>5. Cost recovery — get the money back <span class="badge b-live">Live</span> <span class="badge b-prog">In progress</span></h3>
+      <p>Three ways the platform turns cost data into recovered dollars:</p>
+      <ul>
+        <li><strong>Recoup — bill customers for fees they caused <span class="badge b-live">Live</span></strong> Eligible carrier charges are pushed back into Pace as job costs so the customer is billed for the extra cost their order created. Double‑bill‑safe, and base freight the customer already paid is <strong>never</strong> charged back.</li>
+        <li><strong>Recoup — overage detection <span class="badge b-live">Live</span></strong> Compares what the carrier billed against the quoted ship cost per package to surface where we were billed more than expected.</li>
+        <li><strong>Recover — carrier disputes <span class="badge b-plan">Planned</span></strong> A refund engine to detect disputable fees (dimensional re‑rates, residential misclassifications) and export evidence packs — an edge unique to us because we hold our own dimensions and validated addresses.</li>
+      </ul>
+    </div>
+
+    <div class="cap">
+      <h3>6. Real‑time Pace ERP integration <span class="badge b-live">Live</span></h3>
+      <p>The platform is wired directly into the Pace MIS/ERP so shipments are cleaned as they're created.</p>
+      <ul>
+        <li><strong>What it does:</strong> when a shipment is created in Pace, the platform automatically validates the address, writes the corrected version back to the order, and flags the record as corrected.</li>
+        <li><strong>Why it matters:</strong> address accuracy happens invisibly, at the source, with no staff step — and the fee is avoided before the package ever ships.</li>
+        <li><strong>Guardrails:</strong> only shipments still in the <strong>Planned</strong> stage are touched (nothing already shipped is altered), corrections are recorded on both the ERP and our side for a full audit trail, and the integration can't loop or double‑write.</li>
+      </ul>
+    </div>
+
+    <div class="cap">
+      <h3>7. BestWay — just‑in‑time shipping optimization <span class="badge b-live">Live</span></h3>
+      <ul>
+        <li><strong>What it does:</strong> recommends the <strong>cheapest carrier service that still arrives on the required in‑store date</strong>, shipping on the same plant and billing account as the original order, and writes the recommendation into the export file.</li>
+        <li><strong>Why it matters:</strong> it stops packages from going out faster (and pricier) than they need to, while protecting the in‑hands date — and it never spends another party's money by jumping billing accounts.</li>
+      </ul>
+    </div>
+
+    <h2>How it fits together</h2>
+    <div class="flow">   Pace ERP (job / shipment created)
+        │  real-time webhook
+        ▼
+   Address validation ─────►  corrected address written back to Pace
+        │                      (+ flagged as corrected)
+        ▼
+   Package ships
+        │
+        ▼
+   Carrier invoice (UPS / FedEx) ──►  ingested, parsed, reconciled
+        │                              │
+        │                              ├─►  fee analytics (understand)
+        │                              ├─►  charge back to customer in Pace (recoup)
+        │                              ├─►  overcharges flagged (recover)
+        │                              └─►  new corrections learned (cache)
+        ▼
+   The correction cache feeds the next validation ──►  fewer fees over time</div>
+    <p>The loop is the point: shipments feed invoices, invoices feed the correction cache and the recovery
+    engines, and the correction cache makes the <em>next</em> shipment cleaner. The system gets smarter and
+    cheaper the longer it runs.</p>
+
+    <h2>Platform &amp; security</h2>
+    <ul>
+      <li><strong>Built on</strong> Laravel and Filament — a modern, maintainable web stack; single secure admin interface.</li>
+      <li><strong>Carriers:</strong> UPS and FedEx today (USPS/Smarty capable); designed so additional carriers can be added.</li>
+      <li><strong>ERP:</strong> live two‑way integration with Pace via its native API.</li>
+      <li><strong>Security:</strong> carrier and ERP credentials are stored encrypted; administrative areas are gated to admins via the company's existing LDAP groups; background work runs on a reliable queue so large jobs never block users.</li>
+      <li><strong>Auditability:</strong> every automated push (address correction, cost chargeback) is logged with a timestamp and is traceable end‑to‑end.</li>
+    </ul>
+
+    <h2>Where it's headed</h2>
+    <ul>
+      <li><strong>Refund / dispute engine</strong> — detect disputable carrier fees and export evidence packs (dimensional re‑rates and residential misclassifications first).</li>
+      <li><strong>Dimensional evidence</strong> — CubiScan measurement ingestion and fuller FedEx dimension capture to strengthen dispute claims.</li>
+      <li><strong>Per‑customer recovery policy</strong> — materiality thresholds and pass‑through terms so chargebacks match each customer's agreement.</li>
+      <li><strong>Deeper analytics</strong> — quote‑vs‑billed comparison and salesperson/customer attribution on recovered dollars.</li>
+    </ul>
+
+    <div class="foot">
+      This overview describes current capabilities and direction as of August 2026.
+      For technical detail see the developer and invoice‑ingestion guides in the same folder.
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
