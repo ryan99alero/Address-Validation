@@ -20,7 +20,6 @@ use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
 use Filament\Support\Icons\Heroicon;
 use Filament\View\PanelsRenderHook;
-use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
@@ -110,9 +109,10 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
             ->widgets([
-                AccountWidget::class,
-                // Cost Intelligence widgets (Bleed + Prevent zones) auto-discover from
-                // app/Filament/Widgets; the Filament marketing widget is intentionally dropped.
+                // Both Filament default widgets are intentionally dropped: the AccountWidget
+                // ("Welcome … / Sign out") is redundant with the user menu, and the marketing
+                // widget isn't wanted. The dashboard's own widgets auto-discover from
+                // app/Filament/Widgets (via discoverWidgets above).
             ])
             ->navigationItems([
                 NavigationItem::make('Telescope')
