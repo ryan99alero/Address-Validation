@@ -3,10 +3,12 @@
 namespace App\Filament\Pages;
 
 use App\Services\Analytics\CostAnalyticsService;
+use App\Support\QueueStatus;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Filament\Pages\Dashboard\Concerns\HasFiltersForm;
-use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Schema;
 
 /**
@@ -22,11 +24,17 @@ class Dashboard extends BaseDashboard
     public function filtersForm(Schema $schema): Schema
     {
         $years = app(CostAnalyticsService::class)->availableYears();
+        $queue = QueueStatus::counts();
 
+        // One compact inline row (no bulky card): a "Dashboard / Timeline" label, the Year + Month
+        // selects that drive the KPIs and fee mix, and the live queue status. The queue counts don't
+        // auto-poll here (unlike the old widget) — they refresh on load and when a filter changes.
         return $schema->components([
-            Section::make('Period')
-                ->description('Focus the KPIs and fee mix on a year — or a single month — and compare to the same period a year earlier.')
+            Grid::make(['default' => 2, 'sm' => 3, 'xl' => 6])
                 ->schema([
+                    Placeholder::make('timeline')
+                        ->label('Dashboard')
+                        ->content('Timeline'),
                     Select::make('year')
                         ->label('Year')
                         ->options([0 => 'All years'] + (array_combine($years, $years) ?: []))
@@ -39,8 +47,16 @@ class Dashboard extends BaseDashboard
                         ->default(0)
                         ->selectablePlaceholder(false)
                         ->native(false),
-                ])
-                ->columns(2),
+                    Placeholder::make('processing')
+                        ->label('Processing now')
+                        ->content((string) $queue['processing']),
+                    Placeholder::make('queued')
+                        ->label('Queued')
+                        ->content((string) $queue['queued']),
+                    Placeholder::make('failed')
+                        ->label('Failed')
+                        ->content((string) $queue['failed']),
+                ]),
         ]);
     }
 

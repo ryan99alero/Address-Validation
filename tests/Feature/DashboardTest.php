@@ -13,6 +13,6 @@ test('authenticated users can visit the dashboard', function () {
 
     $response = $this->get(route('filament.admin.pages.dashboard'));
     $response->assertOk()
-        ->assertSee('Period')       // the period filter section renders
+        ->assertSee('Timeline')     // the Dashboard / Timeline filter label renders
         ->assertSee('Full year');   // the month select's default option
 });
