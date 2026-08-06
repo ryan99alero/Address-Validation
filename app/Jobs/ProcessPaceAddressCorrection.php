@@ -26,6 +26,8 @@ use Throwable;
  * changed are pushed back to the Contact as a partial merge — {id + changed
  * fields}, verified safe — config-driven by the object's field mappings. We do
  * NOT write the JobShipment (the trackingNumber constraint gates re-firing).
+ * Before pushing, the shipment is verified still Planned (JobShipment/@planned);
+ * one that has moved on (e.g. created already Shipped) is left untouched.
  * Before/after values are recorded for the correction audit.
  */
 class ProcessPaceAddressCorrection implements ShouldQueue
@@ -104,10 +106,18 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             $contactObject = $connection->objects()->where('object_name', 'Contact')->first();
             [$changes, $diff] = $this->buildContactChanges($contactObject, $corrected, $this->payload);
 
+            // JobShipment guard: only correct a shipment that is still Planned
+            // (JobShipment/@planned == true). One that has moved on — e.g. created already
+            // Shipped for an LTL — must not be touched. Checked only when there's actually
+            // something to push, so the common no-change path stays read-free. Anything other
+            // than an explicit true (including an unreadable shipment) blocks the push.
+            $shipmentPlanned = empty($changes) ? null : $this->shipmentIsPlanned($client, $this->payload, $shipmentId);
+            $plannedBlocked = ! empty($changes) && $shipmentPlanned !== true;
+
             // Shadow / dry-run mode: validate and log what WOULD change, but do not
             // write anything back to Pace.
             $dryRun = (bool) $connection->dry_run;
-            if (! empty($changes) && ! $dryRun) {
+            if (! empty($changes) && ! $plannedBlocked && ! $dryRun) {
                 $client->updateContact(['id' => (int) $contactId] + $changes);
             }
 
@@ -141,9 +151,10 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                 'level' => 'info',
                 'loggable_type' => IntegrationConnection::class,
                 'loggable_id' => $connection->id,
-                'status' => 'success',
+                'status' => $plannedBlocked ? 'skipped' : 'success',
                 'summary' => match (true) {
                     empty($changes) => "Pace address validated (no changes) for Contact {$contactId}",
+                    $plannedBlocked => "Pace address corrected but NOT pushed — JobShipment {$shipmentId} is not Planned (Contact {$contactId})",
                     $dryRun => "DRY RUN — would correct Contact {$contactId} (nothing pushed)",
                     default => "Pace address corrected & pushed for Contact {$contactId}",
                 },
@@ -155,6 +166,8 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                     'csr' => $csr,
                     'sales_person' => $salesPerson,
                     'dry_run' => $dryRun,
+                    'shipment_planned' => $shipmentPlanned,
+                    'planned_blocked' => $plannedBlocked,
                     'changed_fields' => array_keys($changes),
                     'changes' => $diff,
                     'original' => $originalSnapshot,
@@ -277,6 +290,34 @@ class ProcessPaceAddressCorrection implements ShouldQueue
         }
 
         return [$changes, $diff];
+    }
+
+    /**
+     * Whether the shipment is still Planned in Pace (JobShipment/@planned == true). Prefers the
+     * webhook payload when it already carries `planned` (no Pace read); otherwise reads the
+     * JobShipment by id. Returns null when it can't be determined — no shipment id, an unreadable
+     * shipment, or a missing field — so the caller treats anything but an explicit true as "do not
+     * push". Failures are swallowed here (never a hard error) — the constraint re-fires later.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    protected function shipmentIsPlanned(PaceApiClient $client, array $payload, mixed $shipmentId): ?bool
+    {
+        if (array_key_exists('planned', $payload)) {
+            return $this->toBool($payload['planned']);
+        }
+
+        if (empty($shipmentId)) {
+            return null;
+        }
+
+        try {
+            $shipment = $client->readJobShipment((string) $shipmentId);
+        } catch (Throwable) {
+            return null;
+        }
+
+        return array_key_exists('planned', $shipment) ? $this->toBool($shipment['planned']) : null;
     }
 
     protected function valueChanged(mixed $new, mixed $current): bool
