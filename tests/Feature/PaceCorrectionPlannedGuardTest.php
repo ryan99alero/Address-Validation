@@ -101,6 +101,8 @@ test('pushes the correction and flags the JobShipment when it is Planned', funct
     $log = SystemLog::where('type', 'pace_address_correction')->latest('id')->first();
     expect($log->status)->toBe('success')
         ->and($log->summary)->toContain('corrected & pushed')
+        ->and($log->metadata['pushed'])->toBeTrue()
+        ->and($log->metadata['pushed_at'])->not->toBeNull()
         ->and($log->metadata['shipment_planned'])->toBeTrue()
         ->and($log->metadata['address_corrected_flagged'])->toBeTrue();
 });
@@ -122,6 +124,7 @@ test('does NOT push or flag when the JobShipment is not Planned', function () {
     $log = SystemLog::where('type', 'pace_address_correction')->latest('id')->first();
     expect($log->status)->toBe('skipped')
         ->and($log->summary)->toContain('not Planned')
+        ->and($log->metadata['pushed'])->toBeFalse()
         ->and($log->metadata['planned_blocked'])->toBeTrue()
         ->and($log->metadata['address_corrected_flagged'])->toBeFalse();
 });
@@ -137,10 +140,11 @@ test('a failed JobShipment flag write does not fail the correction that already 
     $conn = paceConnectionWithZipPush();
     (new ProcessPaceAddressCorrection($conn->id, correctionPayload()))->handle(validationReturningZipPlus4());
 
-    // The Contact correction still succeeded; only the flag is recorded as not set.
+    // The Contact correction still succeeded (pushed=true); only the JobShipment flag failed.
     $log = SystemLog::where('type', 'pace_address_correction')->latest('id')->first();
     expect($log->status)->toBe('success')
         ->and($log->summary)->toContain('corrected & pushed')
+        ->and($log->metadata['pushed'])->toBeTrue()
         ->and($log->metadata['address_corrected_flagged'])->toBeFalse();
 });
 

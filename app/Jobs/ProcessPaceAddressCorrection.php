@@ -118,8 +118,11 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             // Shadow / dry-run mode: validate and log what WOULD change, but do not
             // write anything back to Pace.
             $dryRun = (bool) $connection->dry_run;
+            // Explicit "we pushed a correction back to Pace" flag — recorded on the audit entry so
+            // pushes are queryable directly (metadata->pushed) instead of string-matching the summary.
+            $pushed = ! empty($changes) && ! $plannedBlocked && ! $dryRun;
             $addressCorrectedFlagged = false;
-            if (! empty($changes) && ! $plannedBlocked && ! $dryRun) {
+            if ($pushed) {
                 $client->updateContact(['id' => (int) $contactId] + $changes);
 
                 // Flag the shipment so Pace/reports can see the address was auto-corrected. This is
@@ -181,6 +184,8 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                     'csr' => $csr,
                     'sales_person' => $salesPerson,
                     'dry_run' => $dryRun,
+                    'pushed' => $pushed,
+                    'pushed_at' => $pushed ? now()->toIso8601String() : null,
                     'shipment_planned' => $shipmentPlanned,
                     'planned_blocked' => $plannedBlocked,
                     'address_corrected_flagged' => $addressCorrectedFlagged,
