@@ -282,11 +282,11 @@ class ProcessExportBatch implements ShouldQueue
     }
 
     /**
-     * Columns appended after the file's own columns when surfacing results. Most
-     * results are written IN-PLACE into existing columns (see computedColumnValue);
-     * only these three are genuinely new — a sortable transit-days number, the
-     * BestWay flag, and a readable ship-method recap. Any that the file already
-     * carries (by header name) are skipped so nothing is duplicated.
+     * BestWay service-result columns appended after the file's own columns when surfacing results.
+     * Most results are written IN-PLACE into existing columns (see computedColumnValue); these are the
+     * ones a raw file typically doesn't already carry — chosen service, a sortable transit-days number,
+     * whether it meets the deadline, the BestWay flag, and a readable ship-method recap. Any the file
+     * already carries (by header name) are skipped so nothing is duplicated.
      *
      * @param  array<int, string>  $existingHeaders
      * @return array<array{field: string, header: string}>

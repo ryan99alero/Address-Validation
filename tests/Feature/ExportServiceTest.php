@@ -169,12 +169,12 @@ describe('ProcessExportBatch with validation fields', function () {
         return array_column($method->invoke($job, $existingHeaders), 'field');
     }
 
-    it('appends only the three new result columns (rest go in existing columns)', function () {
+    it('appends the full BestWay service-result set (rest go in existing columns)', function () {
         $job = new ProcessExportBatch(batch: ImportBatch::factory()->create(), appendValidationFields: true);
 
         $fieldNames = appendedFields($job);
 
-        expect($fieldNames)->toBe(['ship_via_days', 'bestway_optimized', 'ship_method_comment'])
+        expect($fieldNames)->toBe(['ship_via_service', 'ship_via_days', 'ship_via_meets_deadline', 'bestway_optimized', 'ship_method_comment'])
             // These now populate the file's existing columns, not appended ones.
             ->not->toContain('validation_status')
             ->not->toContain('change_summary')
@@ -182,13 +182,13 @@ describe('ProcessExportBatch with validation fields', function () {
             ->not->toContain('recommended_ship_date');
     });
 
-    it('skips an appended column the file already carries', function () {
+    it('skips appended columns the file already carries', function () {
         $job = new ProcessExportBatch(batch: ImportBatch::factory()->create(), appendValidationFields: true);
 
-        // File already has a "Ship Via Transit Days" column (any casing/spacing).
+        // File already has "Ship Via Transit Days" + "ShipMethodComment" columns (any casing/spacing).
         $fieldNames = appendedFields($job, ['ship_via_transit_days', 'ShipMethodComment']);
 
-        expect($fieldNames)->toBe(['bestway_optimized']);
+        expect($fieldNames)->toBe(['ship_via_service', 'ship_via_meets_deadline', 'bestway_optimized']);
     });
 });
 

@@ -76,14 +76,16 @@ it('populates existing columns in place and keeps every column aligned', functio
         ->and($col('AddressCleansingReconciled'))->toBe('valid')
         ->and($col('ShipToCity'))->toBe('CHICOPEE');                         // corrected address written back
 
-    // Only the three new columns are appended — not the old ~15.
+    // Only the BestWay service-result columns are appended — not the old ~15.
     $appended = array_slice($header, 9);
-    expect($appended)->toBe(['Ship Via Transit Days', 'BestWay Optimized', 'ShipMethodComment'])
+    expect($appended)->toBe(['Ship Via Service', 'Ship Via Transit Days', 'Ship Via Meets Deadline', 'BestWay Optimized', 'ShipMethodComment'])
         ->and($header)->not->toContain('Fastest Service')
         ->and($header)->not->toContain('Distance (Miles)')
         ->and($header)->not->toContain('What Changed');
 
-    expect($col('Ship Via Transit Days'))->toBe('1')
+    expect($col('Ship Via Service'))->toBe('FedEx Standard Overnight')
+        ->and($col('Ship Via Transit Days'))->toBe('1')
+        ->and($col('Ship Via Meets Deadline'))->toBe('Yes')
         ->and($col('BestWay Optimized'))->toBe('Yes')
         ->and($col('ShipMethodComment'))->toContain('FedEx Standard Overnight')
         ->and($col('ShipMethodComment'))->toContain('ship 07/14/2026')
