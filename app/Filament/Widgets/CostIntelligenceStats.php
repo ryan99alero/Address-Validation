@@ -16,6 +16,8 @@ class CostIntelligenceStats extends StatsOverviewWidget
 
     protected static ?int $sort = 1;
 
+    protected int|string|array $columnSpan = 'full';
+
     protected ?string $heading = 'Cost Intelligence';
 
     protected ?string $description = 'Where the shipping money goes — for the selected period, versus the same period a year earlier.';

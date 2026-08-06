@@ -19,13 +19,15 @@ class CorrectionCostTrendChart extends ChartWidget
     use InteractsWithPageFilters;
     use ReadsDashboardPeriod;
 
-    protected static ?int $sort = 4;
+    protected static ?int $sort = 5;
 
     protected ?string $heading = 'Address Correction Fees by Year';
 
     protected ?string $description = 'Should trend down as address validation coverage grows. These fees are avoidable.';
 
-    protected int|string|array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 1;
+
+    protected ?string $maxHeight = '220px';
 
     protected function getType(): string
     {

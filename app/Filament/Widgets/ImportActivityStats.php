@@ -15,6 +15,8 @@ class ImportActivityStats extends StatsOverviewWidget
 {
     protected static ?int $sort = 0; // top of the dashboard — a live status strip
 
+    protected int|string|array $columnSpan = 'full';
+
     protected ?string $pollingInterval = '10s';
 
     protected function getStats(): array

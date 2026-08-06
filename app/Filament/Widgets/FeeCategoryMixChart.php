@@ -16,11 +16,13 @@ class FeeCategoryMixChart extends ChartWidget
     use InteractsWithPageFilters;
     use ReadsDashboardPeriod;
 
-    protected static ?int $sort = 3;
+    protected static ?int $sort = 4;
 
     protected ?string $heading = 'Accessorial Spend by Category';
 
-    protected int|string|array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 1;
+
+    protected ?string $maxHeight = '220px';
 
     protected function getType(): string
     {

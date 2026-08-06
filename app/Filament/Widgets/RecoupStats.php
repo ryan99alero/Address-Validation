@@ -13,7 +13,9 @@ use Filament\Widgets\StatsOverviewWidget\Stat;
  */
 class RecoupStats extends StatsOverviewWidget
 {
-    protected static ?int $sort = 5;
+    protected static ?int $sort = 2;
+
+    protected int|string|array $columnSpan = 'full';
 
     protected ?string $heading = 'Recoup';
 

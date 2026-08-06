@@ -18,7 +18,9 @@ class RecoupByCustomerChart extends ChartWidget
 
     protected ?string $description = 'Top Pace customers by billable carrier overage.';
 
-    protected int|string|array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 1;
+
+    protected ?string $maxHeight = '220px';
 
     protected function getType(): string
     {

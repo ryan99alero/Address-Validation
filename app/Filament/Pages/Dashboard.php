@@ -45,6 +45,18 @@ class Dashboard extends BaseDashboard
     }
 
     /**
+     * Compact tile grid so the whole dashboard is visible at a glance. Stat rows and heatmaps span
+     * the full width (they need it, and are set to columnSpan 'full'); the charts take one column
+     * each, so they tile 4-across on a large desktop, 3 on a laptop, 2 on a tablet, and stack on a
+     * phone. Column counts are capped to keep each chart tile at least ~300px wide — the point below
+     * which a chart stops being legible.
+     */
+    public function getColumns(): int|array
+    {
+        return ['default' => 1, 'md' => 2, 'lg' => 3, 'xl' => 4];
+    }
+
+    /**
      * @var array<int, string>
      */
     public const MONTHS = [
