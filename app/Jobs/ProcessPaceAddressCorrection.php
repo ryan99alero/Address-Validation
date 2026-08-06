@@ -24,11 +24,12 @@ use Throwable;
  * missing). The payload address is cleansed against the connection's configured
  * validators (priority order with fallback); only the fields that actually
  * changed are pushed back to the Contact as a partial merge — {id + changed
- * fields}, verified safe — config-driven by the object's field mappings. We do
- * NOT write the JobShipment (the trackingNumber constraint gates re-firing).
+ * fields}, verified safe — config-driven by the object's field mappings.
  * Before pushing, the shipment is verified still Planned (JobShipment/@planned);
- * one that has moved on (e.g. created already Shipped) is left untouched.
- * Before/after values are recorded for the correction audit.
+ * one that has moved on (e.g. created already Shipped) is left untouched. On an
+ * actual correction we also set JobShipment/@u_addressCorrected = true — an
+ * update, so it does not re-fire the punch-out (which is gated on record
+ * creation, not updates). Before/after values are recorded for the correction audit.
  */
 class ProcessPaceAddressCorrection implements ShouldQueue
 {
@@ -117,8 +118,22 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             // Shadow / dry-run mode: validate and log what WOULD change, but do not
             // write anything back to Pace.
             $dryRun = (bool) $connection->dry_run;
+            $addressCorrectedFlagged = false;
             if (! empty($changes) && ! $plannedBlocked && ! $dryRun) {
                 $client->updateContact(['id' => (int) $contactId] + $changes);
+
+                // Flag the shipment so Pace/reports can see the address was auto-corrected. This is
+                // an UPDATE (partial merge, like the Contact write), so it does not re-fire the
+                // punch-out — that is gated on record creation, not updates. Best-effort: a failed
+                // flag must not fail the correction that already landed, so it never rethrows.
+                if (! empty($shipmentId)) {
+                    try {
+                        $client->updateJobShipment(['id' => (int) $shipmentId, 'u_addressCorrected' => true]);
+                        $addressCorrectedFlagged = true;
+                    } catch (Throwable) {
+                        // Left false; surfaced in the audit metadata below.
+                    }
+                }
             }
 
             // Audit snapshot: original as received, and corrected = original with ONLY
@@ -168,6 +183,7 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                     'dry_run' => $dryRun,
                     'shipment_planned' => $shipmentPlanned,
                     'planned_blocked' => $plannedBlocked,
+                    'address_corrected_flagged' => $addressCorrectedFlagged,
                     'changed_fields' => array_keys($changes),
                     'changes' => $diff,
                     'original' => $originalSnapshot,

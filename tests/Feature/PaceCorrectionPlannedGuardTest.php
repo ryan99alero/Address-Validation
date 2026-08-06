@@ -82,10 +82,11 @@ beforeEach(function () {
     Carrier::factory()->create(['slug' => 'fedex', 'name' => 'FedEx', 'is_active' => true]);
 });
 
-test('pushes the correction when the JobShipment is Planned', function () {
+test('pushes the correction and flags the JobShipment when it is Planned', function () {
     Http::fake([
         '*readJobShipment*' => Http::response(['planned' => true]),
         '*updateContact*' => Http::response([]),
+        '*updateJobShipment*' => Http::response([]),
         '*' => Http::response([]),
     ]);
 
@@ -93,17 +94,22 @@ test('pushes the correction when the JobShipment is Planned', function () {
     (new ProcessPaceAddressCorrection($conn->id, correctionPayload()))->handle(validationReturningZipPlus4());
 
     Http::assertSent(fn ($request) => str_contains($request->url(), 'updateContact'));
+    // The JobShipment is flagged u_addressCorrected = true on an actual correction.
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'updateJobShipment')
+        && ($request->data()['u_addressCorrected'] ?? null) === true);
 
     $log = SystemLog::where('type', 'pace_address_correction')->latest('id')->first();
     expect($log->status)->toBe('success')
         ->and($log->summary)->toContain('corrected & pushed')
-        ->and($log->metadata['shipment_planned'])->toBeTrue();
+        ->and($log->metadata['shipment_planned'])->toBeTrue()
+        ->and($log->metadata['address_corrected_flagged'])->toBeTrue();
 });
 
-test('does NOT push the correction when the JobShipment is not Planned', function () {
+test('does NOT push or flag when the JobShipment is not Planned', function () {
     Http::fake([
         '*readJobShipment*' => Http::response(['planned' => false]),
         '*updateContact*' => Http::response([]),
+        '*updateJobShipment*' => Http::response([]),
         '*' => Http::response([]),
     ]);
 
@@ -111,11 +117,31 @@ test('does NOT push the correction when the JobShipment is not Planned', functio
     (new ProcessPaceAddressCorrection($conn->id, correctionPayload()))->handle(validationReturningZipPlus4());
 
     Http::assertNotSent(fn ($request) => str_contains($request->url(), 'updateContact'));
+    Http::assertNotSent(fn ($request) => str_contains($request->url(), 'updateJobShipment'));
 
     $log = SystemLog::where('type', 'pace_address_correction')->latest('id')->first();
     expect($log->status)->toBe('skipped')
         ->and($log->summary)->toContain('not Planned')
-        ->and($log->metadata['planned_blocked'])->toBeTrue();
+        ->and($log->metadata['planned_blocked'])->toBeTrue()
+        ->and($log->metadata['address_corrected_flagged'])->toBeFalse();
+});
+
+test('a failed JobShipment flag write does not fail the correction that already landed', function () {
+    Http::fake([
+        '*readJobShipment*' => Http::response(['planned' => true]),
+        '*updateContact*' => Http::response([]),
+        '*updateJobShipment*' => Http::response(['error' => 'boom'], 500),
+        '*' => Http::response([]),
+    ]);
+
+    $conn = paceConnectionWithZipPush();
+    (new ProcessPaceAddressCorrection($conn->id, correctionPayload()))->handle(validationReturningZipPlus4());
+
+    // The Contact correction still succeeded; only the flag is recorded as not set.
+    $log = SystemLog::where('type', 'pace_address_correction')->latest('id')->first();
+    expect($log->status)->toBe('success')
+        ->and($log->summary)->toContain('corrected & pushed')
+        ->and($log->metadata['address_corrected_flagged'])->toBeFalse();
 });
 
 test('shipmentIsPlanned prefers a planned flag already in the payload (no Pace read)', function () {
