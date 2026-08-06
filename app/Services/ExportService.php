@@ -252,6 +252,11 @@ class ExportService
             'ship_via_code' => $address->ship_via_code,
             'requested_ship_date' => $address->requested_ship_date?->format('Y-m-d'),
             'required_on_site_date' => $address->required_on_site_date?->format('Y-m-d'),
+            // Residential flags — the corrected/validated determination (is_residential) is the
+            // meaningful one for shipping; input_is_residential is the pre-validation value. Without
+            // these arms a template mapping to them silently exported blank.
+            'is_residential' => $address->is_residential === null ? '' : ($address->is_residential ? 'Yes' : 'No'),
+            'input_is_residential' => $address->input_is_residential === null ? '' : ($address->input_is_residential ? 'Yes' : 'No'),
             default => null,
         };
     }

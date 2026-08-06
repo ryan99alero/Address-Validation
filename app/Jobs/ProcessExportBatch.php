@@ -135,12 +135,16 @@ class ProcessExportBatch implements ShouldQueue
                 foreach ($addresses as $address) {
                     $row = [];
                     foreach ($mappings as $mapping) {
-                        // When surfacing results, known columns (ShipDate, ShipViaCode,
-                        // ResidentialDelivery, AddressCleansing*) are populated in-place
-                        // with the computed value instead of echoing the imported one.
-                        $override = $appendServiceResults
-                            ? $this->computedColumnValue($address, $mapping['source'] ?? '')
-                            : null;
+                        // Address-cleansing outputs (AddressCleansingComment / Reconciled /
+                        // ResidentialDelivery) are products of validation, so they fill in-place on
+                        // EVERY export where the file carries the column — independent of the
+                        // service-results toggle. Service/transit/BestWay columns only fill when
+                        // $appendServiceResults is on. Either way the computed value replaces the
+                        // echoed import value.
+                        $override = $this->cleansingColumnValue($address, $mapping['source'] ?? '');
+                        if ($override === null && $appendServiceResults) {
+                            $override = $this->computedColumnValue($address, $mapping['source'] ?? '');
+                        }
 
                         if ($override !== null) {
                             $row[] = $override;
@@ -306,19 +310,32 @@ class ProcessExportBatch implements ShouldQueue
     }
 
     /**
-     * For a handful of well-known columns, the export writes the COMPUTED result
-     * into the file's existing column instead of echoing the imported value.
-     * Returns null for any other column (use the normal mapped value). Matched on
-     * the source header name, case/space/underscore-insensitive.
+     * Address-cleansing columns that are pure validation outputs and therefore fill in-place on
+     * every export (not gated behind the service-results toggle). Returns null for any other column
+     * so the caller can fall through to the service columns / the echoed import value. Matched on the
+     * source header name, case/space/underscore-insensitive.
+     */
+    protected function cleansingColumnValue(Address $address, string $sourceHeader): ?string
+    {
+        return match ($this->normalizeHeader($sourceHeader)) {
+            'residentialdelivery' => $address->is_residential === null ? '' : ($address->is_residential ? 'Y' : 'N'),
+            'addresscleansingcomment' => (string) ($address->change_summary ?? ''),
+            'addresscleansingreconciled' => (string) ($address->validation_status ?? ''),
+            default => null,
+        };
+    }
+
+    /**
+     * Service / transit / BestWay result columns written into the file's existing column instead of
+     * echoing the imported value — only when the service-results toggle is on. Returns null for any
+     * other column (use the normal mapped value). Matched on the source header name,
+     * case/space/underscore-insensitive.
      */
     protected function computedColumnValue(Address $address, string $sourceHeader): ?string
     {
         return match ($this->normalizeHeader($sourceHeader)) {
             'shipdate' => ($address->recommended_ship_date ?? $address->requested_ship_date)?->format('m/d/Y') ?? '',
             'shipviacode' => (string) ($address->ship_via_code ?? ''),
-            'residentialdelivery' => $address->is_residential === null ? '' : ($address->is_residential ? 'Y' : 'N'),
-            'addresscleansingcomment' => $address->change_summary,
-            'addresscleansingreconciled' => (string) ($address->validation_status ?? ''),
             'shipmethodcomment' => $address->ship_method_comment,
             // Service / transit / BestWay / reverse-schedule results. When the re-uploaded file already
             // carries one of these columns, its content is REFRESHED in place: the current finding

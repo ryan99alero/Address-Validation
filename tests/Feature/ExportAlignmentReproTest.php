@@ -89,3 +89,52 @@ it('populates existing columns in place and keeps every column aligned', functio
         ->and($col('ShipMethodComment'))->toContain('ship 07/14/2026')
         ->and($col('ShipMethodComment'))->toContain('arrive 07/15/2026');
 });
+
+/**
+ * Batch-170 scenario: an address-validation-only export with the service-results toggle OFF still
+ * fills the address-cleansing columns (they're validation outputs, not service results), and appends
+ * NO service/transit columns.
+ */
+it('fills address-cleansing columns even with the service-results toggle off', function () {
+    $carrier = Carrier::factory()->create(['slug' => 'ups', 'name' => 'UPS']);
+
+    $batch = ImportBatch::factory()->create([
+        'field_mappings' => [
+            ['source' => 'ShipToCity', 'target' => 'input_city', 'position' => 0],
+            ['source' => 'ShipToState', 'target' => 'input_state', 'position' => 1],
+            ['source' => 'ShipToZipCode', 'target' => 'input_postal', 'position' => 2],
+            ['source' => 'ResidentialDelivery', 'target' => 'input_is_residential', 'position' => 3],
+            ['source' => 'AddressCleansingComment', 'target' => '_skip', 'position' => 4],
+            ['source' => 'AddressCleansingReconciled', 'target' => '_skip', 'position' => 5],
+        ],
+    ]);
+
+    Address::factory()->create([
+        'import_batch_id' => $batch->id,
+        'source_row_number' => 1,
+        'input_city' => 'Chicopee', 'input_state' => 'MA', 'input_postal' => '01020',
+        'output_city' => 'CHICOPEE', 'output_state' => 'MA', 'output_postal' => '01020-5005',
+        'validation_status' => 'valid', 'is_residential' => false,
+        'validated_by_carrier_id' => $carrier->id,
+    ]);
+
+    // appendValidationFields defaults to false — the correction-only export path.
+    $job = new ProcessExportBatch(batch: $batch, useImportMapping: true);
+    $job->handle();
+
+    $path = Storage::disk('local')->path($batch->fresh()->export_file_path);
+    $rows = array_map(fn ($l) => str_getcsv($l, ',', '"', ''), array_filter(file($path), fn ($l) => trim($l) !== ''));
+    $header = $rows[0];
+    $row = $rows[1];
+    $col = fn (string $h) => $row[array_search($h, $header, true)];
+
+    // Cleansing/residential columns filled from validation data despite the toggle being off.
+    expect($col('ResidentialDelivery'))->toBe('N')
+        ->and($col('AddressCleansingComment'))->toBe('City: CHICOPEE, Zip: 01020-5005')
+        ->and($col('AddressCleansingReconciled'))->toBe('valid');
+
+    // No service/transit columns appended.
+    expect($header)->toBe(['ShipToCity', 'ShipToState', 'ShipToZipCode', 'ResidentialDelivery', 'AddressCleansingComment', 'AddressCleansingReconciled'])
+        ->and($header)->not->toContain('Ship Via Transit Days')
+        ->and($header)->not->toContain('BestWay Optimized');
+});
