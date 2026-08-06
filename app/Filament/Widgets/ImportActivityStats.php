@@ -4,12 +4,14 @@ namespace App\Filament\Widgets;
 
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Redis;
 
 /**
- * Live queue + import status. Polls every 10s so you can watch an import drain the queue without
- * refreshing. "Processing now" = jobs the workers have reserved; "Queued" = jobs still waiting.
+ * Live queue status — a compact strip. Polls every 10s so you can watch an import drain the queue
+ * without refreshing. "Processing now" = jobs a worker has reserved; "Queued" = jobs still waiting.
+ * Reads the real queue: Redis when that's the driver (the DB `jobs` table is unused once the queue
+ * moves to Redis), falling back to the `jobs` table for the database driver.
  */
 class ImportActivityStats extends StatsOverviewWidget
 {
@@ -21,28 +23,47 @@ class ImportActivityStats extends StatsOverviewWidget
 
     protected function getStats(): array
     {
-        $inFlight = DB::table('jobs')->whereNotNull('reserved_at')->count();
-        $queued = DB::table('jobs')->whereNull('reserved_at')->count();
-        $failed = DB::table('failed_jobs')->count();
-        $lastImport = DB::table('carrier_import_files')->max('imported_at');
+        [$processing, $queued] = $this->queueDepth();
+        $failed = (int) DB::table('failed_jobs')->count();
 
         return [
-            Stat::make('Processing now', number_format($inFlight))
-                ->description($inFlight > 0 ? 'import running' : 'idle')
-                ->descriptionIcon($inFlight > 0 ? 'heroicon-m-bolt' : 'heroicon-m-check-circle')
-                ->color($inFlight > 0 ? 'info' : 'gray'),
+            Stat::make('Processing now', number_format($processing))
+                ->color($processing > 0 ? 'info' : 'gray'),
 
             Stat::make('Queued', number_format($queued))
-                ->description($queued > 0 ? 'waiting for a worker' : 'nothing waiting')
                 ->color($queued > 0 ? 'warning' : 'gray'),
 
             Stat::make('Failed', number_format($failed))
-                ->description('see Failed Jobs to retry/purge')
                 ->color($failed > 0 ? 'danger' : 'gray'),
+        ];
+    }
 
-            Stat::make('Last import', $lastImport ? Carbon::parse($lastImport)->diffForHumans() : '—')
-                ->description($lastImport ? Carbon::parse($lastImport)->format('M j, g:i a') : 'no imports yet')
-                ->color('gray'),
+    /**
+     * [reserved (processing now), pending (queued)] across every queue the workers poll.
+     *
+     * @return array{0: int, 1: int}
+     */
+    protected function queueDepth(): array
+    {
+        if (config('queue.default') === 'redis') {
+            try {
+                $redis = Redis::connection(config('queue.connections.redis.connection') ?: 'default');
+                $reserved = 0;
+                $pending = 0;
+                foreach (['default', 'chargebacks', 'address-verify'] as $queue) {
+                    $pending += (int) $redis->llen("queues:{$queue}");
+                    $reserved += (int) $redis->zcard("queues:{$queue}:reserved");
+                }
+
+                return [$reserved, $pending];
+            } catch (\Throwable) {
+                // Redis unavailable — fall through to the database queue table.
+            }
+        }
+
+        return [
+            (int) DB::table('jobs')->whereNotNull('reserved_at')->count(),
+            (int) DB::table('jobs')->whereNull('reserved_at')->count(),
         ];
     }
 }
