@@ -8,7 +8,7 @@ use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Filament\Pages\Dashboard\Concerns\HasFiltersForm;
-use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
 /**
@@ -26,11 +26,14 @@ class Dashboard extends BaseDashboard
         $years = app(CostAnalyticsService::class)->availableYears();
         $queue = QueueStatus::counts();
 
-        // One compact inline row (no bulky card): a "Dashboard / Timeline" label, the Year + Month
-        // selects that drive the KPIs and fee mix, and the live queue status. The queue counts don't
-        // auto-poll here (unlike the old widget) — they refresh on load and when a filter changes.
+        // One compact row: a "Dashboard / Timeline" label, the Year + Month selects that drive the
+        // KPIs and fee mix, and the live queue status. A headingless Section is the container because
+        // a bare Grid no longer spans the full form width in Filament v5 (it collapses to a tiny
+        // intrinsic width, crushing the selects). The queue counts don't auto-poll here (unlike the
+        // old widget) — they refresh on load and when a filter changes.
         return $schema->components([
-            Grid::make(['default' => 2, 'sm' => 3, 'xl' => 6])
+            Section::make()
+                ->columns(['default' => 2, 'md' => 3, 'xl' => 6])
                 ->schema([
                     Placeholder::make('timeline')
                         ->label('Dashboard')
