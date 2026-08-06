@@ -14,6 +14,15 @@ use Throwable;
 
 class InvoiceMailProcessService
 {
+    /**
+     * Attachment extensions the parser can ingest directly (not via a ZIP wrapper). importFile()
+     * routes PDF vs CSV from here; UPS emails ZIPs of PDFs (handled separately), FedEx emails a raw
+     * PDF, and CSVs also occur.
+     *
+     * @var array<int, string>
+     */
+    protected const DIRECT_INGEST_EXTENSIONS = ['pdf', 'csv'];
+
     public function __construct(
         protected MailboxService $mailbox,
         protected ZipExtractor $zipExtractor,
@@ -173,7 +182,8 @@ class InvoiceMailProcessService
 
         foreach ($message->getAttachments() as $attachment) {
             $name = $attachment->getName();
-            if (! $name || ! fnmatch($pattern, $name)) {
+            // Case-insensitive so a "*.pdf" pattern also catches "…_08_38.PDF".
+            if (! $name || ! fnmatch($pattern, $name, FNM_CASEFOLD)) {
                 continue;
             }
 
@@ -181,19 +191,36 @@ class InvoiceMailProcessService
                 mkdir($workDir, 0775, true);
             }
 
-            $zipPath = $workDir.'/'.$name;
-            file_put_contents($zipPath, $attachment->getContent());
+            $savedPath = $workDir.'/'.$name;
+            file_put_contents($savedPath, $attachment->getContent());
 
-            $result = $this->zipExtractor->extract($zipPath, $workDir.'/extracted', $password);
-            if (! $result['ok']) {
-                $stats['errors'][] = "{$name}: {$result['error']}";
+            $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+
+            // A ZIP (UPS emails password-protected archives) is decompressed and each member
+            // processed. A file the parser can ingest directly (FedEx emails a raw PDF; CSVs also
+            // occur) is handed straight to processFile — importFile() routes PDF vs CSV from there.
+            if ($ext === 'zip') {
+                $result = $this->zipExtractor->extract($savedPath, $workDir.'/extracted', $password);
+                if (! $result['ok']) {
+                    $stats['errors'][] = "{$name}: {$result['error']}";
+
+                    continue;
+                }
+
+                foreach ($result['files'] as $extractedPath) {
+                    $this->processFile($integration, $message, $extractedPath, $stats);
+                }
 
                 continue;
             }
 
-            foreach ($result['files'] as $pdfPath) {
-                $this->processFile($integration, $message, $pdfPath, $stats);
+            if (in_array($ext, self::DIRECT_INGEST_EXTENSIONS, true)) {
+                $this->processFile($integration, $message, $savedPath, $stats);
+
+                continue;
             }
+
+            $stats['errors'][] = "{$name}: unsupported attachment type (.{$ext}) — expected zip, pdf, or csv";
         }
     }
 

@@ -120,7 +120,7 @@ class MailIntegrationForm
                             ->label('Attachment Pattern')
                             ->default('*.zip')
                             ->required()
-                            ->helperText('Glob for attachments to process. UPS = Invoices_Accounts_*.zip'),
+                            ->helperText('Case-insensitive glob for attachments to process. ZIPs are decompressed; PDFs/CSVs are ingested directly. UPS = Invoices_Accounts_*.zip, FedEx = *.pdf'),
                         TextInput::make('from_filter')
                             ->label('From Filter (recommended)')
                             ->placeholder('ups.com')
