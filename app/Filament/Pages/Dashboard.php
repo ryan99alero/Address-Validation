@@ -33,6 +33,10 @@ class Dashboard extends BaseDashboard
         // old widget) — they refresh on load and when a filter changes.
         return $schema->components([
             Section::make()
+                // Span the full width of the dashboard's content grid — without this the Section
+                // only occupies one column of that multi-column grid (~1/3 width in Filament v5,
+                // which no longer spans all columns by default), crushing the row below.
+                ->columnSpanFull()
                 ->columns(['default' => 2, 'md' => 3, 'xl' => 6])
                 ->schema([
                     Placeholder::make('timeline')
