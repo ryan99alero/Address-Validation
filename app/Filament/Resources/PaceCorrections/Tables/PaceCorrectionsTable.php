@@ -58,6 +58,33 @@ class PaceCorrectionsTable
                     ->badge()
                     ->getStateUsing(fn ($record): string => ($record->metadata['dry_run'] ?? false) ? 'Dry-run' : 'Live')
                     ->color(fn (string $state): string => $state === 'Dry-run' ? 'info' : 'gray'),
+                TextColumn::make('residential')
+                    ->label('Residential')
+                    ->badge()
+                    ->getStateUsing(function ($record): string {
+                        $meta = $record->metadata ?? [];
+                        $changes = $meta['changes'] ?? [];
+
+                        // Did this push actually set the residential flag on the Pace Contact?
+                        if (array_key_exists('residential', $changes)) {
+                            return filter_var($changes['residential']['to'] ?? null, FILTER_VALIDATE_BOOLEAN)
+                                ? 'Set Residential'
+                                : 'Set Commercial';
+                        }
+
+                        // Otherwise report what the validator classified it as (no flag change pushed).
+                        return match ($meta['residential'] ?? null) {
+                            true => 'Residential',
+                            false => 'Commercial',
+                            default => '—',
+                        };
+                    })
+                    ->color(fn (string $state): string => match ($state) {
+                        'Set Residential' => 'success',
+                        'Residential' => 'info',
+                        default => 'gray',
+                    })
+                    ->icon(fn (string $state): ?string => str_contains($state, 'Residential') ? 'heroicon-m-home' : null),
                 TextColumn::make('comparison')
                     ->label('Address (original → corrected)')
                     ->html()
@@ -114,6 +141,10 @@ class PaceCorrectionsTable
                             // don't double-count under both "FedEx" and "No Changes".
                             : $q->where('metadata->source', $value)->whereJsonLength('metadata->changes', '>', 0),
                     )),
+                Filter::make('residential_set')
+                    ->label('Residential set on Pace')
+                    ->toggle()
+                    ->query(fn (Builder $query): Builder => $query->whereRaw("json_extract(metadata, '\$.changes.residential') is not null")),
                 Filter::make('created_at')
                     ->schema([
                         DatePicker::make('from')->label('From'),
