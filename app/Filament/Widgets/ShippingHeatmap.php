@@ -21,7 +21,9 @@ class ShippingHeatmap extends Widget
 
     protected string $view = 'filament.widgets.heatmap';
 
-    protected int|string|array $columnSpan = 'full';
+    // Half-width (side-by-side with the other heatmap) on wide screens; full-width and stacked on
+    // smaller ones so the map stays readable. Click-to-enlarge covers the detailed view.
+    protected int|string|array $columnSpan = ['default' => 1, 'md' => 2, 'lg' => 3, 'xl' => 2];
 
     protected static ?int $sort = 20;
 
