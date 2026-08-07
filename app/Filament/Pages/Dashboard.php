@@ -8,6 +8,7 @@ use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Filament\Pages\Dashboard\Concerns\HasFiltersForm;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
@@ -37,32 +38,42 @@ class Dashboard extends BaseDashboard
                 // only occupies one column of that multi-column grid (~1/3 width in Filament v5,
                 // which no longer spans all columns by default), crushing the row below.
                 ->columnSpanFull()
-                ->columns(['default' => 2, 'md' => 3, 'xl' => 6])
+                ->columns(['default' => 1, 'lg' => 2])
                 ->schema([
-                    Placeholder::make('timeline')
-                        ->label('Dashboard')
-                        ->content('Timeline'),
-                    Select::make('year')
-                        ->label('Year')
-                        ->options([0 => 'All years'] + (array_combine($years, $years) ?: []))
-                        ->default($years[0] ?? 0)
-                        ->selectablePlaceholder(false)
-                        ->native(false),
-                    Select::make('month')
-                        ->label('Month')
-                        ->options([0 => 'Full year'] + self::MONTHS)
-                        ->default(0)
-                        ->selectablePlaceholder(false)
-                        ->native(false),
-                    Placeholder::make('processing')
-                        ->label('Processing now')
-                        ->content((string) $queue['processing']),
-                    Placeholder::make('queued')
-                        ->label('Queued')
-                        ->content((string) $queue['queued']),
-                    Placeholder::make('failed')
-                        ->label('Failed')
-                        ->content((string) $queue['failed']),
+                    // Timeline filters group: Dashboard/Timeline label + Year + Month.
+                    Grid::make(['default' => 2, 'sm' => 3])
+                        ->schema([
+                            Placeholder::make('timeline')
+                                ->label('Dashboard')
+                                ->content('Timeline'),
+                            Select::make('year')
+                                ->label('Year')
+                                ->options([0 => 'All years'] + (array_combine($years, $years) ?: []))
+                                ->default($years[0] ?? 0)
+                                ->selectablePlaceholder(false)
+                                ->native(false),
+                            Select::make('month')
+                                ->label('Month')
+                                ->options([0 => 'Full year'] + self::MONTHS)
+                                ->default(0)
+                                ->selectablePlaceholder(false)
+                                ->native(false),
+                        ]),
+                    // Queue status group, with a full-height vertical separator on its leading edge
+                    // (only when it sits beside the filters — i.e. the lg two-column layout).
+                    Grid::make(['default' => 3])
+                        ->extraAttributes(['class' => 'h-full lg:border-s lg:ps-6 border-gray-200 dark:border-white/10'])
+                        ->schema([
+                            Placeholder::make('processing')
+                                ->label('Processing now')
+                                ->content((string) $queue['processing']),
+                            Placeholder::make('queued')
+                                ->label('Queued')
+                                ->content((string) $queue['queued']),
+                            Placeholder::make('failed')
+                                ->label('Failed')
+                                ->content((string) $queue['failed']),
+                        ]),
                 ]),
         ]);
     }
