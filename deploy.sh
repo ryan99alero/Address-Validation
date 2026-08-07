@@ -35,6 +35,14 @@ echo ""
 echo "Fixing storage permissions..."
 ./fix-storage-permissions.sh
 
+# Build front-end assets so CSS/JS changes reach prod. The panel uses a custom Tailwind theme
+# (viteTheme) whose compiled output is gitignored, so it must be rebuilt on the box. Runs as the
+# deploy user with a login shell so node/npm are on PATH; set -e aborts the deploy if the build
+# fails rather than shipping a stale/broken stylesheet.
+echo ""
+echo "Building front-end assets..."
+sudo -u "$DEPLOY_USER" bash -lc "cd '$PWD' && npm run build"
+
 # Run migrations (run as deploy user)
 echo ""
 echo "Running migrations..."

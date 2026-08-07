@@ -3,13 +3,3 @@
 @source '../../../../app/Filament/**/*';
 @source '../../../../resources/views/filament/**/*';
 @source '../../../../vendor/wire-elements/**/*.blade.php';
-
-/*
- * Filament builds responsive grid / column classes dynamically from ->columns() and
- * ->columnSpan() configs (e.g. xl:grid-cols-6), so the class names never appear literally in
- * any scanned source and Tailwind tree-shakes them out — which collapses the dashboard tile
- * grids at every breakpoint. Safelist the full range so those grids always render.
- */
-@source inline("{sm:,md:,lg:,xl:,2xl:,}grid-cols-{1..12}");
-@source inline("{sm:,md:,lg:,xl:,2xl:,}col-span-{1..12}");
-@source inline("{sm:,md:,lg:,xl:,2xl:,}col-span-full");
