@@ -213,6 +213,7 @@ class BatchProcessing extends Page implements HasSchemas
             ->components([
                 Section::make('Upload File')
                     ->description('Upload an Excel or CSV file containing addresses to validate.')
+                    ->columns(['default' => 1, 'md' => 2, 'xl' => 3])
                     ->schema([
                         FileUpload::make('file')
                             ->label('Address File')
@@ -226,7 +227,8 @@ class BatchProcessing extends Page implements HasSchemas
                             ->disk('local')
                             ->directory('imports')
                             ->storeFileNamesIn('original_file_name')
-                            ->helperText('Accepted formats: .xlsx, .xls, .csv (max 10MB)'),
+                            ->helperText('Accepted formats: .xlsx, .xls, .csv (max 10MB)')
+                            ->columnSpanFull(),
                         TextInput::make('import_name')
                             ->label('Import Name')
                             ->placeholder('Leave blank to use filename')
@@ -238,6 +240,11 @@ class BatchProcessing extends Page implements HasSchemas
                             ->required()
                             ->live()
                             ->helperText('Which carrier API to validate against. Checks the local invoice cache first, then that carrier.'),
+                    ]),
+                Section::make('Validation Options')
+                    ->columns(['default' => 1, 'md' => 2, 'xl' => 3])
+                    ->compact()
+                    ->schema([
                         Checkbox::make('auto_validate')
                             ->label('Automatically start validation after import')
                             ->default(true)
@@ -267,6 +274,12 @@ class BatchProcessing extends Page implements HasSchemas
                                 }
                             })
                             ->helperText('Fetch shipping service options and delivery estimates'),
+                    ]),
+                Section::make('Transit Time & BestWay')
+                    ->columns(['default' => 1, 'md' => 2, 'xl' => 3])
+                    ->compact()
+                    ->visible(fn ($get) => $get('include_transit_times'))
+                    ->schema([
                         Select::make('transit_carrier_id')
                             ->label('Transit Time Carrier')
                             ->options(fn () => Carrier::whereIn('slug', ['ups', 'fedex'])
@@ -347,8 +360,9 @@ class BatchProcessing extends Page implements HasSchemas
     {
         return $schema
             ->components([
-                Section::make('Export Configuration')
+                Section::make('Source & Format')
                     ->description('Select a batch to download validated addresses.')
+                    ->columns(['default' => 1, 'md' => 2, 'xl' => 3])
                     ->schema([
                         Select::make('batch_id')
                             ->label('Import Batch')
@@ -406,7 +420,11 @@ class BatchProcessing extends Page implements HasSchemas
                             ->label('Include service / transit results')
                             ->helperText('Appends the transit-time and BestWay result columns (service, delivery date, meets-deadline, distance, what changed…) after your normal columns. Auto-enabled when the batch was run with transit times or BestWay.')
                             ->default(false),
-
+                    ]),
+                Section::make('Filters & Output')
+                    ->columns(['default' => 1, 'md' => 2, 'xl' => 3])
+                    ->compact()
+                    ->schema([
                         Select::make('filter_status')
                             ->label('Filter by Validation Status')
                             ->options([
