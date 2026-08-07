@@ -22,6 +22,8 @@ class RecoupByCustomerChart extends ChartWidget
 
     protected ?string $maxHeight = '220px';
 
+    protected string $view = 'filament.widgets.expandable-chart';
+
     protected function getType(): string
     {
         return 'bar';
