@@ -15,6 +15,8 @@
                 x-data="{
                     cfg: @js($this->heatMapConfig()),
                     map: null,
+                    isFull: false,
+                    zoomCtl: null,
                     init() {
                         this.ensureLeaflet(() => this.render());
                     },
@@ -44,7 +46,13 @@
                         }, 50);
                     },
                     render() {
-                        this.map = L.map(this.$refs.map, { scrollWheelZoom: false, worldCopyJump: true }).setView(this.cfg.center, this.cfg.zoom);
+                        // Tile = a live but NON-interactive preview (so a click anywhere expands it,
+                        // instead of panning/zooming). Interaction is turned on only in fullscreen.
+                        this.map = L.map(this.$refs.map, {
+                            zoomControl: false, dragging: false, scrollWheelZoom: false,
+                            doubleClickZoom: false, boxZoom: false, keyboard: false,
+                            touchZoom: false, worldCopyJump: true,
+                        }).setView(this.cfg.center, this.cfg.zoom);
                         L.tileLayer(this.cfg.tiles.url, { attribution: this.cfg.tiles.attribution, subdomains: 'abcd', maxZoom: 12 }).addTo(this.map);
                         const overlays = {};
                         this.cfg.layers.forEach((layer) => {
@@ -60,11 +68,44 @@
                         if (this.cfg.layers.length > 1) {
                             L.control.layers(null, overlays, { collapsed: false, position: 'topright' }).addTo(this.map);
                         }
+                        const el = this.$refs.map;
+                        document.addEventListener('fullscreenchange', () => {
+                            this.isFull = (document.fullscreenElement === el);
+                            el.style.height = this.isFull ? '100vh' : '18rem';
+                            this.setInteractive(this.isFull);
+                            setTimeout(() => this.map && this.map.invalidateSize(), 120);
+                        });
                         setTimeout(() => this.map && this.map.invalidateSize(), 250);
+                    },
+                    setInteractive(on) {
+                        const m = this.map; if (! m) return;
+                        ['dragging','scrollWheelZoom','doubleClickZoom','boxZoom','keyboard','touchZoom'].forEach((h) => {
+                            if (m[h]) { on ? m[h].enable() : m[h].disable(); }
+                        });
+                        if (on && ! this.zoomCtl) { this.zoomCtl = L.control.zoom({ position: 'topleft' }).addTo(m); }
+                        else if (! on && this.zoomCtl) { m.removeControl(this.zoomCtl); this.zoomCtl = null; }
+                    },
+                    openFull() {
+                        const el = this.$refs.map;
+                        (el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen)?.call(el);
                     },
                 }"
             >
-                <div wire:ignore x-ref="map" style="height: 30rem; width: 100%; border-radius: 0.5rem; overflow: hidden; z-index: 0; background: #e5e7eb;"></div>
+                <div class="relative" wire:ignore>
+                    <div x-ref="map" style="height: 18rem; width: 100%; border-radius: 0.5rem; overflow: hidden; z-index: 0; background: #e5e7eb;"></div>
+
+                    {{-- The whole preview is the click target; hidden while fullscreen so the map is interactive there. --}}
+                    <div
+                        x-show="! isFull"
+                        @click="openFull()"
+                        title="Click to expand"
+                        class="absolute inset-0 cursor-pointer rounded-lg ring-1 ring-transparent transition hover:ring-2 hover:ring-primary-500"
+                    >
+                        <div class="absolute left-2 top-2 rounded-md bg-gray-100 p-1 text-gray-700 shadow-sm dark:bg-gray-800 dark:text-gray-200">
+                            <x-filament::icon icon="heroicon-m-arrows-pointing-out" class="h-4 w-4" />
+                        </div>
+                    </div>
+                </div>
 
                 <div class="mt-3 space-y-1.5 text-xs">
                     @foreach ($this->heatLegends() as $legend)
@@ -82,7 +123,7 @@
                         </div>
                     @endforeach
                     <div class="pt-0.5 text-gray-400 dark:text-gray-500">
-                        Color shows {{ $this->heatUnit() }} density per ZIP — light = fewer, dark = the busiest ZIP. Toggle a carrier top-right. "Unmapped" = non-US or bad ZIP.
+                        Click the map to expand it fullscreen (pan &amp; zoom there). Color shows {{ $this->heatUnit() }} density per ZIP — light = fewer, dark = the busiest ZIP.
                     </div>
                 </div>
             </div>
