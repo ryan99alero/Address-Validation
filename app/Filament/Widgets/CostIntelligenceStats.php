@@ -22,6 +22,8 @@ class CostIntelligenceStats extends StatsOverviewWidget
 
     protected ?string $description = 'Where the shipping money goes — for the selected period, versus the same period a year earlier.';
 
+    protected string $view = 'filament.widgets.expandable-stats';
+
     protected function getStats(): array
     {
         $svc = app(CostAnalyticsService::class);

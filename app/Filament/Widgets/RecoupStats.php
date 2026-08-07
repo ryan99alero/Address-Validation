@@ -21,6 +21,8 @@ class RecoupStats extends StatsOverviewWidget
 
     protected ?string $description = 'Carrier charges above what we quoted at ship time — billable back to the customer.';
 
+    protected string $view = 'filament.widgets.expandable-stats';
+
     protected function getStats(): array
     {
         $recoup = app(RecoupService::class);
