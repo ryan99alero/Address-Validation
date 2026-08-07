@@ -7,6 +7,7 @@ use App\Filament\Widgets\Concerns\ReadsDashboardPeriod;
 use App\Services\Analytics\CostAnalyticsService;
 use Filament\Widgets\ChartWidget;
 use Filament\Widgets\Concerns\InteractsWithPageFilters;
+use Illuminate\Support\Collection;
 
 /**
  * Bleed zone: which accessorial categories cost the most in the selected period, base transport
@@ -73,16 +74,12 @@ class FeeCategoryMixChart extends ChartWidget
      */
     private function mixData(CostAnalyticsService $svc, ?int $year, ?int $month): array
     {
-        $mix = $svc->periodCategoryMix($year, $month)->take(12);
+        $mix = $svc->periodCategoryMixSplit($year, $month)->take(12);
 
         $this->heading = 'Accessorial Spend by Category · '.$this->periodLabel($year, $month);
 
         return [
-            'datasets' => [[
-                'label' => 'Billed $',
-                'data' => $mix->pluck('total')->all(),
-                'backgroundColor' => '#6366f1',
-            ]],
+            'datasets' => $this->splitDatasets($mix),
             'labels' => $mix->pluck('category')->all(),
         ];
     }
@@ -94,7 +91,7 @@ class FeeCategoryMixChart extends ChartWidget
      */
     private function drillData(CostAnalyticsService $svc, ?int $year, ?int $month): array
     {
-        $series = $svc->categoryTimeSeries($this->drillCategory, $year, $month);
+        $series = $svc->categoryTimeSeriesSplit($this->drillCategory, $year, $month);
 
         if ($year === null) {
             $labels = $series->pluck('label')->all(); // years
@@ -108,12 +105,33 @@ class FeeCategoryMixChart extends ChartWidget
         }
 
         return [
-            'datasets' => [[
-                'label' => $this->drillCategory.' $',
-                'data' => $series->pluck('total')->all(),
-                'backgroundColor' => '#6366f1',
-            ]],
+            'datasets' => $this->splitDatasets($series),
             'labels' => $labels,
+        ];
+    }
+
+    /**
+     * Two stacked datasets — spend billed on the original invoice vs post-bill adjustments —
+     * from a set of driver-split rows (each carrying on_invoice + adjustment).
+     *
+     * @param  Collection<int, object>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function splitDatasets($rows): array
+    {
+        return [
+            [
+                'label' => 'On original invoice',
+                'data' => $rows->pluck('on_invoice')->all(),
+                'backgroundColor' => '#6366f1',
+                'stack' => 'spend',
+            ],
+            [
+                'label' => 'Post-bill adjustment',
+                'data' => $rows->pluck('adjustment')->all(),
+                'backgroundColor' => '#f59e0b',
+                'stack' => 'spend',
+            ],
         ];
     }
 
@@ -126,10 +144,15 @@ class FeeCategoryMixChart extends ChartWidget
 
     protected function getOptions(): array
     {
+        // Stacked horizontal bars: each category (or time bucket, when drilled) splits along its
+        // length into on-invoice vs post-bill adjustment, so the two are comparable across rows.
         return [
             'indexAxis' => 'y', // horizontal bars — category labels are long
-            'scales' => ['x' => ['beginAtZero' => true]],
-            'plugins' => ['legend' => ['display' => false]],
+            'scales' => [
+                'x' => ['beginAtZero' => true, 'stacked' => true],
+                'y' => ['stacked' => true],
+            ],
+            'plugins' => ['legend' => ['display' => true, 'position' => 'bottom']],
         ];
     }
 }

@@ -23,12 +23,29 @@ beforeEach(function () {
     ]);
 
     DB::table('carrier_charges')->insert([
-        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'invoice_date' => '2024-03-10', 'charge_category_id' => CostAnalyticsService::CAT_ADDRESS_CORRECTION, 'amount' => 100, 'tracking_number' => 'A', 'created_at' => now(), 'updated_at' => now()],
-        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'invoice_date' => '2024-07-05', 'charge_category_id' => CostAnalyticsService::CAT_ADDRESS_CORRECTION, 'amount' => 50, 'tracking_number' => 'B', 'created_at' => now(), 'updated_at' => now()],
-        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'invoice_date' => '2025-03-01', 'charge_category_id' => CostAnalyticsService::CAT_ADDRESS_CORRECTION, 'amount' => 40, 'tracking_number' => 'C', 'created_at' => now(), 'updated_at' => now()],
-        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'invoice_date' => '2025-08-06', 'charge_category_id' => CostAnalyticsService::CAT_ADDRESS_CORRECTION, 'amount' => 60, 'tracking_number' => 'D', 'created_at' => now(), 'updated_at' => now()],
-        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'invoice_date' => '2025-01-01', 'charge_category_id' => CostAnalyticsService::CAT_BASE, 'amount' => 999, 'tracking_number' => 'E', 'created_at' => now(), 'updated_at' => now()],
+        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'invoice_date' => '2024-03-10', 'charge_category_id' => CostAnalyticsService::CAT_ADDRESS_CORRECTION, 'amount' => 100, 'tracking_number' => 'A', 'driver' => 'normal', 'created_at' => now(), 'updated_at' => now()],
+        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'invoice_date' => '2024-07-05', 'charge_category_id' => CostAnalyticsService::CAT_ADDRESS_CORRECTION, 'amount' => 50, 'tracking_number' => 'B', 'driver' => 'normal', 'created_at' => now(), 'updated_at' => now()],
+        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'invoice_date' => '2025-03-01', 'charge_category_id' => CostAnalyticsService::CAT_ADDRESS_CORRECTION, 'amount' => 40, 'tracking_number' => 'C', 'driver' => 'normal', 'created_at' => now(), 'updated_at' => now()],
+        // A post-bill adjustment on the same category: belongs in the "adjustment" split segment.
+        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'invoice_date' => '2025-08-06', 'charge_category_id' => CostAnalyticsService::CAT_ADDRESS_CORRECTION, 'amount' => 60, 'tracking_number' => 'D', 'driver' => 'residential_reclass', 'created_at' => now(), 'updated_at' => now()],
+        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'invoice_date' => '2025-01-01', 'charge_category_id' => CostAnalyticsService::CAT_BASE, 'amount' => 999, 'tracking_number' => 'E', 'driver' => 'normal', 'created_at' => now(), 'updated_at' => now()],
     ]);
+});
+
+test('periodCategoryMixSplit splits a category into on-invoice vs post-bill adjustment', function () {
+    $row = app(CostAnalyticsService::class)->periodCategoryMixSplit(null, null)
+        ->firstWhere('category', 'Address Correction');
+
+    expect($row->on_invoice)->toBe(190.0)  // 100 + 50 + 40, all driver=normal
+        ->and($row->adjustment)->toBe(60.0) // the residential_reclass line
+        ->and($row->total)->toBe(250.0);
+});
+
+test('categoryTimeSeriesSplit splits each time bucket by driver group', function () {
+    $byYear = app(CostAnalyticsService::class)->categoryTimeSeriesSplit('Address Correction', null, null);
+
+    expect($byYear->pluck('on_invoice', 'label')->all())->toEqual(['2024' => 150.0, '2025' => 40.0])
+        ->and($byYear->pluck('adjustment', 'label')->all())->toEqual(['2024' => 0.0, '2025' => 60.0]);
 });
 
 test('categoryTimeSeries buckets one category by year, month, then day', function () {

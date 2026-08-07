@@ -2,6 +2,7 @@
 
 namespace App\Services\Analytics;
 
+use App\Enums\ChargeDriver;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -84,6 +85,99 @@ class CostAnalyticsService
 
                 return $r;
             });
+    }
+
+    /**
+     * Like periodCategoryMix(), but each category's spend is split by driver group: the portion
+     * billed on the original shipment invoice (driver = normal, or unclassified) vs post-bill
+     * adjustments (every other driver — residential reclass, address correction, DIM/weight audit,
+     * returns…). Powers the stacked category-mix bars. Ordered by total spend, largest first.
+     *
+     * @return Collection<int, object{category:string, on_invoice:float, adjustment:float, total:float}>
+     */
+    public function periodCategoryMixSplit(?int $year, ?int $month = null): Collection
+    {
+        $query = DB::table('carrier_charges as cc')
+            ->leftJoin('charge_categories as c', 'c.id', '=', 'cc.charge_category_id')
+            ->whereNotNull('cc.invoice_date');
+        $this->applyPeriod($query, $year, $month, 'cc.invoice_date');
+
+        return $query
+            ->where(fn ($q) => $q->whereNull('cc.charge_category_id')->orWhere('cc.charge_category_id', '!=', self::CAT_BASE))
+            ->selectRaw('
+                COALESCE(c.name, ?) AS category,
+                ROUND(SUM(CASE WHEN cc.driver = ? OR cc.driver IS NULL THEN cc.amount ELSE 0 END), 2) AS on_invoice,
+                ROUND(SUM(CASE WHEN cc.driver IS NOT NULL AND cc.driver <> ? THEN cc.amount ELSE 0 END), 2) AS adjustment,
+                ROUND(SUM(cc.amount), 2) AS total
+            ', ['Uncategorized', ChargeDriver::Normal->value, ChargeDriver::Normal->value])
+            ->groupBy('category')
+            ->havingRaw('SUM(cc.amount) > 0')
+            ->orderByDesc('total')
+            ->get()
+            ->map(fn ($r): object => $this->shapeSplit($r));
+    }
+
+    /**
+     * Like categoryTimeSeries(), but each time bucket is split by driver group (on-invoice vs
+     * post-bill adjustment), so a drilled category's bars stack the same way as the mix.
+     *
+     * @return Collection<int, object{label:string, on_invoice:float, adjustment:float, total:float}>
+     */
+    public function categoryTimeSeriesSplit(string $category, ?int $year, ?int $month): Collection
+    {
+        $query = DB::table('carrier_charges as cc')
+            ->leftJoin('charge_categories as c', 'c.id', '=', 'cc.charge_category_id')
+            ->whereNotNull('cc.invoice_date');
+
+        if ($category === 'Uncategorized') {
+            $query->whereNull('cc.charge_category_id');
+        } else {
+            $query->where('c.name', $category);
+        }
+
+        if ($year === null) {
+            if ($month !== null) {
+                $query->whereRaw('substr(cc.invoice_date, 6, 2) = ?', [sprintf('%02d', $month)]);
+            }
+            $bucket = 'substr(cc.invoice_date, 1, 4)'; // year
+        } elseif ($month === null) {
+            [$start, $end] = $this->range($year, null);
+            $query->where('cc.invoice_date', '>=', $start)->where('cc.invoice_date', '<', $end);
+            $bucket = 'substr(cc.invoice_date, 6, 2)'; // month
+        } else {
+            [$start, $end] = $this->range($year, $month);
+            $query->where('cc.invoice_date', '>=', $start)->where('cc.invoice_date', '<', $end);
+            $bucket = 'substr(cc.invoice_date, 9, 2)'; // day
+        }
+
+        return $query
+            ->selectRaw("
+                $bucket AS label,
+                ROUND(SUM(CASE WHEN cc.driver = ? OR cc.driver IS NULL THEN cc.amount ELSE 0 END), 2) AS on_invoice,
+                ROUND(SUM(CASE WHEN cc.driver IS NOT NULL AND cc.driver <> ? THEN cc.amount ELSE 0 END), 2) AS adjustment,
+                ROUND(SUM(cc.amount), 2) AS total
+            ", [ChargeDriver::Normal->value, ChargeDriver::Normal->value])
+            ->groupByRaw($bucket)
+            ->orderByRaw($bucket)
+            ->havingRaw('SUM(cc.amount) <> 0')
+            ->get()
+            ->map(function ($r): object {
+                $r->label = (string) $r->label;
+
+                return $this->shapeSplit($r);
+            });
+    }
+
+    /**
+     * Cast the on-invoice / adjustment / total columns of a driver-split row to float.
+     */
+    private function shapeSplit(object $r): object
+    {
+        $r->on_invoice = (float) $r->on_invoice;
+        $r->adjustment = (float) $r->adjustment;
+        $r->total = (float) $r->total;
+
+        return $r;
     }
 
     /**
