@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Pages\Dashboard;
 use App\Filament\Widgets\Concerns\ReadsDashboardPeriod;
 use App\Services\Analytics\CostAnalyticsService;
 use Filament\Widgets\ChartWidget;
@@ -10,6 +11,9 @@ use Filament\Widgets\Concerns\InteractsWithPageFilters;
 /**
  * Bleed zone: which accessorial categories cost the most in the selected period, base transport
  * excluded — so fuel / DAS / residential / additional handling / corrections stand out.
+ *
+ * Click a category bar to drill it down over time, one level finer than the current period filter:
+ * all years → by year, a year → by month, a year+month → by day. "Back" returns to the mix.
  */
 class FeeCategoryMixChart extends ChartWidget
 {
@@ -24,7 +28,28 @@ class FeeCategoryMixChart extends ChartWidget
 
     protected ?string $maxHeight = '220px';
 
-    protected string $view = 'filament.widgets.expandable-chart';
+    protected string $view = 'filament.widgets.drilldown-chart';
+
+    /**
+     * The category currently drilled into (its label from the mix), or null for the category mix.
+     */
+    public ?string $drillCategory = null;
+
+    /**
+     * Drill into one category's spend over time. Called from the chart's bar click.
+     */
+    public function drillIntoCategory(string $category): void
+    {
+        $this->drillCategory = $category;
+    }
+
+    /**
+     * Return from a category drill-down to the full category mix.
+     */
+    public function clearDrill(): void
+    {
+        $this->drillCategory = null;
+    }
 
     protected function getType(): string
     {
@@ -35,6 +60,19 @@ class FeeCategoryMixChart extends ChartWidget
     {
         $svc = app(CostAnalyticsService::class);
         [$year, $month] = $this->selectedPeriod($svc);
+
+        return $this->drillCategory !== null
+            ? $this->drillData($svc, $year, $month)
+            : $this->mixData($svc, $year, $month);
+    }
+
+    /**
+     * The category mix for the period (default view).
+     *
+     * @return array<string, mixed>
+     */
+    private function mixData(CostAnalyticsService $svc, ?int $year, ?int $month): array
+    {
         $mix = $svc->periodCategoryMix($year, $month)->take(12);
 
         $this->heading = 'Accessorial Spend by Category · '.$this->periodLabel($year, $month);
@@ -47,6 +85,43 @@ class FeeCategoryMixChart extends ChartWidget
             ]],
             'labels' => $mix->pluck('category')->all(),
         ];
+    }
+
+    /**
+     * One category broken down over time, one level finer than the current period.
+     *
+     * @return array<string, mixed>
+     */
+    private function drillData(CostAnalyticsService $svc, ?int $year, ?int $month): array
+    {
+        $series = $svc->categoryTimeSeries($this->drillCategory, $year, $month);
+
+        if ($year === null) {
+            $labels = $series->pluck('label')->all(); // years
+            $this->heading = $this->drillCategory.' · by Year';
+        } elseif ($month === null) {
+            $labels = $series->map(fn ($r): string => substr(Dashboard::MONTHS[(int) $r->label], 0, 3))->all();
+            $this->heading = $this->drillCategory.' · '.$year.' by Month';
+        } else {
+            $labels = $series->map(fn ($r): int => (int) $r->label)->all();
+            $this->heading = $this->drillCategory.' · '.substr(Dashboard::MONTHS[$month], 0, 3).' '.$year.' by Day';
+        }
+
+        return [
+            'datasets' => [[
+                'label' => $this->drillCategory.' $',
+                'data' => $series->pluck('total')->all(),
+                'backgroundColor' => '#6366f1',
+            ]],
+            'labels' => $labels,
+        ];
+    }
+
+    public function getDescription(): ?string
+    {
+        return $this->drillCategory !== null
+            ? 'One category over time — click Back to return to the mix.'
+            : 'Click a category to break it down over time.';
     }
 
     protected function getOptions(): array

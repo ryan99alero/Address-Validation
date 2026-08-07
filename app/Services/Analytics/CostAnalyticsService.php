@@ -271,6 +271,57 @@ class CostAnalyticsService
     }
 
     /**
+     * One accessorial category's Billed $ over time, bucketed one level finer than the current
+     * period: all years → by year, a year → by month, a year+month → by day. Powers click-to-drill
+     * on the category-mix chart. $category is the display label from periodCategoryMix()
+     * ('Uncategorized' = charges with no category). Live over carrier_charges — a single category
+     * across a bounded range stays sub-second.
+     *
+     * @return Collection<int, object{label:string, total:float}>
+     */
+    public function categoryTimeSeries(string $category, ?int $year, ?int $month): Collection
+    {
+        $query = DB::table('carrier_charges as cc')
+            ->leftJoin('charge_categories as c', 'c.id', '=', 'cc.charge_category_id')
+            ->whereNotNull('cc.invoice_date');
+
+        if ($category === 'Uncategorized') {
+            $query->whereNull('cc.charge_category_id');
+        } else {
+            $query->where('c.name', $category);
+        }
+
+        // Bucket one level finer than the selected period (mirrors the trend-chart drill order).
+        if ($year === null) {
+            if ($month !== null) {
+                $query->whereRaw('substr(cc.invoice_date, 6, 2) = ?', [sprintf('%02d', $month)]);
+            }
+            $bucket = 'substr(cc.invoice_date, 1, 4)'; // year
+        } elseif ($month === null) {
+            [$start, $end] = $this->range($year, null);
+            $query->where('cc.invoice_date', '>=', $start)->where('cc.invoice_date', '<', $end);
+            $bucket = 'substr(cc.invoice_date, 6, 2)'; // month
+        } else {
+            [$start, $end] = $this->range($year, $month);
+            $query->where('cc.invoice_date', '>=', $start)->where('cc.invoice_date', '<', $end);
+            $bucket = 'substr(cc.invoice_date, 9, 2)'; // day
+        }
+
+        return $query
+            ->groupByRaw($bucket)
+            ->orderByRaw($bucket)
+            ->selectRaw("$bucket AS label, ROUND(SUM(cc.amount), 2) AS total")
+            ->havingRaw('SUM(cc.amount) <> 0')
+            ->get()
+            ->map(function ($r): object {
+                $r->label = (string) $r->label;
+                $r->total = (float) $r->total;
+
+                return $r;
+            });
+    }
+
+    /**
      * Spend by canonical category for a given year (or all years when null), largest first —
      * the fee-mix breakdown. Base transportation is excluded so accessorials stand out.
      *
