@@ -3,17 +3,18 @@
 namespace App\Services\Analytics;
 
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
- * The address-engine FUNNEL, on invoiced shipments only — the factual pipeline for a period.
+ * The address-engine FUNNEL over time, on invoiced shipments only — the factual pipeline, broken out
+ * by sub-period (all years → by year, a year → by month, a year+month → by day).
  *
  * We can only tie a correction to a real shipment through the Pace job number
  * (correction.job_number → carton_costs.pace_job_number → tracking → carrier charges), so this is
  * the Pace Connect path. Only shipments that shipped (a carton tracking) AND were invoiced (≥1
- * carrier charge) are counted, so every number is a fact. For a period, each such shipment falls
- * into the funnel stages below (some are nested subsets — the widget draws them as descending bars,
- * never a stack):
+ * carrier charge) are counted, so every number is a fact. Within each bucket each shipment is scored
+ * into the funnel stages (nested subsets — the widget draws them as grouped, never stacked, bars):
  *   processed      — we ran the address (the job has a Pace correction event)
  *   fixed          — we changed the address
  *   avoided        — fixed, and no address/residential fee landed (the win)
@@ -24,19 +25,17 @@ use Illuminate\Support\Facades\DB;
 class CorrectionOutcomeService
 {
     /**
-     * @return object{processed:int, fixed:int, avoided:int, charged_fixed:int, charged_nofix:int, billed_back:int}
+     * @return Collection<int, object{label:string, processed:int, fixed:int, avoided:int, charged_fixed:int, charged_nofix:int, billed_back:int}>
      */
-    public function funnel(?int $year, ?int $month): object
+    public function funnelSeries(?int $year, ?int $month): Collection
     {
-        $funnel = $this->emptyFunnel();
-
         $allJobs = $this->processedJobNumbers(changedOnly: false);
         if ($allJobs === []) {
-            return $funnel;
+            return collect();
         }
         $fixed = array_flip($this->processedJobNumbers(changedOnly: true));
 
-        [$start, $end, $monthOnly] = $this->range($year, $month);
+        [$bucket, $start, $end, $monthOnly] = $this->bucketing($year, $month);
 
         $query = DB::table('carton_costs as cc')
             ->whereIn('cc.pace_job_number', $allJobs)
@@ -54,13 +53,17 @@ class CorrectionOutcomeService
         $feeExists = 'EXISTS (SELECT 1 FROM carrier_charges fch WHERE fch.tracking_number = cc.tracking_number AND '.$this->feeCond('fch').')';
         $recoupExists = "EXISTS (SELECT 1 FROM chargeback_pushes cb WHERE cb.tracking_number = cc.tracking_number AND cb.status = 'pushed' AND ".$this->feeCond('cb').')';
 
-        $rows = $query->selectRaw("cc.pace_job_number AS job,
+        $rows = $query->selectRaw("{$bucket} AS label, cc.pace_job_number AS job,
             CASE WHEN {$feeExists} THEN 1 ELSE 0 END AS has_fee,
             CASE WHEN {$recoupExists} THEN 1 ELSE 0 END AS recouped")
             ->get();
 
-        $funnel->processed = $rows->count();
+        $buckets = [];
         foreach ($rows as $row) {
+            $label = (string) $row->label;
+            $funnel = $buckets[$label] ??= $this->emptyFunnel($label);
+
+            $funnel->processed++;
             $wasFixed = isset($fixed[$row->job]);
             if ($wasFixed) {
                 $funnel->fixed++;
@@ -75,12 +78,14 @@ class CorrectionOutcomeService
             }
         }
 
-        return $funnel;
+        ksort($buckets);
+
+        return collect($buckets)->values();
     }
 
-    private function emptyFunnel(): object
+    private function emptyFunnel(string $label): object
     {
-        return (object) ['processed' => 0, 'fixed' => 0, 'avoided' => 0, 'charged_fixed' => 0, 'charged_nofix' => 0, 'billed_back' => 0];
+        return (object) ['label' => $label, 'processed' => 0, 'fixed' => 0, 'avoided' => 0, 'charged_fixed' => 0, 'charged_nofix' => 0, 'billed_back' => 0];
     }
 
     /**
@@ -121,17 +126,20 @@ class CorrectionOutcomeService
     }
 
     /**
-     * @return array{0:?string, 1:?string, 2:?int} [ship_date range start, end, month-only]
+     * @return array{0:string, 1:?string, 2:?string, 3:?int} [bucket expr, ship_date range start, end, month-only]
      */
-    private function range(?int $year, ?int $month): array
+    private function bucketing(?int $year, ?int $month): array
     {
         if ($year === null) {
-            return [null, null, $month];
+            return ['substr(cc.ship_date, 1, 4)', null, null, $month];
         }
 
         $start = Carbon::create($year, $month ?? 1, 1)->startOfDay();
-        $end = $month !== null ? $start->copy()->addMonth() : $start->copy()->addYear();
 
-        return [$start->toDateString(), $end->toDateString(), null];
+        if ($month === null) {
+            return ['substr(cc.ship_date, 6, 2)', $start->toDateString(), $start->copy()->addYear()->toDateString(), null];
+        }
+
+        return ['substr(cc.ship_date, 9, 2)', $start->toDateString(), $start->copy()->addMonth()->toDateString(), null];
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Pages\Dashboard;
 use App\Filament\Widgets\Concerns\ReadsDashboardPeriod;
 use App\Services\Analytics\CorrectionOutcomeService;
 use App\Services\Analytics\CostAnalyticsService;
@@ -9,10 +10,10 @@ use Filament\Widgets\ChartWidget;
 use Filament\Widgets\Concerns\InteractsWithPageFilters;
 
 /**
- * The address-engine funnel for the selected period, on invoiced shipments only (so every bar is a
- * fact): Processed → Address fixed → Fee avoided / Charged (we fixed it) / Charged (no fix) / Billed
- * back. Drawn as descending bars — these are nested subsets, so they are NOT stacked. Reads as a
- * drop-off: how far the big "processed" number narrows to the few that still cost us.
+ * The address-engine funnel broken out by sub-period (all years → by year, a year → by month, a
+ * year+month → by day), on invoiced shipments only so every bar is a fact. Each bucket shows the six
+ * funnel metrics as GROUPED bars (nested subsets — never stacked): Processed → Fixed → Fee avoided /
+ * Charged (we fixed it) / Charged (no fix) / Billed back.
  */
 class CorrectionOutcomeChart extends ChartWidget
 {
@@ -23,13 +24,14 @@ class CorrectionOutcomeChart extends ChartWidget
 
     protected ?string $heading = 'Address Correction Funnel';
 
-    protected int|string|array $columnSpan = 1;
+    protected int|string|array $columnSpan = ['default' => 1, 'md' => 2, 'xl' => 2];
 
-    protected ?string $maxHeight = '280px';
+    protected ?string $maxHeight = '300px';
 
     protected string $view = 'filament.widgets.expandable-chart';
 
-    private ?object $funnel = null;
+    /** @var array<string, int> */
+    private array $totals = [];
 
     protected function getType(): string
     {
@@ -41,46 +43,61 @@ class CorrectionOutcomeChart extends ChartWidget
         $svc = app(CostAnalyticsService::class);
         [$year, $month] = $this->selectedPeriod($svc);
 
-        $this->funnel = app(CorrectionOutcomeService::class)->funnel($year, $month);
+        $series = app(CorrectionOutcomeService::class)->funnelSeries($year, $month);
         $this->heading = 'Address Correction Funnel · '.$this->periodLabel($year, $month);
 
-        // [label, value, colour] — descending stages; drawn as separate bars, never stacked.
-        $bars = [
-            ['Processed (invoiced)', $this->funnel->processed, '#94a3b8'],
-            ['Address fixed', $this->funnel->fixed, '#6366f1'],
-            ['Fee avoided', $this->funnel->avoided, '#22c55e'],
-            ['Charged — we fixed it', $this->funnel->charged_fixed, '#f97316'],
-            ['Charged — no fix', $this->funnel->charged_nofix, '#ef4444'],
-            ['Billed back to job', $this->funnel->billed_back, '#f59e0b'],
+        if ($year === null) {
+            $labels = $series->pluck('label')->all(); // years
+        } elseif ($month === null) {
+            $labels = $series->map(fn ($r): string => substr(Dashboard::MONTHS[(int) $r->label] ?? $r->label, 0, 3))->all();
+        } else {
+            $labels = $series->map(fn ($r): int => (int) $r->label)->all();
+        }
+
+        // [legend label, row key, colour] — the six funnel stages, drawn as grouped bars per bucket.
+        $metrics = [
+            ['Processed', 'processed', '#94a3b8'],
+            ['Fixed', 'fixed', '#6366f1'],
+            ['Fee avoided', 'avoided', '#22c55e'],
+            ['Charged — fixed', 'charged_fixed', '#f97316'],
+            ['Charged — no fix', 'charged_nofix', '#ef4444'],
+            ['Billed back', 'billed_back', '#f59e0b'],
         ];
 
-        return [
-            'datasets' => [[
-                'label' => 'Shipments',
-                'data' => array_column($bars, 1),
-                'backgroundColor' => array_column($bars, 2),
-            ]],
-            'labels' => array_column($bars, 0),
-        ];
+        $this->totals = [];
+        $datasets = [];
+        foreach ($metrics as [$label, $key, $color]) {
+            $this->totals[$key] = (int) $series->sum($key);
+            $datasets[] = [
+                'label' => $label,
+                'data' => $series->pluck($key)->all(),
+                'backgroundColor' => $color,
+            ];
+        }
+
+        return ['datasets' => $datasets, 'labels' => $labels];
     }
 
     public function getDescription(): ?string
     {
-        $f = $this->funnel;
-        if (! $f || $f->processed === 0) {
+        if (($this->totals['processed'] ?? 0) === 0) {
             return 'No invoiced shipments we processed in this period yet.';
         }
 
-        return $f->processed.' processed · '.$f->fixed.' fixed · '.$f->avoided.' fee avoided · '
-            .($f->charged_fixed + $f->charged_nofix).' still charged';
+        $charged = ($this->totals['charged_fixed'] ?? 0) + ($this->totals['charged_nofix'] ?? 0);
+
+        return $this->totals['processed'].' processed · '.$this->totals['fixed'].' fixed · '
+            .$this->totals['avoided'].' fee avoided · '.$charged.' still charged';
     }
 
     protected function getOptions(): array
     {
         return [
-            'indexAxis' => 'y', // horizontal bars, longest on top
-            'scales' => ['x' => ['beginAtZero' => true]],
-            'plugins' => ['legend' => ['display' => false]],
+            'scales' => [
+                'x' => ['stacked' => false],
+                'y' => ['stacked' => false, 'beginAtZero' => true],
+            ],
+            'plugins' => ['legend' => ['display' => true, 'position' => 'bottom']],
         ];
     }
 }
