@@ -136,6 +136,34 @@ class PaceCorrectionsTable
                         default => 'info',
                     })
                     ->tooltip("Address / residential fees charged back to the customer on this correction's Pace job (job-level match). \"billed\" = a JobCost was actually posted; otherwise the push was skipped (e.g. job closed)."),
+                TextColumn::make('fee_outcome')
+                    ->label('Fee Outcome')
+                    ->badge()
+                    ->getStateUsing(function ($record): string {
+                        $job = $record->metadata['job_number'] ?? null;
+                        if (empty($job)) {
+                            return 'Pending';
+                        }
+
+                        $outcome = self::correctionOutcome((string) $job);
+
+                        return match ($outcome['state']) {
+                            'prevented' => 'Prevented',
+                            'charged' => 'Charged · $'.number_format($outcome['amount'], 2),
+                            default => 'Pending',
+                        };
+                    })
+                    ->color(fn (string $state): string => match (true) {
+                        str_starts_with($state, 'Prevented') => 'success',
+                        str_starts_with($state, 'Charged') => 'danger',
+                        default => 'gray',
+                    })
+                    ->icon(fn (string $state): string => match (true) {
+                        str_starts_with($state, 'Prevented') => 'heroicon-m-check-circle',
+                        str_starts_with($state, 'Charged') => 'heroicon-m-exclamation-triangle',
+                        default => 'heroicon-m-clock',
+                    })
+                    ->tooltip('Did the corrected shipment dodge an address/residential CARRIER fee? Prevented = it shipped (a tracking exists via carton) with no such fee; Charged = it got the fee anyway; Pending = not shipped/invoiced yet.'),
                 TextColumn::make('source')
                     ->label('Validator')
                     ->badge()
@@ -204,6 +232,40 @@ class PaceCorrectionsTable
                             }
                         });
                     }),
+                SelectFilter::make('outcome')
+                    ->label('Fee outcome')
+                    ->options([
+                        'prevented' => 'Prevented (saved a fee)',
+                        'charged' => 'Charged despite correction',
+                        'pending' => 'Pending (not invoiced yet)',
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        $value = $data['value'] ?? null;
+                        if (! $value) {
+                            return $query;
+                        }
+                        $job = self::jobNumberSql();
+
+                        // Shipped = a carton (tracking) exists for the correction's Pace job.
+                        $shipped = fn ($q) => $q->from('carton_costs as cc')
+                            ->whereRaw("cc.pace_job_number = {$job}")
+                            ->whereNotNull('cc.tracking_number');
+
+                        // Charged = any of the job's trackings carries an address/residential carrier fee.
+                        $charged = function ($q) use ($job): void {
+                            $q->from('carrier_charges as ch')
+                                ->join('carton_costs as cc2', 'cc2.tracking_number', '=', 'ch.tracking_number')
+                                ->whereRaw("cc2.pace_job_number = {$job}");
+                            self::scopeAddressCharge($q, 'ch.');
+                        };
+
+                        return match ($value) {
+                            'charged' => $query->whereExists($charged),
+                            'prevented' => $query->whereExists($shipped)->whereNotExists($charged),
+                            'pending' => $query->whereNotExists($shipped),
+                            default => $query,
+                        };
+                    }),
                 Filter::make('created_at')
                     ->schema([
                         DatePicker::make('from')->label('From'),
@@ -251,6 +313,65 @@ class PaceCorrectionsTable
         return self::addressChargebackQuery(DB::table('chargeback_pushes'))
             ->where('pace_job', $job)
             ->get(['amount', 'status', 'charge_category_id', 'driver', 'tracking_number', 'ship_date']);
+    }
+
+    /**
+     * The fee outcome for a correction's Pace job: has it shipped (a carton tracking exists), and if
+     * so did any of its trackings still incur an address/residential CARRIER charge? This is the
+     * "did we actually save the fee?" signal — trace tracking → job via carton, then charges.
+     *
+     * @return array{state: string, amount?: float}
+     */
+    protected static function correctionOutcome(string $job): array
+    {
+        $trackings = DB::table('carton_costs')
+            ->where('pace_job_number', $job)
+            ->whereNotNull('tracking_number')
+            ->pluck('tracking_number')
+            ->all();
+
+        if ($trackings === []) {
+            return ['state' => 'pending']; // not shipped / invoiced yet — no verdict
+        }
+
+        $charges = DB::table('carrier_charges')->whereIn('tracking_number', $trackings);
+        self::scopeAddressCharge($charges);
+        $rows = $charges->get(['amount']);
+
+        return $rows->isEmpty()
+            ? ['state' => 'prevented']
+            : ['state' => 'charged', 'amount' => round((float) $rows->sum('amount'), 2)];
+    }
+
+    /**
+     * Constrain a carrier_charges query to address-correction + residential charges. $prefix qualifies
+     * the columns when the query is joined (e.g. 'ch.').
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     */
+    protected static function scopeAddressCharge($query, string $prefix = ''): void
+    {
+        $category = $prefix.'charge_category_id';
+        $driver = $prefix.'driver';
+
+        $query->where(function ($q) use ($category, $driver): void {
+            $q->where($category, CostAnalyticsService::CAT_ADDRESS_CORRECTION)
+                ->orWhere($driver, 'residential_reclass')
+                ->orWhereIn($category, fn ($sub) => $sub->from('charge_categories')
+                    ->whereRaw('lower(name) like ?', ['%residential%'])
+                    ->select('id'));
+        });
+    }
+
+    /**
+     * Portable SQL expression that pulls the correction's Pace job number out of the JSON metadata
+     * (MySQL needs json_unquote; SQLite's json_extract already returns the bare text).
+     */
+    protected static function jobNumberSql(): string
+    {
+        return DB::connection()->getDriverName() === 'sqlite'
+            ? "json_extract(system_logs.metadata, '\$.job_number')"
+            : "json_unquote(json_extract(system_logs.metadata, '\$.job_number'))";
     }
 
     /**
