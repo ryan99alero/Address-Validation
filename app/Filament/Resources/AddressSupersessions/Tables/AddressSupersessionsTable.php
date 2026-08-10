@@ -13,6 +13,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
@@ -51,6 +52,14 @@ class AddressSupersessionsTable
                     ->color(fn (AddressSupersession $record): string => $record->isManuallyEdited() ? 'info' : 'success')
                     ->extraAttributes(['class' => 'whitespace-nowrap'])
                     ->action(self::detailsAction()),
+                TextColumn::make('loop')
+                    ->label('Loop')
+                    ->badge()
+                    ->placeholder('—')
+                    ->state(fn (AddressSupersession $record): ?string => self::isReversal($record) ? '↔ Reversal' : null)
+                    ->color('warning')
+                    ->icon(fn (AddressSupersession $record): ?string => self::isReversal($record) ? 'heroicon-m-arrow-path' : null)
+                    ->tooltip('A↔B thrash: this address pair was also corrected in the opposite direction — the carrier (or a later invoice) keeps flipping it back. Worth a manual look.'),
                 TextColumn::make('tracking')
                     ->label('Tracking')
                     ->fontFamily('mono')
@@ -121,6 +130,15 @@ class AddressSupersessionsTable
                 SelectFilter::make('carrier_id')
                     ->label('Carrier')
                     ->options(fn (): array => Carrier::query()->orderBy('name')->pluck('name', 'id')->all()),
+                Filter::make('reversal')
+                    ->label('Reversal loops (A↔B) only')
+                    ->toggle()
+                    ->query(fn (Builder $query): Builder => $query
+                        ->whereNotNull('old_corrected_address_id')
+                        ->whereNotNull('new_corrected_address_id')
+                        ->whereExists(fn ($q) => $q->from('address_supersessions as r')
+                            ->whereColumn('r.old_corrected_address_id', 'address_supersessions.new_corrected_address_id')
+                            ->whereColumn('r.new_corrected_address_id', 'address_supersessions.old_corrected_address_id'))),
                 TernaryFilter::make('age')
                     ->label('Age')
                     ->placeholder('All ages')
@@ -215,6 +233,22 @@ class AddressSupersessionsTable
      *
      * @param  array{company: ?string, name: ?string, address_1: ?string, address_2: ?string, city: ?string, state: ?string, postal: ?string, postal_ext: ?string}  $f
      */
+    /**
+     * A reversal loop: this event (old → new) has a mirror event (new → old) — the carrier or a later
+     * invoice corrected the same pair back the other way (A↔B thrash).
+     */
+    private static function isReversal(AddressSupersession $record): bool
+    {
+        if ($record->old_corrected_address_id === null || $record->new_corrected_address_id === null) {
+            return false;
+        }
+
+        return AddressSupersession::query()
+            ->where('old_corrected_address_id', $record->new_corrected_address_id)
+            ->where('new_corrected_address_id', $record->old_corrected_address_id)
+            ->exists();
+    }
+
     private static function fieldsToHtml(array $f): string
     {
         $zip = ($f['postal'] ?? '').(($f['postal_ext'] ?? null) ? '-'.$f['postal_ext'] : '');
