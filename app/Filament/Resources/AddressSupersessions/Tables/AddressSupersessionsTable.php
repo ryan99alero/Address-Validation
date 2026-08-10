@@ -36,9 +36,8 @@ class AddressSupersessionsTable
             ->columns([
                 TextColumn::make('from')
                     ->label('Was (shipped / current good)')
-                    ->state(fn (AddressSupersession $record): string => self::fieldsToHtml($record->wasFields()))
+                    ->state(fn (AddressSupersession $record): string => self::comparedHtml($record, 'was'))
                     ->html()
-                    ->color('danger')
                     ->extraAttributes(['class' => 'whitespace-nowrap'])
                     ->action(self::detailsAction())
                     // Global search box matches the denormalized index: tracking, invoice #, Pace
@@ -46,10 +45,9 @@ class AddressSupersessionsTable
                     ->searchable(query: fn (Builder $query, string $search): Builder => $query->where('search_text', 'like', '%'.mb_strtolower(trim($search)).'%')),
                 TextColumn::make('to')
                     ->label('Corrected to')
-                    ->state(fn (AddressSupersession $record): string => self::fieldsToHtml($record->correctedFields())
-                        .($record->isManuallyEdited() ? '<br><span class="text-xs">✎ manually edited</span>' : ''))
+                    ->state(fn (AddressSupersession $record): string => self::comparedHtml($record, 'corrected')
+                        .($record->isManuallyEdited() ? '<br><span style="color:#60a5fa;font-size:0.75rem">✎ manually edited</span>' : ''))
                     ->html()
-                    ->color(fn (AddressSupersession $record): string => $record->isManuallyEdited() ? 'info' : 'success')
                     ->extraAttributes(['class' => 'whitespace-nowrap'])
                     ->action(self::detailsAction()),
                 TextColumn::make('loop')
@@ -249,19 +247,92 @@ class AddressSupersessionsTable
             ->exists();
     }
 
-    private static function fieldsToHtml(array $f): string
+    /**
+     * Render one side of the correction (was / corrected) with the fields that DIFFER from the other
+     * side highlighted — red strike-through on the "was", green bold on the "corrected" — the same
+     * "only what changed stands out" treatment as the Pace Corrections view. Unchanged fields render
+     * in neutral text.
+     */
+    private static function comparedHtml(AddressSupersession $record, string $side): string
     {
-        $zip = ($f['postal'] ?? '').(($f['postal_ext'] ?? null) ? '-'.$f['postal_ext'] : '');
+        $was = $record->wasFields();
+        $corrected = $record->correctedFields();
+        $changed = self::changedFields($was, $corrected);
 
-        $lines = array_filter([
-            $f['company'] ?? null,
-            $f['name'] ?? null,
-            $f['address_1'] ?? null,
-            $f['address_2'] ?? null,
-            trim(implode(' ', array_filter([$f['city'] ?? null, $f['state'] ?? null, $zip]))),
-        ], fn ($line): bool => $line !== null && trim((string) $line) !== '');
+        return self::fieldsToHtml($side === 'was' ? $was : $corrected, $changed, $side);
+    }
 
-        return $lines === [] ? '—' : implode('<br>', array_map(fn ($line): string => e($line), $lines));
+    /**
+     * Field keys (company, name, address_1, address_2, city, state, zip) whose value differs between
+     * the two addresses — case-insensitive, so a case-only standardisation is not flagged.
+     *
+     * @param  array<string, mixed>  $was
+     * @param  array<string, mixed>  $corrected
+     * @return array<int, string>
+     */
+    private static function changedFields(array $was, array $corrected): array
+    {
+        $differs = fn (string $a, string $b): bool => strcasecmp(trim($a), trim($b)) !== 0;
+
+        $changed = [];
+        foreach (['company', 'name', 'address_1', 'address_2', 'city', 'state'] as $key) {
+            if ($differs((string) ($was[$key] ?? ''), (string) ($corrected[$key] ?? ''))) {
+                $changed[] = $key;
+            }
+        }
+
+        if ($differs(self::zip($was), self::zip($corrected))) {
+            $changed[] = 'zip';
+        }
+
+        return $changed;
+    }
+
+    /**
+     * @param  array<string, mixed>  $f
+     */
+    private static function zip(array $f): string
+    {
+        return ($f['postal'] ?? '').(($f['postal_ext'] ?? null) ? '-'.$f['postal_ext'] : '');
+    }
+
+    private static function highlight(string $text, string $side): string
+    {
+        return $side === 'corrected'
+            ? '<span style="color:#4ade80;font-weight:700;font-style:italic">'.e($text).'</span>'
+            : '<span style="color:#f87171;text-decoration:line-through;font-style:italic">'.e($text).'</span>';
+    }
+
+    /**
+     * @param  array<string, mixed>  $f
+     * @param  array<int, string>  $changed  field keys to highlight
+     */
+    private static function fieldsToHtml(array $f, array $changed = [], string $side = 'was'): string
+    {
+        $lines = [];
+
+        foreach (['company', 'name', 'address_1', 'address_2'] as $key) {
+            $val = trim((string) ($f[$key] ?? ''));
+            if ($val === '') {
+                continue;
+            }
+            $lines[] = in_array($key, $changed, true) ? self::highlight($val, $side) : e($val);
+        }
+
+        // City / State / ZIP share a line, each token highlighted on its own.
+        $tokens = [];
+        foreach (['city' => (string) ($f['city'] ?? ''), 'state' => (string) ($f['state'] ?? ''), 'zip' => self::zip($f)] as $key => $val) {
+            $val = trim($val);
+            if ($val === '') {
+                continue;
+            }
+            $tokens[] = in_array($key, $changed, true) ? self::highlight($val, $side) : e($val);
+        }
+        if ($tokens !== []) {
+            $lines[] = implode(' ', $tokens);
+        }
+
+        return $lines === [] ? '—' : implode('<br>', $lines);
     }
 
     /**
