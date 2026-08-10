@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PaceCorrections\Tables;
 
 use App\Filament\Exports\PaceCorrectionExporter;
 use App\Models\Carrier;
+use App\Services\Analytics\CostAnalyticsService;
 use App\Support\AddressComparison;
 use Filament\Actions\ExportBulkAction;
 use Filament\Forms\Components\DatePicker;
@@ -12,6 +13,8 @@ use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class PaceCorrectionsTable
@@ -107,6 +110,32 @@ class PaceCorrectionsTable
 
                         return empty($changes) ? $html.'<div style="color:#6b7280;font-size:0.75rem;margin-top:2px">(no changes)</div>' : $html;
                     }),
+                TextColumn::make('chargebacks')
+                    ->label('Client Chargebacks (job)')
+                    ->badge()
+                    ->getStateUsing(function ($record): string {
+                        $job = $record->metadata['job_number'] ?? null;
+                        if (empty($job)) {
+                            return '—';
+                        }
+
+                        $rows = self::jobAddressChargebacks((string) $job);
+                        if ($rows->isEmpty()) {
+                            return '—';
+                        }
+
+                        $billed = $rows->where('status', 'pushed');
+
+                        return $billed->isNotEmpty()
+                            ? $billed->count().' billed · $'.number_format((float) $billed->sum('amount'), 2)
+                            : $rows->count().' not billed';
+                    })
+                    ->color(fn (string $state): string => match (true) {
+                        str_contains($state, 'billed ·') => 'warning',
+                        $state === '—' => 'gray',
+                        default => 'info',
+                    })
+                    ->tooltip("Address / residential fees charged back to the customer on this correction's Pace job (job-level match). \"billed\" = a JobCost was actually posted; otherwise the push was skipped (e.g. job closed)."),
                 TextColumn::make('source')
                     ->label('Validator')
                     ->badge()
@@ -152,6 +181,29 @@ class PaceCorrectionsTable
                     ->label('Residential set on Pace')
                     ->toggle()
                     ->query(fn (Builder $query): Builder => $query->whereRaw("json_extract(metadata, '\$.changes.residential') is not null")),
+                Filter::make('has_chargeback')
+                    ->label('Has address/residential chargeback')
+                    ->toggle()
+                    ->query(function (Builder $query): Builder {
+                        $jobs = self::addressChargebackQuery(DB::table('chargeback_pushes'))
+                            ->whereNotNull('pace_job')
+                            ->distinct()
+                            ->pluck('pace_job')
+                            ->all();
+
+                        return $query->where(function (Builder $q) use ($jobs): void {
+                            if (empty($jobs)) {
+                                $q->whereRaw('1 = 0');
+
+                                return;
+                            }
+                            // JSON-path where per job (Laravel compiles the extraction per driver,
+                            // so this stays portable across MySQL and the SQLite test DB).
+                            foreach ($jobs as $job) {
+                                $q->orWhere('metadata->job_number', $job);
+                            }
+                        });
+                    }),
                 Filter::make('created_at')
                     ->schema([
                         DatePicker::make('from')->label('From'),
@@ -168,6 +220,37 @@ class PaceCorrectionsTable
                     ->label('Export to Excel')
                     ->exporter(PaceCorrectionExporter::class),
             ]);
+    }
+
+    /**
+     * Constrain a chargeback_pushes query to address-correction + residential charges — the fees the
+     * address engine is meant to prevent the customer being billed for.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @return \Illuminate\Database\Query\Builder
+     */
+    protected static function addressChargebackQuery($query)
+    {
+        return $query->where(function ($q): void {
+            $q->where('charge_category_id', CostAnalyticsService::CAT_ADDRESS_CORRECTION)
+                ->orWhere('driver', 'residential_reclass')
+                ->orWhereIn('charge_category_id', fn ($sub) => $sub->from('charge_categories')
+                    ->whereRaw('lower(name) like ?', ['%residential%'])
+                    ->select('id'));
+        });
+    }
+
+    /**
+     * Address-correction + residential chargebacks on a given Pace job (job-level match — a
+     * correction records the job#, not a tracking#). status = pushed means it was actually billed.
+     *
+     * @return Collection<int, object>
+     */
+    protected static function jobAddressChargebacks(string $job): Collection
+    {
+        return self::addressChargebackQuery(DB::table('chargeback_pushes'))
+            ->where('pace_job', $job)
+            ->get(['amount', 'status', 'charge_category_id', 'driver', 'tracking_number', 'ship_date']);
     }
 
     /**
