@@ -19,7 +19,7 @@ class CorrectionCostTrendChart extends ChartWidget
     use InteractsWithPageFilters;
     use ReadsDashboardPeriod;
 
-    protected static ?int $sort = 5;
+    protected static ?int $sort = 6;
 
     protected ?string $heading = 'Address Correction Fees by Year';
 

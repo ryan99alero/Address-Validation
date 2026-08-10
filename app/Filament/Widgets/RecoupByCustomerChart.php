@@ -12,7 +12,7 @@ use Filament\Widgets\ChartWidget;
  */
 class RecoupByCustomerChart extends ChartWidget
 {
-    protected static ?int $sort = 6;
+    protected static ?int $sort = 7;
 
     protected ?string $heading = 'Recoupable by Customer';
 

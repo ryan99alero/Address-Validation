@@ -19,7 +19,7 @@ class AccessorialLoadChart extends ChartWidget
     use InteractsWithPageFilters;
     use ReadsDashboardPeriod;
 
-    protected static ?int $sort = 3;
+    protected static ?int $sort = 4;
 
     protected ?string $heading = 'Accessorial Load % by Year';
 

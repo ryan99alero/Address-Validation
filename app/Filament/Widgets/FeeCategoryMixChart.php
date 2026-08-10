@@ -21,7 +21,7 @@ class FeeCategoryMixChart extends ChartWidget
     use InteractsWithPageFilters;
     use ReadsDashboardPeriod;
 
-    protected static ?int $sort = 4;
+    protected static ?int $sort = 5;
 
     protected ?string $heading = 'Accessorial Spend by Category';
 
