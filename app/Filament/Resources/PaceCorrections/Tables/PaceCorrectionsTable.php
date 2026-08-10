@@ -123,6 +123,13 @@ class PaceCorrectionsTable
                     }),
             ])
             ->filters([
+                // No-change rows (address already clean) are kept for stats — correction rate,
+                // coverage — but hidden from the default operational view. Toggle off to see them.
+                Filter::make('hide_unchanged')
+                    ->label('Hide unchanged (already-clean)')
+                    ->toggle()
+                    ->default(true)
+                    ->query(fn (Builder $query): Builder => $query->whereJsonLength('metadata->changes', '>', 0)),
                 SelectFilter::make('status')
                     ->options([
                         'success' => 'Success',

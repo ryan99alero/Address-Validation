@@ -34,17 +34,19 @@ beforeEach(function () {
         'residential' => true,
         'changes' => ['zip' => ['from' => '12345', 'to' => '12345-6789']],
     ]);
-    // Commercial address.
+    // A real correction (city fixed) on a commercial address — no residential flag change.
     $this->commercial = paceResidentialLog([
         'shipment_id' => 'SHIP-COM',
         'residential' => false,
-        'changes' => [],
+        'changes' => ['city' => ['from' => 'Sprngfield', 'to' => 'Springfield']],
     ]);
     $this->actingAs(User::factory()->create());
 });
 
 test('the Residential column labels set / verified / commercial rows', function () {
     Livewire::test(ListPaceCorrections::class)
+        // Show every row regardless of the default "hide unchanged" filter.
+        ->set('tableFilters.hide_unchanged.isActive', false)
         ->assertTableColumnStateSet('residential', 'Set Residential', $this->setResidential)
         ->assertTableColumnStateSet('residential', 'Residential', $this->verifiedResidential)
         ->assertTableColumnStateSet('residential', 'Commercial', $this->commercial);
@@ -52,6 +54,7 @@ test('the Residential column labels set / verified / commercial rows', function 
 
 test('the Residential-set filter shows only rows where we pushed the residential flag', function () {
     Livewire::test(ListPaceCorrections::class)
+        ->set('tableFilters.hide_unchanged.isActive', false)
         ->filterTable('residential_set', true)
         ->assertCanSeeTableRecords([$this->setResidential])
         ->assertCanNotSeeTableRecords([$this->verifiedResidential, $this->commercial]);
