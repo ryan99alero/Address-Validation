@@ -1,5 +1,6 @@
 <?php
 
+use App\Filament\Resources\CarrierShipmentSummaries\CarrierShipmentSummaryResource;
 use App\Filament\Resources\CarrierShipmentSummaries\Pages\ListCarrierShipmentSummaries;
 use App\Models\Carrier;
 use App\Models\CarrierInvoice;
@@ -28,4 +29,9 @@ it('renders the standalone Per-Shipment Costs list off carrier_shipments', funct
         ->assertOk()
         ->assertSee('TRK00099')
         ->assertSee('FedEx');
+});
+
+it('is surfaced in the Carrier Costs nav as "All Shipments"', function () {
+    expect(CarrierShipmentSummaryResource::shouldRegisterNavigation())->toBeTrue()
+        ->and(CarrierShipmentSummaryResource::getNavigationLabel())->toBe('All Shipments');
 });

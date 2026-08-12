@@ -24,14 +24,15 @@ class CarrierShipmentSummaryResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'Carrier Costs';
 
-    protected static ?string $navigationLabel = 'Per-Shipment Costs';
+    protected static ?string $navigationLabel = 'All Shipments';
 
     protected static ?string $modelLabel = 'Shipment';
 
     protected static ?int $navigationSort = 3;
 
-    // Absorbed into the Invoices "Per-Shipment Costs" relation-manager tab; kept URL-reachable.
-    protected static bool $shouldRegisterNavigation = false;
+    // The cross-invoice, all-carriers shipment view (the per-invoice "Per-Shipment Costs" tab shows
+    // only a single invoice's shipments). Surfaced in the Carrier Costs group as "All Shipments".
+    protected static bool $shouldRegisterNavigation = true;
 
     public static function canCreate(): bool
     {
