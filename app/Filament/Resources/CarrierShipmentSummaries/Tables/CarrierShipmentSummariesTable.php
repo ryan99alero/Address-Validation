@@ -8,6 +8,7 @@ use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\TextInput;
 use Filament\Tables\Columns\Summarizers\Sum;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -100,7 +101,7 @@ class CarrierShipmentSummariesTable
                     ->label('Has extra fees')
                     ->toggle()
                     ->query(fn (Builder $query): Builder => $query->where('fee_amount', '>', 0)),
-            ])
+            ], layout: FiltersLayout::Modal)
             ->recordActions([
                 ViewAction::make(),
             ]);
