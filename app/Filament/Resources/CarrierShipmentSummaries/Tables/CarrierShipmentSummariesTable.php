@@ -2,10 +2,10 @@
 
 namespace App\Filament\Resources\CarrierShipmentSummaries\Tables;
 
+use App\Filament\Support\ShipmentFilters;
 use App\Models\CarrierShipment;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\DatePicker;
-use Filament\Forms\Components\TextInput;
 use Filament\Tables\Columns\Summarizers\Sum;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Enums\FiltersLayout;
@@ -119,17 +119,17 @@ class CarrierShipmentSummariesTable
             ])
             ->filtersFormColumns(3)
             ->filters([
-                // Free-text filters — all live in the one filter panel alongside the dropdowns.
-                self::textFilter('invoice_number', 'Invoice #', fn (Builder $q, string $v): Builder => $q->whereHas('invoice', fn (Builder $iq): Builder => $iq->where('invoice_number', 'like', "%{$v}%"))),
-                self::textFilter('tracking', 'Tracking #', fn (Builder $q, string $v): Builder => $q->where('tracking_number', 'like', "%{$v}%")),
-                self::textFilter('job', 'Job # (exact)', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'pace_job_number', $v, exact: true)),
-                self::textFilter('customer', 'Customer ID (exact)', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'pace_customer_id', $v, exact: true)),
-                self::textFilter('reference1', 'Reference 1', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'U_reference', $v)),
-                self::textFilter('reference2', 'Reference 2', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'U_reference2', $v)),
-                self::textFilter('address', 'Address', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carrier_invoice_lines', 'original_address_1', $v)),
-                self::textFilter('city', 'City', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carrier_invoice_lines', 'original_city', $v)),
-                self::textFilter('state', 'State', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carrier_invoice_lines', 'original_state', $v)),
-                self::textFilter('zip', 'Zip', fn (Builder $q, string $v): Builder => $q->where('zip', 'like', "{$v}%")),
+                // Free-text filters — shared with the All Charges view (see ShipmentFilters).
+                ShipmentFilters::text('invoice_number', 'Invoice #', fn (Builder $q, string $v): Builder => $q->whereHas('invoice', fn (Builder $iq): Builder => $iq->where('invoice_number', 'like', "%{$v}%"))),
+                ShipmentFilters::text('tracking', 'Tracking #', fn (Builder $q, string $v): Builder => $q->where('tracking_number', 'like', "%{$v}%")),
+                ShipmentFilters::text('job', 'Job # (exact)', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_shipments', 'carton_costs', 'pace_job_number', $v, exact: true)),
+                ShipmentFilters::text('customer', 'Customer ID (exact)', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_shipments', 'carton_costs', 'pace_customer_id', $v, exact: true)),
+                ShipmentFilters::text('reference1', 'Reference 1', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_shipments', 'carton_costs', 'U_reference', $v)),
+                ShipmentFilters::text('reference2', 'Reference 2', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_shipments', 'carton_costs', 'U_reference2', $v)),
+                ShipmentFilters::text('address', 'Address', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_shipments', 'carrier_invoice_lines', 'original_address_1', $v)),
+                ShipmentFilters::text('city', 'City', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_shipments', 'carrier_invoice_lines', 'original_city', $v)),
+                ShipmentFilters::text('state', 'State', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_shipments', 'carrier_invoice_lines', 'original_state', $v)),
+                ShipmentFilters::text('zip', 'Zip', fn (Builder $q, string $v): Builder => $q->where('zip', 'like', "{$v}%")),
                 SelectFilter::make('carrier_id')
                     ->label('Carrier')
                     ->relationship('carrier', 'name'),
@@ -161,36 +161,5 @@ class CarrierShipmentSummariesTable
             ->recordActions([
                 ViewAction::make(),
             ]);
-    }
-
-    /**
-     * A single-text-input filter that applies $apply(query, value) when filled, with a chip indicator.
-     *
-     * @param  callable(Builder, string): Builder  $apply
-     */
-    private static function textFilter(string $name, string $label, callable $apply): Filter
-    {
-        return Filter::make($name)
-            ->schema([TextInput::make('value')->label($label)])
-            ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
-                ? $apply($query, trim((string) $data['value']))
-                : $query)
-            ->indicateUsing(fn (array $data): ?string => filled($data['value'] ?? null) ? $label.': '.$data['value'] : null);
-    }
-
-    /**
-     * Constrain shipments to those whose tracking number matches a LIKE on $column of a related table
-     * (carton_costs for job/customer, carrier_invoice_lines for the shipped-to address). Correlated
-     * EXISTS on the indexed tracking_number, so it only touches matching rows.
-     */
-    private static function whereTrackingMatch(Builder $query, string $table, string $column, string $value, bool $exact = false): Builder
-    {
-        return $query->whereExists(fn ($sub) => $sub->from($table)
-            ->whereColumn("{$table}.tracking_number", 'carrier_shipments.tracking_number')
-            ->when(
-                $exact,
-                fn ($q) => $q->where("{$table}.{$column}", $value),
-                fn ($q) => $q->where("{$table}.{$column}", 'like', '%'.$value.'%'),
-            ));
     }
 }

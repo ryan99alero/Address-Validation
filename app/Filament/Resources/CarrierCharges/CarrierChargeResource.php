@@ -9,6 +9,7 @@ use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use UnitEnum;
 
 class CarrierChargeResource extends Resource
@@ -19,11 +20,11 @@ class CarrierChargeResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'Carrier Costs';
 
-    protected static ?string $navigationLabel = 'Adjustments';
+    protected static ?string $navigationLabel = 'All Charges';
 
-    protected static ?string $modelLabel = 'Adjustment';
+    protected static ?string $modelLabel = 'Charge';
 
-    protected static ?string $pluralModelLabel = 'Adjustments';
+    protected static ?string $pluralModelLabel = 'Charges';
 
     protected static ?string $slug = 'adjustments';
 
@@ -32,6 +33,12 @@ class CarrierChargeResource extends Resource
     public static function canCreate(): bool
     {
         return false;
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()
+            ->with(['carrier', 'category', 'invoice', 'cartonCost']);
     }
 
     public static function table(Table $table): Table

@@ -5,11 +5,14 @@ namespace App\Filament\Resources\CarrierCharges\Tables;
 use App\Filament\Filters\BillingTypeFilter;
 use App\Filament\Resources\CarrierInvoices\CarrierInvoiceResource;
 use App\Filament\Support\CartonReferenceColumns;
+use App\Filament\Support\ShipmentFilters;
 use App\Models\CarrierCharge;
 use App\Models\ChargeCategory;
+use App\Services\Analytics\CostAnalyticsService;
 use Filament\Forms\Components\Select;
 use Filament\Tables\Columns\Summarizers\Sum;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -57,12 +60,58 @@ class CarrierChargesTable
                     ->color('primary')
                     ->limit(28)
                     ->placeholder('—'),
+                // Pace / shipment context — off by default, flip on from the column toggle menu.
+                TextColumn::make('cartonCost.pace_job_number')
+                    ->label('Job #')
+                    ->placeholder('— (not invoiced/known in Pace)')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('cartonCost.pace_customer_id')
+                    ->label('Customer')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('cartonCost.pace_customer_name')
+                    ->label('Customer Name')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('invoice.invoice_number')
+                    ->label('Invoice #')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('service')
+                    ->label('Service')
+                    ->badge()
+                    ->color('info')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             // id-desc is index-fast on 3.4M rows; invoice_date sort is available
             // per-column. Once a category/carrier filter is applied the subset is
             // small enough to sort however the user likes.
             ->defaultSort('id', 'desc')
+            ->filtersFormColumns(3)
             ->filters([
+                // Free-text filters — shared with the All Shipments view (see ShipmentFilters),
+                // correlated on the indexed carrier_charges.tracking_number.
+                ShipmentFilters::text('invoice_number', 'Invoice #', fn (Builder $q, string $v): Builder => $q->whereHas('invoice', fn (Builder $iq): Builder => $iq->where('invoice_number', 'like', "%{$v}%"))),
+                ShipmentFilters::text('tracking', 'Tracking #', fn (Builder $q, string $v): Builder => $q->where('tracking_number', 'like', "%{$v}%")),
+                ShipmentFilters::text('job', 'Job # (exact)', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_charges', 'carton_costs', 'pace_job_number', $v, exact: true)),
+                ShipmentFilters::text('customer', 'Customer ID (exact)', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_charges', 'carton_costs', 'pace_customer_id', $v, exact: true)),
+                ShipmentFilters::text('reference1', 'Reference 1', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_charges', 'carton_costs', 'U_reference', $v)),
+                ShipmentFilters::text('reference2', 'Reference 2', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_charges', 'carton_costs', 'U_reference2', $v)),
+                ShipmentFilters::text('address', 'Address', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_charges', 'carrier_invoice_lines', 'original_address_1', $v)),
+                ShipmentFilters::text('city', 'City', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_charges', 'carrier_invoice_lines', 'original_city', $v)),
+                ShipmentFilters::text('state', 'State', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_charges', 'carrier_invoice_lines', 'original_state', $v)),
+                ShipmentFilters::text('zip', 'Zip', fn (Builder $q, string $v): Builder => ShipmentFilters::trackingMatch($q, 'carrier_charges', 'carrier_shipments', 'zip', $v)),
+                ShipmentFilters::text('service', 'Service', fn (Builder $q, string $v): Builder => $q->where('service', 'like', "%{$v}%")),
+                // "On top of what we were quoted" — every charge except Base Transportation
+                // (the quoted freight). Uncategorized rows stay in; they're not the base quote.
+                Filter::make('auxiliary_only')
+                    ->label('Auxiliary fees only (exclude base transport)')
+                    ->toggle()
+                    ->default()
+                    ->query(fn (Builder $query): Builder => $query->where(fn (Builder $q): Builder => $q
+                        ->where('charge_category_id', '!=', CostAnalyticsService::CAT_BASE)
+                        ->orWhereNull('charge_category_id'))),
                 SelectFilter::make('carrier_id')
                     ->label('Carrier')
                     ->relationship('carrier', 'name'),
@@ -87,7 +136,7 @@ class CarrierChargesTable
                         ->when($data['year_from'] ?? null, fn (Builder $q, $from): Builder => $q->where('invoice_date', '>=', "{$from}-01-01"))
                         ->when($data['year_to'] ?? null, fn (Builder $q, $to): Builder => $q->where('invoice_date', '<', ((int) $to + 1).'-01-01')))
                     ->indicateUsing(fn (array $data): ?string => self::yearIndicator($data)),
-            ])
+            ], layout: FiltersLayout::Modal)
             ->paginated([25, 50, 100]);
     }
 
