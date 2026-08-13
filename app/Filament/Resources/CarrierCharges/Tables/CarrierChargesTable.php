@@ -83,6 +83,12 @@ class CarrierChargesTable
                     ->color('info')
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('driver')
+                    ->label('Chargeback Code')
+                    ->badge()
+                    ->color('gray')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             // id-desc is index-fast on 3.4M rows; invoice_date sort is available
             // per-column. Once a category/carrier filter is applied the subset is
@@ -112,6 +118,21 @@ class CarrierChargesTable
                     ->query(fn (Builder $query): Builder => $query->where(fn (Builder $q): Builder => $q
                         ->where('charge_category_id', '!=', CostAnalyticsService::CAT_BASE)
                         ->orWhereNull('charge_category_id'))),
+                // "The ones we charge the client for." Mirrors the live chargeback engine exactly
+                // (ChargebackEligibility): a charge pushes to Pace when its Chargeback Code (driver)
+                // is flagged push_to_pace AND carries a Pace activity code. Push is a driver-level
+                // switch (Charge Classification → Chargeback Codes), not a category flag.
+                Filter::make('push_back_only')
+                    ->label('Pushed back to Pace only (client-billable)')
+                    ->toggle()
+                    ->default()
+                    ->query(fn (Builder $query): Builder => $query->whereIn('driver', function ($sub): void {
+                        $sub->from('charge_drivers')
+                            ->where('push_to_pace', true)
+                            ->whereNotNull('pace_activity_code')
+                            ->where('pace_activity_code', '!=', '')
+                            ->select('key');
+                    })),
                 SelectFilter::make('carrier_id')
                     ->label('Carrier')
                     ->relationship('carrier', 'name'),
