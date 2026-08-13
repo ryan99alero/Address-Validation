@@ -111,29 +111,30 @@ class CarrierChargesTable
                 ShipmentFilters::text('service', 'Service', fn (Builder $q, string $v): Builder => $q->where('service', 'like', "%{$v}%")),
                 // "On top of what we were quoted" — every charge except Base Transportation
                 // (the quoted freight). Uncategorized rows stay in; they're not the base quote.
+                // Opt-in (NOT default): hides Base Transportation, the quoted freight. Left off by
+                // default because some charged-back lines (shipping-charge re-rate corrections) keep
+                // the Base Transportation category and would be wrongly hidden alongside the "In
+                // Chargeback Pushes" view.
                 Filter::make('auxiliary_only')
                     ->label('Auxiliary fees only (exclude base transport)')
                     ->toggle()
-                    ->default()
                     ->query(fn (Builder $query): Builder => $query->where(fn (Builder $q): Builder => $q
                         ->where('charge_category_id', '!=', CostAnalyticsService::CAT_BASE)
                         ->orWhereNull('charge_category_id'))),
-                // Charge LINES whose Chargeback Code is configured to push back (driver push_to_pace +
-                // a Pace activity code) — the classification the chargeback engine keys off. This is a
-                // charge-line filter: its dollar total will NOT match the Chargeback Pushes ledger,
-                // because DIM/Weight-audit chargebacks are computed re-rate deltas with no charge line.
-                // Use it to see/export the fee lines that feed chargebacks; use the ledger for the
-                // reconciled pushed total.
-                Filter::make('chargeback_eligible')
-                    ->label('Chargeback-eligible only (code set to push)')
+                // Exactly the charge lines that appear in the Chargeback Pushes ledger (charged back to
+                // Pace) — sourced from the ledger itself (chargeback_pushes.carrier_charge_id) so it
+                // can't drift from that page, and catches every category (incl. the Base Transportation
+                // re-rate corrections). NOTE: some chargebacks — DIM/Weight-audit re-rate deltas — are
+                // COMPUTED with no invoice charge line, so they exist only in the ledger and can never
+                // appear here. Default on: the pushed set is the working view.
+                Filter::make('in_chargeback_pushes')
+                    ->label('In Chargeback Pushes (charged back to Pace)')
                     ->toggle()
                     ->default()
-                    ->query(fn (Builder $query): Builder => $query->whereIn('driver', function ($sub): void {
-                        $sub->from('charge_drivers')
-                            ->where('push_to_pace', true)
-                            ->whereNotNull('pace_activity_code')
-                            ->where('pace_activity_code', '!=', '')
-                            ->select('key');
+                    ->query(fn (Builder $query): Builder => $query->whereIn('id', function ($sub): void {
+                        $sub->from('chargeback_pushes')
+                            ->whereNotNull('carrier_charge_id')
+                            ->select('carrier_charge_id');
                     })),
                 SelectFilter::make('carrier_id')
                     ->label('Carrier')
