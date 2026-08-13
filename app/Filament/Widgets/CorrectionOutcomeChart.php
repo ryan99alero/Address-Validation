@@ -46,6 +46,14 @@ class CorrectionOutcomeChart extends ChartWidget
     /** @var array<string, int> */
     private array $totals = [];
 
+    /**
+     * Keep the small tile clean — the caption + legend show only in the enlarged view.
+     */
+    public function hideTileChrome(): bool
+    {
+        return true;
+    }
+
     protected function getType(): string
     {
         return 'bar';

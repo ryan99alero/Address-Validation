@@ -12,10 +12,14 @@
     // Widgets may expose a described legend ([label, color, description]); when present we render our
     // own legend so each entry has a hover tooltip explaining what the bar means.
     $legendItems = method_exists($this, 'getLegendItems') ? $this->getLegendItems() : [];
+
+    // Widgets may opt to hide the caption + legend in the small tile (they still show in the enlarged
+    // copy), for a cleaner grid.
+    $hideTileChrome = method_exists($this, 'hideTileChrome') && $this->hideTileChrome();
 @endphp
 
 <x-filament-widgets::widget class="fi-wi-chart">
-    <x-filament::section :description="$description" :heading="$heading">
+    <x-filament::section :description="$hideTileChrome ? null : $description" :heading="$heading">
         <div x-data="{ open: false }">
             {{-- Tile: the live Filament chart. A click overlay sits on top so the tile itself is a
                  non-interactive preview and clicking anywhere opens the large, interactive copy. --}}
@@ -49,7 +53,7 @@
                 </div>
             </div>
 
-            @if ($legendItems)
+            @if ($legendItems && ! $hideTileChrome)
                 <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
                     @foreach ($legendItems as $item)
                         <span class="fi-legend-tip inline-flex cursor-help items-center gap-1.5 text-gray-600 dark:text-gray-300" data-tip="{{ $item['description'] }}">

@@ -1,7 +1,6 @@
 <x-filament-widgets::widget>
     <x-filament::section>
         <x-slot name="heading">{{ $this->heatHeading() }}</x-slot>
-        <x-slot name="description">{{ $this->heatDescription() }}</x-slot>
 
         @php($meta = $this->heatMeta())
 
@@ -104,26 +103,6 @@
                         <div class="absolute left-2 top-2 rounded-md bg-gray-100 p-1 text-gray-700 shadow-sm dark:bg-gray-800 dark:text-gray-200">
                             <x-filament::icon icon="heroicon-m-arrows-pointing-out" class="h-4 w-4" />
                         </div>
-                    </div>
-                </div>
-
-                <div class="mt-3 space-y-1.5 text-xs">
-                    @foreach ($this->heatLegends() as $legend)
-                        <div class="flex items-center gap-3">
-                            <span class="w-16 shrink-0 font-semibold text-gray-700 dark:text-gray-200">{{ $legend['label'] }}</span>
-                            <span class="inline-block h-2.5 w-24 shrink-0 rounded-full" style="background: linear-gradient(to right, {{ implode(',', $legend['stops']) }});"></span>
-                            <span class="text-gray-600 dark:text-gray-300">
-                                <span class="font-medium">{{ number_format($legend['plotted']) }}</span> {{ $this->heatUnit() }}
-                                across <span class="font-medium">{{ number_format($legend['zips']) }}</span> ZIPs
-                                · busiest ZIP {{ number_format($legend['max']) }}
-                                @if ($legend['unmapped'] > 0)
-                                    · {{ number_format($legend['unmapped']) }} unmapped
-                                @endif
-                            </span>
-                        </div>
-                    @endforeach
-                    <div class="pt-0.5 text-gray-400 dark:text-gray-500">
-                        Click the map to expand it fullscreen (pan &amp; zoom there). Color shows {{ $this->heatUnit() }} density per ZIP — light = fewer, dark = the busiest ZIP.
                     </div>
                 </div>
             </div>

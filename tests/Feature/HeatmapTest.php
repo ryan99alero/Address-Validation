@@ -120,15 +120,15 @@ test('corrections split by carrier, filtered by INVOICE date (not the unreliable
         ->and($svc->corrections(2026, null, null)['meta']['matched'])->toBe(3);
 });
 
-test('the shipping heatmap widget renders server-side with its heading and legend', function () {
+test('the shipping heatmap widget renders server-side with its heading (tile is decluttered)', function () {
     $this->actingAs(User::factory()->create());
     seedShipment($this->upsInv, $this->ups->id, '78701', '2026-05-01');
 
     Livewire::test(ShippingHeatmap::class)
         ->assertOk()
         ->assertSee('Shipping Destinations')
-        ->assertSee('shipments')      // per-carrier count line
-        ->assertSee('busiest ZIP');
+        // The subtitle + the density/ZIP stats block are hidden on the map tile now.
+        ->assertDontSee('busiest ZIP');
 });
 
 test('FedEx CSV import persists shipments (dest ZIP + service) into carrier_shipments', function () {
