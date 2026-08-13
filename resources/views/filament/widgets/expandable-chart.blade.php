@@ -52,7 +52,7 @@
             @if ($legendItems)
                 <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
                     @foreach ($legendItems as $item)
-                        <span class="inline-flex cursor-help items-center gap-1.5 text-gray-600 dark:text-gray-300" title="{{ $item['description'] }}">
+                        <span class="fi-legend-tip inline-flex cursor-help items-center gap-1.5 text-gray-600 dark:text-gray-300" data-tip="{{ $item['description'] }}">
                             <span class="inline-block h-2.5 w-2.5 rounded-sm" style="background: {{ $item['color'] }}"></span>
                             {{ $item['label'] }}
                         </span>
@@ -104,7 +104,7 @@
                     @if ($legendItems)
                         <div class="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-sm">
                             @foreach ($legendItems as $item)
-                                <span class="inline-flex cursor-help items-center gap-1.5 text-gray-600 dark:text-gray-300" title="{{ $item['description'] }}">
+                                <span class="fi-legend-tip inline-flex cursor-help items-center gap-1.5 text-gray-600 dark:text-gray-300" data-tip="{{ $item['description'] }}">
                                     <span class="inline-block h-3 w-3 rounded-sm" style="background: {{ $item['color'] }}"></span>
                                     {{ $item['label'] }}
                                 </span>
