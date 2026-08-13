@@ -118,6 +118,23 @@ class CarrierChargesTable
                     ->query(fn (Builder $query): Builder => $query->where(fn (Builder $q): Builder => $q
                         ->where('charge_category_id', '!=', CostAnalyticsService::CAT_BASE)
                         ->orWhereNull('charge_category_id'))),
+                // Charge LINES whose Chargeback Code is configured to push back (driver push_to_pace +
+                // a Pace activity code) — the classification the chargeback engine keys off. This is a
+                // charge-line filter: its dollar total will NOT match the Chargeback Pushes ledger,
+                // because DIM/Weight-audit chargebacks are computed re-rate deltas with no charge line.
+                // Use it to see/export the fee lines that feed chargebacks; use the ledger for the
+                // reconciled pushed total.
+                Filter::make('chargeback_eligible')
+                    ->label('Chargeback-eligible only (code set to push)')
+                    ->toggle()
+                    ->default()
+                    ->query(fn (Builder $query): Builder => $query->whereIn('driver', function ($sub): void {
+                        $sub->from('charge_drivers')
+                            ->where('push_to_pace', true)
+                            ->whereNotNull('pace_activity_code')
+                            ->where('pace_activity_code', '!=', '')
+                            ->select('key');
+                    })),
                 SelectFilter::make('carrier_id')
                     ->label('Carrier')
                     ->relationship('carrier', 'name'),

@@ -75,7 +75,10 @@ it('filters charges by every shared text field', function () {
         ['zip', '90210'],              // carrier_shipments by tracking
         ['service', 'Ground'],         // direct column
     ] as [$filter, $value]) {
+        // chargeback_eligible defaults on; the fixture charges have no driver, so turn it off to
+        // isolate the text filter under test.
         Livewire::test(ListCarrierCharges::class)
+            ->filterTable('chargeback_eligible', false)
             ->filterTable($filter, ['value' => $value])
             ->assertCanSeeTableRecords([$c1])
             ->assertCanNotSeeTableRecords([$c2]);
@@ -91,11 +94,36 @@ it('defaults to auxiliary fees only, hiding base transportation', function () {
     $aux = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'tracking_number' => 'AUX1', 'raw_charge_description' => 'Address Correction', 'charge_category_id' => 1, 'amount' => 20, 'source_type' => 'csv']);
     $base = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'tracking_number' => 'BASE1', 'raw_charge_description' => 'Ground Freight', 'charge_category_id' => 13, 'amount' => 100, 'source_type' => 'csv']);
 
-    // Default mount: the auxiliary-only toggle is on, so base transport is hidden.
+    // Isolate the auxiliary toggle from the chargeback-eligible default (neither charge has a driver).
     Livewire::test(ListCarrierCharges::class)
+        ->filterTable('chargeback_eligible', false)
         ->assertCanSeeTableRecords([$aux])
         ->assertCanNotSeeTableRecords([$base])
-        // Toggling it off reveals the base freight too.
+        // Toggling auxiliary off reveals the base freight too.
         ->filterTable('auxiliary_only', false)
         ->assertCanSeeTableRecords([$aux, $base]);
+});
+
+it('defaults to chargeback-eligible charges, keyed off the driver push flag', function () {
+    $this->actingAs(User::factory()->create());
+    $carrier = Carrier::factory()->create(['slug' => 'ups', 'name' => 'UPS']);
+    seedChargeCategories();
+    $inv = CarrierInvoice::create(['carrier_id' => $carrier->id, 'invoice_number' => 'INV-1', 'invoice_date' => '2026-05-01', 'filename' => 'x.csv']);
+
+    // Push eligibility is a driver-level switch: push_to_pace + a Pace activity code.
+    DB::table('charge_drivers')->insert([
+        ['key' => 'PUSH', 'label' => 'Chargeable', 'disposition' => 'chargeback', 'push_to_pace' => true, 'pace_activity_code' => 'FRTCORR', 'is_active' => true, 'sort_order' => 0, 'created_at' => now(), 'updated_at' => now()],
+        ['key' => 'INFO', 'label' => 'Informational', 'disposition' => 'informational', 'push_to_pace' => false, 'pace_activity_code' => null, 'is_active' => true, 'sort_order' => 0, 'created_at' => now(), 'updated_at' => now()],
+    ]);
+
+    // Both auxiliary (cat 1) so only the chargeback-eligible toggle distinguishes them.
+    $eligible = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'tracking_number' => 'PUSH1', 'raw_charge_description' => 'Address Correction', 'charge_category_id' => 1, 'driver' => 'PUSH', 'amount' => 20, 'source_type' => 'csv']);
+    $notEligible = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'tracking_number' => 'INFO1', 'raw_charge_description' => 'Fuel', 'charge_category_id' => 1, 'driver' => 'INFO', 'amount' => 20, 'source_type' => 'csv']);
+
+    Livewire::test(ListCarrierCharges::class)
+        ->assertCanSeeTableRecords([$eligible])
+        ->assertCanNotSeeTableRecords([$notEligible])
+        // Toggling it off shows every charge regardless of push-back classification.
+        ->filterTable('chargeback_eligible', false)
+        ->assertCanSeeTableRecords([$eligible, $notEligible]);
 });
