@@ -24,9 +24,9 @@ class CorrectionOutcomeChart extends ChartWidget
 
     protected ?string $heading = 'Address Correction Funnel';
 
-    protected int|string|array $columnSpan = ['default' => 1, 'md' => 2, 'xl' => 2];
+    protected int|string|array $columnSpan = 1;
 
-    protected ?string $maxHeight = '300px';
+    protected ?string $maxHeight = '220px';
 
     protected string $view = 'filament.widgets.expandable-chart';
 

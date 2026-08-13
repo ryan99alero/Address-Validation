@@ -20,9 +20,9 @@ class CorrectionHeatmap extends Widget
 
     protected string $view = 'filament.widgets.heatmap';
 
-    // Half-width (side-by-side with the other heatmap) on wide screens; full-width and stacked on
-    // smaller ones so the map stays readable. Click-to-enlarge covers the detailed view.
-    protected int|string|array $columnSpan = ['default' => 1, 'md' => 2, 'lg' => 3, 'xl' => 2];
+    // Standard single-column tile, matching the other dashboard widgets; click-to-enlarge (fullscreen)
+    // covers the detailed view.
+    protected int|string|array $columnSpan = 1;
 
     protected static ?int $sort = 21;
 
