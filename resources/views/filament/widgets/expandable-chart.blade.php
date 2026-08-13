@@ -8,6 +8,10 @@
     $options = $this->getOptions();
     $maxHeight = $this->getMaxHeight();
     $chartSrc = FilamentAsset::getAlpineComponentSrc('chart', 'filament/widgets');
+
+    // Widgets may expose a described legend ([label, color, description]); when present we render our
+    // own legend so each entry has a hover tooltip explaining what the bar means.
+    $legendItems = method_exists($this, 'getLegendItems') ? $this->getLegendItems() : [];
 @endphp
 
 <x-filament-widgets::widget class="fi-wi-chart">
@@ -44,6 +48,17 @@
                     </div>
                 </div>
             </div>
+
+            @if ($legendItems)
+                <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                    @foreach ($legendItems as $item)
+                        <span class="inline-flex cursor-help items-center gap-1.5 text-gray-600 dark:text-gray-300" title="{{ $item['description'] }}">
+                            <span class="inline-block h-2.5 w-2.5 rounded-sm" style="background: {{ $item['color'] }}"></span>
+                            {{ $item['label'] }}
+                        </span>
+                    @endforeach
+                </div>
+            @endif
 
             {{-- Enlarged, interactive copy — only rendered while open so Chart.js sizes to the modal. --}}
             <div
@@ -85,6 +100,17 @@
                             <span x-ref="textColorElement" class="fi-wi-chart-text-color"></span>
                         </div>
                     </template>
+
+                    @if ($legendItems)
+                        <div class="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-sm">
+                            @foreach ($legendItems as $item)
+                                <span class="inline-flex cursor-help items-center gap-1.5 text-gray-600 dark:text-gray-300" title="{{ $item['description'] }}">
+                                    <span class="inline-block h-3 w-3 rounded-sm" style="background: {{ $item['color'] }}"></span>
+                                    {{ $item['label'] }}
+                                </span>
+                            @endforeach
+                        </div>
+                    @endif
                 </div>
             </div>
         </div>

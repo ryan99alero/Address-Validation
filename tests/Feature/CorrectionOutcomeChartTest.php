@@ -71,10 +71,14 @@ test('the funnel breaks a year out by month, counting invoiced shipments per sta
         ->and($march->billed_back)->toBe(1);
 });
 
-test('the funnel widget renders the headline totals across the buckets', function () {
+test('the funnel widget renders the headline totals and the described legend', function () {
     Livewire::test(CorrectionOutcomeChart::class, ['pageFilters' => ['year' => 2026, 'month' => 0]])
         ->assertOk()
         ->assertSee('Address Correction Funnel')
-        // Feb (1 processed/fixed/avoided) + March (3/2/1, 2 charged) => 4 / 3 / 2 / 2.
-        ->assertSee('4 processed · 3 fixed · 2 fee avoided · 2 still charged');
+        // Feb (1 processed/fixed/avoided) + March (3/2/1, 2 charged, 1 recouped).
+        ->assertSee('4 checked · 3 fixed · 2 fees avoided · 2 still billed (1 recovered to the job)')
+        // Plain-English legend labels + a hover description (rendered as the title attribute).
+        ->assertSee('Shipments checked')
+        ->assertSee('Fixed, billed anyway')
+        ->assertSee('the fix was too late or did not take');
 });
