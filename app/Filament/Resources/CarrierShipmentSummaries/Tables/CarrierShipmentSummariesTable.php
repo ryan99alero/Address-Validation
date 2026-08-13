@@ -70,6 +70,8 @@ class CarrierShipmentSummariesTable
                 self::textFilter('tracking', 'Tracking #', fn (Builder $q, string $v): Builder => $q->where('tracking_number', 'like', "%{$v}%")),
                 self::textFilter('job', 'Job #', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'pace_job_number', $v)),
                 self::textFilter('customer', 'Customer ID', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'pace_customer_id', $v)),
+                self::textFilter('reference1', 'Reference 1', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'U_reference', $v)),
+                self::textFilter('reference2', 'Reference 2', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'U_reference2', $v)),
                 self::textFilter('address', 'Address', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carrier_invoice_lines', 'original_address_1', $v)),
                 self::textFilter('city', 'City', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carrier_invoice_lines', 'original_city', $v)),
                 self::textFilter('state', 'State', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carrier_invoice_lines', 'original_state', $v)),

@@ -22,7 +22,7 @@ function shipmentFilterFixture(): array
     $s2 = CarrierShipment::forceCreate(['carrier_invoice_id' => $inv2->id, 'carrier_id' => $carrier->id, 'tracking_number' => 'TRKBBB', 'service' => 'Ground', 'ship_date' => '2026-05-01', 'zip' => '10001', 'printed_total' => 10, 'base_amount' => 8, 'fee_amount' => 2, 'is_third_party' => false, 'source_type' => 'derived']);
 
     // Job / customer come from carton_costs; the shipped-to address from carrier_invoice_lines — both by tracking.
-    DB::table('carton_costs')->insert(['tracking_number' => 'TRKAAA', 'pace_job_number' => 'JOB-1', 'pace_customer_id' => 'CUST-9', 'ship_cost' => 8, 'created_at' => now(), 'updated_at' => now()]);
+    DB::table('carton_costs')->insert(['tracking_number' => 'TRKAAA', 'pace_job_number' => 'JOB-1', 'pace_customer_id' => 'CUST-9', 'U_reference' => 'PO-777', 'U_reference2' => 'REF2X', 'ship_cost' => 8, 'created_at' => now(), 'updated_at' => now()]);
     DB::table('carrier_invoice_lines')->insert(['carrier_invoice_id' => $inv1->id, 'tracking_number' => 'TRKAAA', 'original_address_1' => '100 Rodeo Dr', 'original_city' => 'Beverly Hills', 'original_state' => 'CA', 'original_postal' => '90210', 'original_country' => 'US', 'ship_date' => '2026-05-01', 'charge_code' => 'ADC', 'charge_amount' => 2, 'created_at' => now(), 'updated_at' => now()]);
 
     return [$s1, $s2];
@@ -62,6 +62,8 @@ it('filters shipments by every text field in the one panel', function () {
         ['invoice_number', 'INV-100'], // whereHas invoice
         ['job', 'JOB-1'],              // carton_costs exists
         ['customer', 'CUST-9'],        // carton_costs exists
+        ['reference1', 'PO-777'],      // carton U_reference
+        ['reference2', 'REF2X'],       // carton U_reference2
         ['address', 'Rodeo'],          // invoice line exists
         ['city', 'Beverly'],           // invoice line exists
         ['state', 'CA'],               // invoice line exists
