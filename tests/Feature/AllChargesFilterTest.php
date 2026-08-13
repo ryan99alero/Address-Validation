@@ -75,10 +75,10 @@ it('filters charges by every shared text field', function () {
         ['zip', '90210'],              // carrier_shipments by tracking
         ['service', 'Ground'],         // direct column
     ] as [$filter, $value]) {
-        // charged_back defaults on; the fixture charges have no push-eligible driver, so turn it off
-        // to isolate the text filter under test.
+        // cost_center_categories defaults on; the fixture charges are in a no-cost-center category,
+        // so turn it off to isolate the text filter under test.
         Livewire::test(ListCarrierCharges::class)
-            ->filterTable('charged_back', false)
+            ->filterTable('cost_center_categories', false)
             ->filterTable($filter, ['value' => $value])
             ->assertCanSeeTableRecords([$c1])
             ->assertCanNotSeeTableRecords([$c2]);
@@ -94,9 +94,9 @@ it('auxiliary-only is opt-in and hides base transportation', function () {
     $aux = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'tracking_number' => 'AUX1', 'raw_charge_description' => 'Address Correction', 'charge_category_id' => 1, 'amount' => 20, 'source_type' => 'csv']);
     $base = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'tracking_number' => 'BASE1', 'raw_charge_description' => 'Ground Freight', 'charge_category_id' => 13, 'amount' => 100, 'source_type' => 'csv']);
 
-    // Turn off the charged-back default (neither charge has a push driver); both show by default now.
+    // Turn off the cost-center default (both charges are in no-cost-center categories); both show now.
     Livewire::test(ListCarrierCharges::class)
-        ->filterTable('charged_back', false)
+        ->filterTable('cost_center_categories', false)
         ->assertCanSeeTableRecords([$aux, $base])
         // Opt into auxiliary-only → base transport drops out.
         ->filterTable('auxiliary_only')
@@ -104,29 +104,22 @@ it('auxiliary-only is opt-in and hides base transportation', function () {
         ->assertCanNotSeeTableRecords([$base]);
 });
 
-it('defaults to charged-back lines by driver, including base-transport re-rates but not ordinary fuel', function () {
+it('defaults to the Pace cost-center categories, showing each line individually', function () {
     $this->actingAs(User::factory()->create());
     $carrier = Carrier::factory()->create(['slug' => 'ups', 'name' => 'UPS']);
-    seedChargeCategories();
-    ChargeCategory::forceCreate(['id' => 2, 'name' => 'Fuel Surcharge']);
+    // Audit / Correction Fee carries a Pace cost center; Base Transportation does not.
+    ChargeCategory::forceCreate(['id' => 10, 'name' => 'Audit / Correction Fee', 'pace_cost_center' => '72530']);
+    ChargeCategory::forceCreate(['id' => 13, 'name' => 'Base Transportation']);
     $inv = CarrierInvoice::create(['carrier_id' => $carrier->id, 'invoice_number' => 'INV-1', 'invoice_date' => '2026-05-01', 'filename' => 'x.csv']);
 
-    // push_to_pace drivers are the per-line signal. audit_correction pushes; "normal" (ordinary fuel)
-    // does not — even though both can share the Fuel Surcharge category (which has a Pace cost center).
-    DB::table('charge_drivers')->insert([
-        ['key' => 'audit_correction', 'label' => 'Audit', 'disposition' => 'chargeback', 'push_to_pace' => true, 'pace_activity_code' => '72530', 'is_active' => true, 'sort_order' => 0, 'created_at' => now(), 'updated_at' => now()],
-        ['key' => 'normal', 'label' => 'Normal', 'disposition' => 'informational', 'push_to_pace' => false, 'pace_activity_code' => null, 'is_active' => true, 'sort_order' => 0, 'created_at' => now(), 'updated_at' => now()],
-    ]);
-
-    // A charged-back Base Transportation re-rate (cat 13, audit_correction) proves category isn't the
-    // signal; an ordinary Fuel line (cat 2, normal) proves cost-center category alone isn't either.
-    $charged = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'tracking_number' => 'PUSH1', 'raw_charge_description' => 'Shipping Charge Correction', 'charge_category_id' => 13, 'driver' => 'audit_correction', 'amount' => 12.34, 'source_type' => 'csv']);
-    $ordinaryFuel = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'tracking_number' => 'INFO1', 'raw_charge_description' => 'Fuel Surcharge', 'charge_category_id' => 2, 'driver' => 'normal', 'amount' => 20, 'source_type' => 'csv']);
+    // Two separate lines on the same tracking — the customer breakout shows each individually.
+    $inCostCenter = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'tracking_number' => 'TRK1', 'raw_charge_description' => 'Shipping Charge Correction', 'charge_category_id' => 10, 'amount' => 7.96, 'source_type' => 'pdf']);
+    $noCostCenter = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'tracking_number' => 'TRK1', 'raw_charge_description' => 'Ground Commercial', 'charge_category_id' => 13, 'amount' => 7.24, 'source_type' => 'pdf']);
 
     Livewire::test(ListCarrierCharges::class)
-        ->assertCanSeeTableRecords([$charged])
-        ->assertCanNotSeeTableRecords([$ordinaryFuel])
-        // Toggling it off shows every charge regardless of chargeback classification.
-        ->filterTable('charged_back', false)
-        ->assertCanSeeTableRecords([$charged, $ordinaryFuel]);
+        ->assertCanSeeTableRecords([$inCostCenter])
+        ->assertCanNotSeeTableRecords([$noCostCenter])
+        // Toggling it off shows every category.
+        ->filterTable('cost_center_categories', false)
+        ->assertCanSeeTableRecords([$inCostCenter, $noCostCenter]);
 });

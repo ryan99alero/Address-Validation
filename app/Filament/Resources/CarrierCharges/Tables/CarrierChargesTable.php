@@ -121,22 +121,22 @@ class CarrierChargesTable
                     ->query(fn (Builder $query): Builder => $query->where(fn (Builder $q): Builder => $q
                         ->where('charge_category_id', '!=', CostAnalyticsService::CAT_BASE)
                         ->orWhereNull('charge_category_id'))),
-                // "What we charge the client back." The per-LINE signal is the Chargeback Code (driver),
-                // NOT the category: a category like "Fuel Surcharge" carries a Pace Cost Center but its
-                // ordinary lines (driver "normal") are never charged back — only the fuel on an audit
-                // re-rate (driver "audit_correction") is. Sourced from charge_drivers.push_to_pace
-                // (edited on the Chargeback Codes page), so it's ledger-independent and can't be skewed
-                // by the re-import double-post. Default on.
-                Filter::make('charged_back')
-                    ->label('Charged back to Pace (chargeback code)')
+                // Client breakout: every INDIVIDUAL charge line whose Fee Category maps to a Pace cost
+                // center (Address Correction / Fuel Surcharge / Audit-Correction). Where the Chargeback
+                // Pushes ledger posts one combined correction, All Charges shows the pieces line by line.
+                // Scope with the Job / Customer filters for a per-client breakdown. NOTE: the Fuel
+                // Surcharge category has a cost center, so this also includes ordinary (non-charged-back)
+                // fuel lines; and charged-back lines whose category has no cost center (base-transport /
+                // residential re-rates) are NOT shown here — see the Chargeback Codes driver for those.
+                Filter::make('cost_center_categories')
+                    ->label('Pace cost-center categories (client breakout)')
                     ->toggle()
                     ->default()
-                    ->query(fn (Builder $query): Builder => $query->whereIn('driver', function ($sub): void {
-                        $sub->from('charge_drivers')
-                            ->where('push_to_pace', true)
-                            ->whereNotNull('pace_activity_code')
-                            ->where('pace_activity_code', '!=', '')
-                            ->select('key');
+                    ->query(fn (Builder $query): Builder => $query->whereIn('charge_category_id', function ($sub): void {
+                        $sub->from('charge_categories')
+                            ->whereNotNull('pace_cost_center')
+                            ->where('pace_cost_center', '!=', '')
+                            ->select('id');
                     })),
                 SelectFilter::make('carrier_id')
                     ->label('Carrier')
