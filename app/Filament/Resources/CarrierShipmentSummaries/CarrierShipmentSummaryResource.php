@@ -14,6 +14,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use UnitEnum;
 
 class CarrierShipmentSummaryResource extends Resource
@@ -39,6 +40,13 @@ class CarrierShipmentSummaryResource extends Resource
         return false;
     }
 
+    public static function getEloquentQuery(): Builder
+    {
+        // Eager-load the relationships the table/view columns read (carton is a non-FK hasOne by
+        // tracking number) so the extra fields don't N+1 across the page.
+        return parent::getEloquentQuery()->with(['carrier', 'invoice', 'carton']);
+    }
+
     public static function table(Table $table): Table
     {
         return CarrierShipmentSummariesTable::configure($table);
@@ -58,6 +66,32 @@ class CarrierShipmentSummaryResource extends Resource
                     TextEntry::make('fee_amount')->label('Fees')->money('USD'),
                     TextEntry::make('printed_total')->label('Total')->money('USD')->weight('bold'),
                     TextEntry::make('fee_abbrevs')->label('Fees applied')->placeholder('—'),
+                ]),
+            Section::make('Pace / Invoice')
+                ->columns(4)
+                ->schema([
+                    TextEntry::make('invoice.invoice_number')->label('Invoice #')->placeholder('—'),
+                    TextEntry::make('carton.pace_job_number')->label('Job #')->placeholder('— (not in Pace / not invoiced)'),
+                    TextEntry::make('carton.pace_customer_id')->label('Customer')->placeholder('—'),
+                    TextEntry::make('carton.pace_customer_name')->label('Customer Name')->placeholder('—'),
+                    TextEntry::make('carton.U_reference')->label('Reference 1')->placeholder('—'),
+                    TextEntry::make('carton.U_reference2')->label('Reference 2')->placeholder('—'),
+                    TextEntry::make('carton.U_reference3')->label('Reference 3')->placeholder('—'),
+                    TextEntry::make('is_third_party')->label('Billing')->badge()
+                        ->formatStateUsing(fn ($state): string => $state ? '3rd Party' : 'On Account')
+                        ->color(fn ($state): string => $state ? 'warning' : 'gray'),
+                ]),
+            Section::make('Package / Routing')
+                ->columns(4)
+                ->schema([
+                    TextEntry::make('zip')->label('Zip')->placeholder('—'),
+                    TextEntry::make('zone')->label('Zone')->placeholder('—'),
+                    TextEntry::make('weight')->label('Weight')->placeholder('—'),
+                    TextEntry::make('billed_weight')->label('Billed Wt')->placeholder('—'),
+                    TextEntry::make('section')->label('Section')->badge()->color('gray')->placeholder('—'),
+                    TextEntry::make('source_type')->label('Source')->badge()->color('gray')->placeholder('—'),
+                    TextEntry::make('sender')->label('Sender')->placeholder('—')->columnSpan(2),
+                    TextEntry::make('receiver')->label('Receiver')->placeholder('—')->columnSpan(2),
                 ]),
         ]);
     }

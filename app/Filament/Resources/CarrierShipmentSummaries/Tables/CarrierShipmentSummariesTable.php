@@ -62,14 +62,68 @@ class CarrierShipmentSummariesTable
                     ->weight('bold')
                     ->sortable()
                     ->summarize(Sum::make()->money('USD')->label('Total')),
+                TextColumn::make('invoice.invoice_number')
+                    ->label('Invoice #')
+                    ->placeholder('—')
+                    ->toggleable(),
+                TextColumn::make('carton.pace_job_number')
+                    ->label('Job #')
+                    ->placeholder('— (not invoiced/known in Pace)')
+                    ->toggleable(),
+                TextColumn::make('carton.pace_customer_id')
+                    ->label('Customer')
+                    ->placeholder('—')
+                    ->toggleable(),
+                TextColumn::make('carton.pace_customer_name')
+                    ->label('Customer Name')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('carton.U_reference')
+                    ->label('Reference 1')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('carton.U_reference2')
+                    ->label('Reference 2')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('zip')
+                    ->label('Zip')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('zone')
+                    ->label('Zone')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('billed_weight')
+                    ->label('Billed Wt')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('section')
+                    ->label('Section')
+                    ->badge()
+                    ->color('gray')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('is_third_party')
+                    ->label('Billing')
+                    ->badge()
+                    ->formatStateUsing(fn ($state): string => $state ? '3rd Party' : 'On Account')
+                    ->color(fn ($state): string => $state ? 'warning' : 'gray')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('source_type')
+                    ->label('Source')
+                    ->badge()
+                    ->color('gray')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filtersFormColumns(3)
             ->filters([
                 // Free-text filters — all live in the one filter panel alongside the dropdowns.
                 self::textFilter('invoice_number', 'Invoice #', fn (Builder $q, string $v): Builder => $q->whereHas('invoice', fn (Builder $iq): Builder => $iq->where('invoice_number', 'like', "%{$v}%"))),
                 self::textFilter('tracking', 'Tracking #', fn (Builder $q, string $v): Builder => $q->where('tracking_number', 'like', "%{$v}%")),
-                self::textFilter('job', 'Job #', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'pace_job_number', $v)),
-                self::textFilter('customer', 'Customer ID', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'pace_customer_id', $v)),
+                self::textFilter('job', 'Job # (exact)', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'pace_job_number', $v, exact: true)),
+                self::textFilter('customer', 'Customer ID (exact)', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'pace_customer_id', $v, exact: true)),
                 self::textFilter('reference1', 'Reference 1', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'U_reference', $v)),
                 self::textFilter('reference2', 'Reference 2', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carton_costs', 'U_reference2', $v)),
                 self::textFilter('address', 'Address', fn (Builder $q, string $v): Builder => self::whereTrackingMatch($q, 'carrier_invoice_lines', 'original_address_1', $v)),
@@ -129,10 +183,14 @@ class CarrierShipmentSummariesTable
      * (carton_costs for job/customer, carrier_invoice_lines for the shipped-to address). Correlated
      * EXISTS on the indexed tracking_number, so it only touches matching rows.
      */
-    private static function whereTrackingMatch(Builder $query, string $table, string $column, string $value): Builder
+    private static function whereTrackingMatch(Builder $query, string $table, string $column, string $value, bool $exact = false): Builder
     {
         return $query->whereExists(fn ($sub) => $sub->from($table)
             ->whereColumn("{$table}.tracking_number", 'carrier_shipments.tracking_number')
-            ->where("{$table}.{$column}", 'like', '%'.$value.'%'));
+            ->when(
+                $exact,
+                fn ($q) => $q->where("{$table}.{$column}", $value),
+                fn ($q) => $q->where("{$table}.{$column}", 'like', '%'.$value.'%'),
+            ));
     }
 }

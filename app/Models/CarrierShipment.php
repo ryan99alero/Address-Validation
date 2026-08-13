@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class CarrierShipment extends Model
 {
@@ -61,6 +62,15 @@ class CarrierShipment extends Model
     public function carrier(): BelongsTo
     {
         return $this->belongsTo(Carrier::class);
+    }
+
+    /**
+     * The Pace carton for this shipment (Job / Customer / References), matched by tracking number.
+     * Present only for shipments Pace knows about — see CartonCostSyncService.
+     */
+    public function carton(): HasOne
+    {
+        return $this->hasOne(CartonCost::class, 'tracking_number', 'tracking_number');
     }
 
     public function charges(): HasMany
