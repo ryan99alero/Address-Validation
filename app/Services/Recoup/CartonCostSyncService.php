@@ -3,12 +3,14 @@
 namespace App\Services\Recoup;
 
 use App\Models\CarrierCharge;
+use App\Models\CarrierInvoice;
 use App\Models\CartonCost;
 use App\Models\IntegrationConnection;
 use App\Services\Integrations\PaceApiClient;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -169,6 +171,55 @@ class CartonCostSyncService
     public function syncFromPace(?PaceApiClient $client = null, int $chunk = 100): ?int
     {
         return $this->syncTrackings($this->pendingTrackingNumbers(), $client, $chunk);
+    }
+
+    /**
+     * Stamp the era-correct carton link (carrier_charges.carton_cost_id) for the given invoices'
+     * charges, matched by tracking number. Scoped to specific invoices so it runs right after that
+     * invoice's carton sync — and because only recent invoices reach the sync, the mirror's carton is
+     * this charge's own era (a recycled 1Z's old carton was never kept). Charges whose tracking has no
+     * carton are left null = correctly unattributed. Portable correlated-subquery update so it runs on
+     * MySQL and the sqlite test DB alike; idempotent (safe to re-run after a re-import recreates rows).
+     *
+     * @param  array<int, int>  $invoiceIds
+     * @return int rows stamped
+     */
+    public function stampChargesForInvoices(array $invoiceIds): int
+    {
+        if ($invoiceIds === []) {
+            return 0;
+        }
+
+        return DB::table('carrier_charges')
+            ->whereIn('carrier_invoice_id', $invoiceIds)
+            ->whereExists(fn ($q) => $q->from('carton_costs')
+                ->whereColumn('carton_costs.tracking_number', 'carrier_charges.tracking_number'))
+            ->update([
+                'carton_cost_id' => DB::raw('(select id from carton_costs where carton_costs.tracking_number = carrier_charges.tracking_number limit 1)'),
+            ]);
+    }
+
+    /**
+     * Backfill: stamp carton_cost_id on every charge on a RECENT invoice (same 6-month gate as the
+     * carton sync). Old-invoice charges stay null — they predate the recoup window, and a recycled
+     * tracking would otherwise attach them to the wrong-era carton. Run once after deploy, and as a
+     * sweep, to repair the historic tracking-only attribution.
+     *
+     * @return int rows stamped
+     */
+    public function stampRecentCharges(): int
+    {
+        $invoiceIds = CarrierInvoice::query()
+            ->where('invoice_date', '>=', self::recentInvoiceCutoff())
+            ->pluck('id')
+            ->all();
+
+        $total = 0;
+        foreach (array_chunk($invoiceIds, 500) as $chunk) {
+            $total += $this->stampChargesForInvoices($chunk);
+        }
+
+        return $total;
     }
 
     /**

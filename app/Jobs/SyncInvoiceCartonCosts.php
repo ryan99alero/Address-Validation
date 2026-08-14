@@ -53,5 +53,10 @@ class SyncInvoiceCartonCosts implements ShouldQueue
             ->all();
 
         $sync->syncTrackings($trackingNumbers);
+
+        // Link each of this invoice's charges to the carton just synced (era-correct, by tracking).
+        // Recycled 1Z numbers on OLD invoices never reach here, so their charges stay unattributed
+        // instead of inheriting a newer job.
+        $sync->stampChargesForInvoices($recentInvoiceIds);
     }
 }
