@@ -88,6 +88,15 @@ Schedule::command('correction-cache:reverify')
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/correction-reverify.log'));
 
+// Self-heal re-correction events whose Job/Customer froze null because they were indexed before their
+// invoice's carton synced from Pace (a timing race). Targeted to only the now-resolvable ones, so it's
+// a cheap no-op once caught up.
+Schedule::command('correction-cache:reindex-supersessions --missing-info')
+    ->dailyAt('03:00')
+    ->name('supersession-missing-info-reindex')
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/supersession-reindex.log'));
+
 // Prune Telescope debug entries nightly (keep 48h). telescope_entries is otherwise the largest
 // table and grows unbounded; Telescope stays on for now but doesn't need weeks of history.
 Schedule::command('telescope:prune --hours=48')

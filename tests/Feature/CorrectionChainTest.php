@@ -234,6 +234,32 @@ test('rebuildSearchText indexes tracking, job, invoice and both addresses for th
         ->and($fresh->pace_customer_name)->toBe('Acme Co');
 });
 
+test('reindex --missing-info fills Job/Customer on events indexed before their carton synced', function () {
+    $carrier = Carrier::factory()->create(['slug' => 'ups', 'name' => 'UPS']);
+    $invId = DB::table('carrier_invoices')->insertGetId([
+        'carrier_id' => $carrier->id, 'invoice_number' => 'INVR', 'invoice_date' => '2026-07-11', 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $b = chainGood('100 main st', 'austin', 'tx', '78701');
+    $c = chainGood('100 main st', 'austin', 'tx', '78702');
+    DB::table('carrier_invoice_lines')->insert([
+        'carrier_invoice_id' => $invId, 'corrected_address_id' => $c->id, 'tracking_number' => 'TRKLATE',
+        'original_address_1' => '100 Main St', 'original_city' => 'Austin', 'original_state' => 'TX', 'original_postal' => '78701', 'original_country' => 'US',
+        'ship_date' => '2026-07-06', 'charge_code' => 'ADC', 'charge_amount' => 12, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+
+    // Event indexed BEFORE the carton exists → Job/Customer frozen null (the timing race).
+    $ev = app(CorrectionThreader::class)->recordEvent($b, $c, AddressSupersession::TRIGGER_BACKFILL, AddressSupersession::STATUS_PENDING_REVIEW);
+    expect($ev->fresh()->tracking)->toBe('TRKLATE')
+        ->and($ev->fresh()->pace_job)->toBeNull();
+
+    // The carton syncs later; the targeted nightly sweep re-stamps only the now-resolvable events.
+    CartonCost::create(['tracking_number' => 'TRKLATE', 'pace_job_number' => 'JOBLATE', 'pace_customer_id' => 'CUSTL']);
+    $this->artisan('correction-cache:reindex-supersessions --missing-info')->assertSuccessful();
+
+    expect($ev->fresh()->pace_job)->toBe('JOBLATE')
+        ->and($ev->fresh()->pace_customer_id)->toBe('CUSTL');
+});
+
 // --- Phase 3: ingest-time threading -----------------------------------------
 
 function ingestInvoiceId(): int
