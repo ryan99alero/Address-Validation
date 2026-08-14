@@ -170,7 +170,13 @@ class CartonCostSyncService
      */
     public function syncFromPace(?PaceApiClient $client = null, int $chunk = 100): ?int
     {
-        return $this->syncTrackings($this->pendingTrackingNumbers(), $client, $chunk);
+        $written = $this->syncTrackings($this->pendingTrackingNumbers(), $client, $chunk);
+        if ($written !== null) {
+            // Backfill the era-correct charge→carton links for the freshly-synced cartons.
+            $this->stampRecentCharges();
+        }
+
+        return $written;
     }
 
     /**

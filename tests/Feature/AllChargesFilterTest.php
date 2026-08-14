@@ -43,10 +43,11 @@ function chargeFilterFixture(): array
     $c1 = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv1->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'ship_date' => '2026-05-01', 'tracking_number' => 'TRKAAA', 'raw_charge_description' => 'Address Correction', 'charge_category_id' => 1, 'amount' => 20, 'service' => 'Ground', 'source_type' => 'csv']);
     $c2 = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv2->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-05-01', 'ship_date' => '2026-05-01', 'tracking_number' => 'TRKBBB', 'raw_charge_description' => 'Residential', 'charge_category_id' => 1, 'amount' => 5, 'service' => 'Express', 'source_type' => 'csv']);
 
-    DB::table('carton_costs')->insert([
-        ['tracking_number' => 'TRKAAA', 'pace_job_number' => 'JOB-1', 'pace_customer_id' => 'CUST-9', 'U_reference' => 'PO-777', 'U_reference2' => 'REF2X', 'ship_cost' => 8, 'created_at' => now(), 'updated_at' => now()],
-        ['tracking_number' => 'TRKBBB', 'pace_job_number' => 'JOB-1X', 'pace_customer_id' => 'CUST-9X', 'U_reference' => 'PO-000', 'U_reference2' => 'REF2Y', 'ship_cost' => 8, 'created_at' => now(), 'updated_at' => now()],
-    ]);
+    $cartonA = DB::table('carton_costs')->insertGetId(['tracking_number' => 'TRKAAA', 'pace_job_number' => 'JOB-1', 'pace_customer_id' => 'CUST-9', 'U_reference' => 'PO-777', 'U_reference2' => 'REF2X', 'ship_cost' => 8, 'created_at' => now(), 'updated_at' => now()]);
+    $cartonB = DB::table('carton_costs')->insertGetId(['tracking_number' => 'TRKBBB', 'pace_job_number' => 'JOB-1X', 'pace_customer_id' => 'CUST-9X', 'U_reference' => 'PO-000', 'U_reference2' => 'REF2Y', 'ship_cost' => 8, 'created_at' => now(), 'updated_at' => now()]);
+    // Job/Customer/Reference filters now match via the era-correct carton_cost_id, not by tracking.
+    DB::table('carrier_charges')->where('id', $c1->id)->update(['carton_cost_id' => $cartonA]);
+    DB::table('carrier_charges')->where('id', $c2->id)->update(['carton_cost_id' => $cartonB]);
     DB::table('carrier_invoice_lines')->insert(['carrier_invoice_id' => $inv1->id, 'tracking_number' => 'TRKAAA', 'original_address_1' => '100 Rodeo Dr', 'original_city' => 'Beverly Hills', 'original_state' => 'CA', 'original_postal' => '90210', 'original_country' => 'US', 'ship_date' => '2026-05-01', 'charge_code' => 'ADC', 'charge_amount' => 2, 'created_at' => now(), 'updated_at' => now()]);
     CarrierShipment::forceCreate(['carrier_invoice_id' => $inv1->id, 'carrier_id' => $carrier->id, 'tracking_number' => 'TRKAAA', 'ship_date' => '2026-05-01', 'zip' => '90210', 'source_type' => 'derived']);
     CarrierShipment::forceCreate(['carrier_invoice_id' => $inv2->id, 'carrier_id' => $carrier->id, 'tracking_number' => 'TRKBBB', 'ship_date' => '2026-05-01', 'zip' => '10001', 'source_type' => 'derived']);
@@ -102,6 +103,25 @@ it('auxiliary-only is opt-in and hides base transportation', function () {
         ->filterTable('auxiliary_only')
         ->assertCanSeeTableRecords([$aux])
         ->assertCanNotSeeTableRecords([$base]);
+});
+
+it('the Job filter is era-correct: an unstamped recycled charge does not match its tracking carton', function () {
+    $this->actingAs(User::factory()->create());
+    $carrier = Carrier::factory()->create(['slug' => 'ups', 'name' => 'UPS']);
+    ChargeCategory::forceCreate(['id' => 10, 'name' => 'Audit / Correction Fee', 'pace_cost_center' => '72530']);
+    $inv2026 = CarrierInvoice::create(['carrier_id' => $carrier->id, 'invoice_number' => 'N', 'invoice_date' => '2026-07-11', 'filename' => 'n.csv']);
+    $inv2013 = CarrierInvoice::create(['carrier_id' => $carrier->id, 'invoice_number' => 'O', 'invoice_date' => '2013-12-14', 'filename' => 'o.csv']);
+
+    // Same recycled 1Z: the 2026 charge is stamped to the M254432 carton; the 2013 charge stays null.
+    $recent = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv2026->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2026-07-11', 'tracking_number' => 'TRK1', 'raw_charge_description' => 'Shipping Charge Correction', 'charge_category_id' => 10, 'amount' => 7.96, 'source_type' => 'pdf']);
+    $old = CarrierCharge::forceCreate(['carrier_invoice_id' => $inv2013->id, 'carrier_id' => $carrier->id, 'invoice_date' => '2013-12-14', 'tracking_number' => 'TRK1', 'raw_charge_description' => 'Fuel', 'charge_category_id' => 10, 'amount' => 0.44, 'source_type' => 'csv']);
+    $cartonId = DB::table('carton_costs')->insertGetId(['tracking_number' => 'TRK1', 'pace_job_number' => 'M254432', 'ship_cost' => 5, 'created_at' => now(), 'updated_at' => now()]);
+    DB::table('carrier_charges')->where('id', $recent->id)->update(['carton_cost_id' => $cartonId]);
+
+    Livewire::test(ListCarrierCharges::class)
+        ->filterTable('job', ['value' => 'M254432'])
+        ->assertCanSeeTableRecords([$recent])
+        ->assertCanNotSeeTableRecords([$old]);  // shares the tracking, but null carton_cost_id → excluded
 });
 
 it('defaults to the Pace cost-center categories, showing each line individually', function () {

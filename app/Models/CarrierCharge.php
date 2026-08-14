@@ -71,12 +71,14 @@ class CarrierCharge extends Model
     }
 
     /**
-     * The Pace carton mirror for this line's tracking number (not a FK — matched by tracking),
-     * carrying the shipment's U_reference fields and ship cost.
+     * The Pace carton mirror for this line, via the era-correct carton_cost_id (stamped at sync time
+     * scoped to the invoice) — NOT a bare tracking match. A recycled 1Z's old charge has a null
+     * carton_cost_id, so it no longer resolves a newer job. See the 2026_08_14 migration +
+     * CartonCostSyncService::stampChargesForInvoices.
      */
     public function cartonCost(): BelongsTo
     {
-        return $this->belongsTo(CartonCost::class, 'tracking_number', 'tracking_number');
+        return $this->belongsTo(CartonCost::class, 'carton_cost_id');
     }
 
     public function shipment(): BelongsTo

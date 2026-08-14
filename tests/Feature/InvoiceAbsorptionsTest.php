@@ -54,9 +54,10 @@ test('the global chargeback ledger stays reachable and keeps its CSV export', fu
         ->assertSee('Export CSV');
 });
 
-test('Per-Shipment Costs is hidden from nav, but the Chargeback ledger stays visible', function () {
-    // Per-Shipment Costs is fully absorbed into the invoice tab.
-    expect(CarrierShipmentSummaryResource::shouldRegisterNavigation())->toBeFalse();
+test('All Shipments and the Chargeback ledger are both visible in nav', function () {
+    // Re-surfaced as "All Shipments" (also still an absorbed invoice tab).
+    expect(CarrierShipmentSummaryResource::shouldRegisterNavigation())->toBeTrue()
+        ->and(CarrierShipmentSummaryResource::getNavigationLabel())->toBe('All Shipments');
     // The chargeback (recoup) ledger stays a Carrier Costs menu item — it's a primary view.
     expect(ChargebackPushes::shouldRegisterNavigation())->toBeTrue();
 });

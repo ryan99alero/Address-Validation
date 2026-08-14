@@ -43,4 +43,22 @@ class ShipmentFilters
                 fn ($q) => $q->where("{$joinTable}.{$column}", 'like', '%'.$value.'%'),
             ));
     }
+
+    /**
+     * Era-correct carton match: constrain to rows whose stamped carton_cost_id points at a carton
+     * whose $column matches. Use this on carrier_charges (which carries carton_cost_id) instead of
+     * trackingMatch, so a recycled 1Z's old charge — carton_cost_id null — can't match a newer job.
+     *
+     * @param  string  $fkColumn  fully-qualified FK, e.g. "carrier_charges.carton_cost_id"
+     */
+    public static function cartonMatch(Builder $query, string $fkColumn, string $column, string $value, bool $exact = false): Builder
+    {
+        return $query->whereExists(fn ($sub) => $sub->from('carton_costs')
+            ->whereColumn('carton_costs.id', $fkColumn)
+            ->when(
+                $exact,
+                fn ($q) => $q->where("carton_costs.{$column}", $value),
+                fn ($q) => $q->where("carton_costs.{$column}", 'like', '%'.$value.'%'),
+            ));
+    }
 }

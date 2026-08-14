@@ -47,13 +47,19 @@ function charge(int $invoiceId, int $carrierId, string $tracking, float $amount,
 
 function carton(string $tracking, float $shipCost, ?string $customer = 'CUST1', ?string $job = 'JOB1'): CartonCost
 {
-    return CartonCost::create([
+    $carton = CartonCost::create([
         'tracking_number' => $tracking,
         'ship_cost' => $shipCost,
         'ship_date' => '2026-06-01',
         'pace_job_number' => $job,
         'pace_customer_id' => $customer,
     ]);
+
+    // Mirror the sync: link this tracking's charges to the carton via the era-correct carton_cost_id
+    // (candidates() now joins on that, not bare tracking).
+    DB::table('carrier_charges')->where('tracking_number', $tracking)->whereNull('carton_cost_id')->update(['carton_cost_id' => $carton->id]);
+
+    return $carton;
 }
 
 test('recoup delta is invoiced total minus recorded ship cost', function () {
@@ -275,6 +281,7 @@ test('SyncInvoiceCartonCosts syncs the distinct tracking numbers of the given in
             return $trackings === ['1ZA', '1ZB'];
         })
         ->andReturn(2);
+    $mock->shouldReceive('stampChargesForInvoices')->once()->andReturn(2);
 
     (new SyncInvoiceCartonCosts([$this->invoiceId]))->handle($mock);
 });

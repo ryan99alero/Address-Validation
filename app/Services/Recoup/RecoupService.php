@@ -78,7 +78,9 @@ class RecoupService
     public function candidates(float $minDelta = 0.01): Collection
     {
         return DB::table('carrier_charges as cc')
-            ->join('carton_costs as kc', 'kc.tracking_number', '=', 'cc.tracking_number')
+            // Era-correct join (carton_cost_id), not bare tracking — otherwise a recycled 1Z's old
+            // charges get SUMmed against the current carton and inflate the recoup delta (over-bill).
+            ->join('carton_costs as kc', 'kc.id', '=', 'cc.carton_cost_id')
             ->whereNotNull('cc.tracking_number')
             ->whereNull('kc.recouped_at')
             // A carton with no recorded cost (0, e.g. pre-Process-Shipper shipments) has no valid
