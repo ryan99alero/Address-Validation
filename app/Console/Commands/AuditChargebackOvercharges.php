@@ -26,7 +26,7 @@ class AuditChargebackOvercharges extends Command
     {
         $path = $this->option('path') ?: storage_path('app/chargeback-overcharge-audit.csv');
         $fh = fopen($path, 'w');
-        fputcsv($fh, ['flag', 'status', 'pace_job', 'correct_job', 'pace_customer_id', 'pace_customer_name', 'pace_jobcost_id', 'tracking_number', 'activity_code', 'driver', 'amount', 'pushed_at', 'carrier_charge_id', 'backing_invoice_date']);
+        fputcsv($fh, ['flag', 'status', 'pace_job', 'correct_job', 'pace_customer_id', 'pace_customer_name', 'pace_jobcost_id', 'tracking_number', 'activity_code', 'activity_label', 'driver', 'amount', 'pushed_at', 'carrier_charge_id', 'backing_invoice_date', 'notes']);
 
         $rows = DB::table('chargeback_pushes')
             ->whereNotNull('pace_jobcost_id')->where('pace_jobcost_id', '!=', '')
@@ -70,7 +70,14 @@ class AuditChargebackOvercharges extends Command
                 $suspectAmount += (float) $r->amount;
             }
 
-            fputcsv($fh, [$flag, $r->status, $r->pace_job, $correctJob, $r->pace_customer_id, $r->pace_customer_name, $r->pace_jobcost_id, $r->tracking_number, $r->activity_code, $r->driver, $r->amount, $r->pushed_at, $r->carrier_charge_id, $backingEra]);
+            $activityLabel = match ((string) $r->activity_code) {
+                '72510' => 'Address Correction',
+                '72520' => 'Fuel Surcharge',
+                '72530' => 'Audit / Weight Correction',
+                default => (string) $r->activity_code,
+            };
+
+            fputcsv($fh, [$flag, $r->status, $r->pace_job, $correctJob, $r->pace_customer_id, $r->pace_customer_name, $r->pace_jobcost_id, $r->tracking_number, $r->activity_code, $activityLabel, $r->driver, $r->amount, $r->pushed_at, $r->carrier_charge_id, $backingEra, $r->notes]);
         }
         fclose($fh);
 
