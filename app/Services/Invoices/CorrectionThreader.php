@@ -170,6 +170,25 @@ class CorrectionThreader
      */
     public function recordEvent(?CorrectedAddress $from, ?CorrectedAddress $to, string $trigger, string $status, array $evidence = []): AddressSupersession
     {
+        // A correction already in the reviewer's queue (pending) or one they DISMISSED must not be
+        // re-raised on the next ingest — otherwise a dismissed A→B correction reappears as a fresh
+        // pending event every time it recurs. Reuse the existing SAME-DIRECTION event instead of
+        // piling up duplicates. Matched by direction (not the unordered pair) so the mirror B→A stays
+        // a distinct event — the reversal-loop detection needs both directions present. Only for the
+        // reviewable pending_review status, with both endpoints known; an APPLIED event is deliberately
+        // NOT a suppressor (a loop recurring after a supersede is worth re-surfacing).
+        if ($status === AddressSupersession::STATUS_PENDING_REVIEW && $from !== null && $to !== null) {
+            $existing = AddressSupersession::query()
+                ->whereIn('status', [AddressSupersession::STATUS_PENDING_REVIEW, AddressSupersession::STATUS_DISMISSED])
+                ->where('old_corrected_address_id', $from->id)
+                ->where('new_corrected_address_id', $to->id)
+                ->latest('id')
+                ->first();
+            if ($existing !== null) {
+                return $existing;
+            }
+        }
+
         $event = AddressSupersession::create([
             'old_corrected_address_id' => $from?->id,
             'new_corrected_address_id' => $to?->id,

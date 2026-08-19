@@ -260,6 +260,26 @@ test('reindex --missing-info fills Job/Customer on events indexed before their c
         ->and($ev->fresh()->pace_customer_id)->toBe('CUSTL');
 });
 
+test('a dismissed re-correction is not re-raised when the same correction recurs at ingest', function () {
+    $a = chainGood('100 main st', 'austin', 'tx', '78701');
+    $b = chainGood('100 main st', 'austin', 'tx', '78702');
+    $threader = app(CorrectionThreader::class);
+
+    // First detection → a pending-review event; the reviewer dismisses it.
+    $first = $threader->recordEvent($a, $b, AddressSupersession::TRIGGER_RECORRECTION, AddressSupersession::STATUS_PENDING_REVIEW);
+    $first->update(['status' => AddressSupersession::STATUS_DISMISSED]);
+
+    // The SAME correction (same direction) recurs on a later ingest — reuse the dismissed event, don't
+    // re-queue it. The mirror B->A is a distinct correction and legitimately its own event.
+    $again = $threader->recordEvent($a, $b, AddressSupersession::TRIGGER_RECORRECTION, AddressSupersession::STATUS_PENDING_REVIEW);
+    $reverse = $threader->recordEvent($b, $a, AddressSupersession::TRIGGER_RECORRECTION, AddressSupersession::STATUS_PENDING_REVIEW);
+
+    expect($again->id)->toBe($first->id)                                        // reused the dismissed A->B
+        ->and($again->fresh()->status)->toBe(AddressSupersession::STATUS_DISMISSED) // and it stays dismissed
+        ->and($reverse->id)->not->toBe($first->id)                             // mirror B->A is its own event
+        ->and(AddressSupersession::where('status', AddressSupersession::STATUS_PENDING_REVIEW)->where('old_corrected_address_id', $a->id)->count())->toBe(0);
+});
+
 // --- Phase 3: ingest-time threading -----------------------------------------
 
 function ingestInvoiceId(): int
