@@ -229,6 +229,12 @@ class ProcessPaceAddressCorrection implements ShouldQueue
      */
     protected function cleanse(AddressValidationService $validation, array $source, array $carrierSlugs): array
     {
+        // Real-time Connect corrections ALWAYS re-validate against the carrier API — never short-circuit
+        // on a cached answer. The address may have changed (e.g. a ZIP update) since it was cached, and
+        // a cache hit carries no residential classification, so serving it would push a null residential
+        // and wipe Pace's flag. The API result still refreshes the cache for the batch/invoice paths.
+        $validation->useLocalCache(false);
+
         $input = [
             'input_address_1' => $source['address1'] ?? null,
             'input_address_2' => $source['address2'] ?? null,
@@ -297,6 +303,12 @@ class ProcessPaceAddressCorrection implements ShouldQueue
         foreach ($contactObject->fieldMappings()->where('sync_on_push', true)->get() as $mapping) {
             $localKey = $mapping->local_field;
             if (empty($localKey) || ! array_key_exists($localKey, $corrected)) {
+                continue;
+            }
+
+            // Never push a null (unknown) value over Pace's existing one — e.g. a residential flag we
+            // couldn't classify must not wipe Pace's. Safety net alongside the always-API cleanse.
+            if ($corrected[$localKey] === null) {
                 continue;
             }
 

@@ -51,6 +51,8 @@ function paceConnectionWithZipPush(bool $dryRun = false): IntegrationConnection
 function validationReturningZipPlus4(): AddressValidationService
 {
     $mock = Mockery::mock(AddressValidationService::class);
+    // Connect corrections now force a live API call (no cache short-circuit).
+    $mock->shouldReceive('useLocalCache')->andReturnSelf();
     $mock->shouldReceive('validateAddress')->andReturnUsing(function (Address $a, $carrier = null) {
         $a->output_address_1 = $a->input_address_1;
         $a->output_city = $a->input_city;
