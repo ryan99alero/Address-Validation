@@ -243,7 +243,7 @@ class SmartyCarrier extends AbstractCarrier
         }
 
         if ($address->input_state) {
-            $data['state'] = $address->input_state;
+            $data['state'] = $this->normalizeStateCode($address->input_state);
         }
 
         if ($address->input_postal) {

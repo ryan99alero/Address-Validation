@@ -28,6 +28,39 @@ abstract class AbstractCarrier implements CarrierInterface
     }
 
     /**
+     * Normalize a US state to its 2-letter USPS code for carrier requests. FedEx 400s on a full name
+     * ("Kansas"); UPS tolerates it — normalizing everywhere keeps single AND batch validation consistent
+     * no matter how the state was typed (Kansas / KANSAS / ks / KS). A 2-letter or unrecognized value
+     * passes through unchanged.
+     */
+    protected function normalizeStateCode(?string $state): string
+    {
+        $state = trim((string) $state);
+        if (strlen($state) === 2) {
+            return strtoupper($state);
+        }
+
+        return self::STATE_CODES[strtoupper($state)] ?? $state;
+    }
+
+    /** USPS full state/territory name → 2-letter code. */
+    protected const STATE_CODES = [
+        'ALABAMA' => 'AL', 'ALASKA' => 'AK', 'ARIZONA' => 'AZ', 'ARKANSAS' => 'AR', 'CALIFORNIA' => 'CA',
+        'COLORADO' => 'CO', 'CONNECTICUT' => 'CT', 'DELAWARE' => 'DE', 'DISTRICT OF COLUMBIA' => 'DC',
+        'FLORIDA' => 'FL', 'GEORGIA' => 'GA', 'HAWAII' => 'HI', 'IDAHO' => 'ID', 'ILLINOIS' => 'IL',
+        'INDIANA' => 'IN', 'IOWA' => 'IA', 'KANSAS' => 'KS', 'KENTUCKY' => 'KY', 'LOUISIANA' => 'LA',
+        'MAINE' => 'ME', 'MARYLAND' => 'MD', 'MASSACHUSETTS' => 'MA', 'MICHIGAN' => 'MI', 'MINNESOTA' => 'MN',
+        'MISSISSIPPI' => 'MS', 'MISSOURI' => 'MO', 'MONTANA' => 'MT', 'NEBRASKA' => 'NE', 'NEVADA' => 'NV',
+        'NEW HAMPSHIRE' => 'NH', 'NEW JERSEY' => 'NJ', 'NEW MEXICO' => 'NM', 'NEW YORK' => 'NY',
+        'NORTH CAROLINA' => 'NC', 'NORTH DAKOTA' => 'ND', 'OHIO' => 'OH', 'OKLAHOMA' => 'OK', 'OREGON' => 'OR',
+        'PENNSYLVANIA' => 'PA', 'RHODE ISLAND' => 'RI', 'SOUTH CAROLINA' => 'SC', 'SOUTH DAKOTA' => 'SD',
+        'TENNESSEE' => 'TN', 'TEXAS' => 'TX', 'UTAH' => 'UT', 'VERMONT' => 'VT', 'VIRGINIA' => 'VA',
+        'WASHINGTON' => 'WA', 'WEST VIRGINIA' => 'WV', 'WISCONSIN' => 'WI', 'WYOMING' => 'WY',
+        'PUERTO RICO' => 'PR', 'GUAM' => 'GU', 'VIRGIN ISLANDS' => 'VI', 'AMERICAN SAMOA' => 'AS',
+        'NORTHERN MARIANA ISLANDS' => 'MP',
+    ];
+
+    /**
      * Get the chunk size for batch processing.
      */
     protected function getChunkSize(): int

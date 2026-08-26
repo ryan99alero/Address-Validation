@@ -122,7 +122,7 @@ class UpsCarrier extends AbstractCarrier
         return [
             'AddressLine' => $addressLines,
             'PoliticalDivision2' => $address->input_city,
-            'PoliticalDivision1' => $address->input_state,
+            'PoliticalDivision1' => $this->normalizeStateCode($address->input_state),
             'PostcodePrimaryLow' => $address->input_postal,
             'CountryCode' => $address->input_country ?? 'US',
         ];

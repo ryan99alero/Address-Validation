@@ -3,6 +3,7 @@
 use App\Models\Address;
 use App\Models\Carrier;
 use App\Services\Carriers\FedExCarrier;
+use App\Services\Carriers\UpsCarrier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -28,4 +29,14 @@ it('leaves a 2-letter code (or an unrecognized value) as-is', function () {
     expect(fedexRequestState('KS'))->toBe('KS')
         ->and(fedexRequestState('ks'))->toBe('KS')
         ->and(fedexRequestState('Freedonia'))->toBe('Freedonia');
+});
+
+it('normalizes state for UPS too (shared in AbstractCarrier — covers batch + single)', function () {
+    $ups = Carrier::where('slug', 'ups')->first() ?? Carrier::factory()->create(['slug' => 'ups', 'name' => 'UPS']);
+    $svc = (new UpsCarrier)->setCarrier($ups);
+    $a = (new Address)->forceFill(['input_address_1' => '1 Main St', 'input_city' => 'Wellington', 'input_state' => 'KANSAS', 'input_postal' => '67152', 'input_country' => 'US']);
+    $m = new ReflectionMethod($svc, 'formatAddressForRequest');
+    $m->setAccessible(true);
+
+    expect($m->invoke($svc, $a)['PoliticalDivision1'])->toBe('KS');
 });
