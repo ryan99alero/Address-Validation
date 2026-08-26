@@ -173,6 +173,17 @@ class FedExCarrier extends AbstractCarrier
                     'addressesToValidate' => $addressesToValidate,
                 ]);
 
+            // TEMP diagnostic (single-address only — GUI / Pace Connect, not bulk imports): capture the
+            // raw FedEx exchange so an intermittent "no result" can be traced to a status/body/empty set.
+            if (count($addresses) <= 2) {
+                Log::info('FedEx address resolve [diag]', [
+                    'request' => $addressesToValidate,
+                    'http_status' => $response->status(),
+                    'resolved_count' => count($response->json('output.resolvedAddresses') ?? []),
+                    'body' => mb_substr((string) $response->body(), 0, 4000),
+                ]);
+            }
+
             if (! $response->successful()) {
                 $this->markError('API request failed: '.$response->status());
 
