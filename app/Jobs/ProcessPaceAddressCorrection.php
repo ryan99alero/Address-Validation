@@ -6,6 +6,7 @@ use App\Models\Address;
 use App\Models\Carrier;
 use App\Models\IntegrationConnection;
 use App\Models\IntegrationObject;
+use App\Models\ShipViaCode;
 use App\Models\SystemLog;
 use App\Services\AddressValidationService;
 use App\Services\Integrations\PaceApiClient;
@@ -100,6 +101,14 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                 return;
             }
 
+            // Residential is authoritative from the live FedEx validation (always re-checked). Treat the
+            // shipment as residential if EITHER FedEx says so OR Pace already had the flag set — and when
+            // it is, always FLAG residential on the push.
+            $residentialFinal = $this->toBool($this->payload['residential'] ?? null) || ($corrected['residential'] === true);
+            if ($residentialFinal) {
+                $corrected['residential'] = true;
+            }
+
             // Diff the validated address against the payload's current values and push
             // ONLY the changed fields (config-driven by the Contact's push-enabled
             // mappings). Pace updateContact merges — verified — so we send just
@@ -107,13 +116,20 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             $contactObject = $connection->objects()->where('object_name', 'Contact')->first();
             [$changes, $diff] = $this->buildContactChanges($contactObject, $corrected, $this->payload);
 
-            // JobShipment guard: only correct a shipment that is still Planned
-            // (JobShipment/@planned == true). One that has moved on — e.g. created already
-            // Shipped for an LTL — must not be touched. Checked only when there's actually
-            // something to push, so the common no-change path stays read-free. Anything other
-            // than an explicit true (including an unreadable shipment) blocks the push.
-            $shipmentPlanned = empty($changes) ? null : $this->shipmentIsPlanned($client, $this->payload, $shipmentId);
-            $plannedBlocked = ! empty($changes) && $shipmentPlanned !== true;
+            // Residential FedEx Ground → Home Delivery swap. Reuses the BestWay matcher to land the
+            // Home Delivery ship-via that keeps the SAME plant, payer, and account (plant lives on our
+            // ship_via_codes, not Pace). Null when not residential, not a FedEx Ground ship-via, or no
+            // Home Delivery equivalent exists (e.g. UPS Ground — residential is a surcharge there, not a
+            // separate service).
+            $homeSwap = $residentialFinal ? $this->resolveHomeDeliverySwap((string) ($this->payload['ship_via'] ?? '')) : null;
+
+            // JobShipment guard: only touch a shipment that is still Planned (JobShipment/@planned ==
+            // true). One that has moved on must not be corrected OR re-routed. Checked when there's work
+            // to do — an address/residential change OR a ship-via swap. Anything but an explicit true
+            // (including an unreadable shipment) blocks the write.
+            $hasWork = ! empty($changes) || $homeSwap !== null;
+            $shipmentPlanned = $hasWork ? $this->shipmentIsPlanned($client, $this->payload, $shipmentId) : null;
+            $plannedBlocked = $hasWork && $shipmentPlanned !== true;
 
             // Shadow / dry-run mode: validate and log what WOULD change, but do not
             // write anything back to Pace.
@@ -121,21 +137,30 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             // Explicit "we pushed a correction back to Pace" flag — recorded on the audit entry so
             // pushes are queryable directly (metadata->pushed) instead of string-matching the summary.
             $pushed = ! empty($changes) && ! $plannedBlocked && ! $dryRun;
+            $swapped = $homeSwap !== null && ! $plannedBlocked && ! $dryRun;
             $addressCorrectedFlagged = false;
+
             if ($pushed) {
                 $client->updateContact(['id' => (int) $contactId] + $changes);
+            }
 
-                // Flag the shipment so Pace/reports can see the address was auto-corrected. This is
-                // an UPDATE (partial merge, like the Contact write), so it does not re-fire the
-                // punch-out — that is gated on record creation, not updates. Best-effort: a failed
-                // flag must not fail the correction that already landed, so it never rethrows.
-                if (! empty($shipmentId)) {
-                    try {
-                        $client->updateJobShipment(['id' => (int) $shipmentId, 'u_addressCorrected' => true]);
-                        $addressCorrectedFlagged = true;
-                    } catch (Throwable) {
-                        // Left false; surfaced in the audit metadata below.
-                    }
+            // One JobShipment write (partial merge) for the corrected flag + the Ground→Home Delivery
+            // ship-via swap. An UPDATE, so it never re-fires the punch-out (gated on record creation).
+            // Best-effort: a failed shipment write must not fail a correction that already landed.
+            if (($pushed || $swapped) && ! empty($shipmentId)) {
+                $shipmentUpdate = ['id' => (int) $shipmentId];
+                if ($pushed) {
+                    $shipmentUpdate['u_addressCorrected'] = true;
+                }
+                if ($swapped) {
+                    $shipmentUpdate['shipVia'] = (int) $homeSwap->code;
+                }
+                try {
+                    $client->updateJobShipment($shipmentUpdate);
+                    $addressCorrectedFlagged = $pushed;
+                } catch (Throwable) {
+                    $swapped = false;
+                    $addressCorrectedFlagged = false;
                 }
             }
 
@@ -171,9 +196,11 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                 'loggable_id' => $connection->id,
                 'status' => $plannedBlocked ? 'skipped' : 'success',
                 'summary' => match (true) {
-                    empty($changes) => "Pace address validated (no changes) for Contact {$contactId}",
-                    $plannedBlocked => "Pace address corrected but NOT pushed — JobShipment {$shipmentId} is not Planned (Contact {$contactId})",
-                    $dryRun => "DRY RUN — would correct Contact {$contactId} (nothing pushed)",
+                    $plannedBlocked => "Pace correction NOT pushed — JobShipment {$shipmentId} is not Planned (Contact {$contactId})",
+                    $dryRun && $hasWork => "DRY RUN — would correct/re-route Contact {$contactId} (nothing pushed)",
+                    empty($changes) && ! $swapped => "Pace address validated (no changes) for Contact {$contactId}",
+                    $swapped && $pushed => "Pace address corrected & ship-via swapped to Home Delivery for Contact {$contactId}",
+                    $swapped => "Residential — ship-via swapped to Home Delivery for Contact {$contactId}",
                     default => "Pace address corrected & pushed for Contact {$contactId}",
                 },
                 'completed_at' => now(),
@@ -189,6 +216,11 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                     'shipment_planned' => $shipmentPlanned,
                     'planned_blocked' => $plannedBlocked,
                     'address_corrected_flagged' => $addressCorrectedFlagged,
+                    'residential_final' => $residentialFinal,
+                    'ship_via_in' => $this->payload['ship_via'] ?? null,
+                    'ship_via_swap' => $homeSwap?->code,
+                    'ship_via_swap_service' => $homeSwap?->service_name,
+                    'swapped' => $swapped,
                     'changed_fields' => array_keys($changes),
                     'changes' => $diff,
                     'original' => $originalSnapshot,
@@ -281,6 +313,29 @@ class ProcessPaceAddressCorrection implements ShouldQueue
         }
 
         return $this->normalizeFromInput($input) + ['validated' => false];
+    }
+
+    /**
+     * The FedEx Home Delivery ship-via to swap a residential FedEx Ground shipment to — same plant,
+     * payer, and account as the original (reuses the BestWay matcher; plant lives on our ship_via_codes,
+     * resolved from the code). Null when the incoming ship-via isn't a resolvable FedEx Ground, or there
+     * is no Home Delivery equivalent (e.g. UPS Ground — its residential handling is a surcharge, not a
+     * separate service).
+     */
+    protected function resolveHomeDeliverySwap(string $shipViaCode): ?ShipViaCode
+    {
+        if (trim($shipViaCode) === '') {
+            return null;
+        }
+
+        $original = ShipViaCode::lookup($shipViaCode);
+        if ($original === null || $original->carrier_slug !== 'fedex' || $original->service_type !== 'FEDEX_GROUND') {
+            return null;
+        }
+
+        $home = ShipViaCode::findMatchingForBestWay('GROUND_HOME_DELIVERY', $original->plant_id, $original);
+
+        return ($home !== null && $home->code !== $original->code) ? $home : null;
     }
 
     /**
