@@ -72,8 +72,10 @@ class AuditChargebackOvercharges extends Command
 
             $activityLabel = match ((string) $r->activity_code) {
                 '72510' => 'Address Correction',
-                '72520' => 'Fuel Surcharge',
+                '72520' => 'Fuel Surcharge (Address)',
                 '72530' => 'Audit / Weight Correction',
+                '72540' => 'Residential Reclassification',
+                '72550' => 'Fuel Surcharge (Audit)',
                 default => (string) $r->activity_code,
             };
 

@@ -13,10 +13,23 @@ use Illuminate\Support\Facades\DB;
  * each one's Pace activity code. A charge qualifies when its Chargeback Code (driver) is flagged to
  * push AND has a cost center, its Fee Category is set, it has a tracking, a positive amount, its
  * invoice is recent + reconciled, and it isn't already in the ledger. activityCode = the category's
- * cost center, falling back to the driver's.
+ * cost center, falling back to the driver's — except fuel, which splits by what it rode in on (see
+ * FUEL_CATEGORY_NAME below).
  */
 class ChargebackEligibility
 {
+    /**
+     * Name of the Fee Category that holds fuel surcharges. Fuel is special: a fuel charge inherits the
+     * driver of the correction it rode in on — attributeCorrectionSurcharges() stamps an audit-only
+     * tracking's fuel with driver=audit_correction, an address-only tracking's with
+     * address_correction. So the SAME fuel category can book to different Pace cost centers by driver,
+     * a split one category cost center can't express. The per-driver override is editable in the UI at
+     * Chargeback Codes (charge_drivers.fuel_cost_center): when a fuel charge's driver has a
+     * fuel_cost_center it wins; otherwise the fuel category's own cost center (its default) applies.
+     * Blank on every driver => all fuel books to that one default.
+     */
+    private const FUEL_CATEGORY_NAME = 'Fuel Surcharge';
+
     /**
      * @param  array<int, int>  $invoiceIds
      * @return Collection<int, object{carrier_charge_id:int, carrier_id:int, carrier_invoice_id:int, invoice_number:?string, invoice_date:?string, tracking_number:string, charge_category_id:int, driver:string, amount:float, ship_date:?string, activity_code:string}>
@@ -65,6 +78,8 @@ class ChargebackEligibility
      */
     private function baseQuery(): Builder
     {
+        $fuelCategoryId = (int) (DB::table('charge_categories')->where('name', self::FUEL_CATEGORY_NAME)->value('id') ?? 0);
+
         return DB::table('carrier_charges as cc')
             ->join('charge_drivers as d', 'd.key', '=', 'cc.driver')
             ->join('charge_categories as c', 'c.id', '=', 'cc.charge_category_id')
@@ -79,8 +94,12 @@ class ChargebackEligibility
                 cc.id AS carrier_charge_id, cc.carrier_id, cc.carrier_invoice_id,
                 i.invoice_number, i.invoice_date, cc.tracking_number, cc.charge_category_id,
                 cc.driver, cc.amount, cc.ship_date,
-                COALESCE(NULLIF(c.pace_cost_center, ?), d.pace_activity_code) AS activity_code
-            ', ['']);
+                CASE
+                    WHEN cc.charge_category_id = ? AND d.fuel_cost_center IS NOT NULL AND d.fuel_cost_center <> ?
+                        THEN d.fuel_cost_center
+                    ELSE COALESCE(NULLIF(c.pace_cost_center, ?), d.pace_activity_code)
+                END AS activity_code
+            ', [$fuelCategoryId, '', '']);
     }
 
     private function castRow(object $r): object

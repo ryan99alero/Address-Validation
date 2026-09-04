@@ -44,6 +44,11 @@ class ChargeDriverForm
                             ->label('Pace Activity Code')
                             ->maxLength(255)
                             ->helperText('The Pace GL / activity code to post this to.'),
+                        TextInput::make('fuel_cost_center')
+                            ->label('Fuel Surcharge → cost center')
+                            ->maxLength(16)
+                            ->placeholder('Uses the Fuel Surcharge category default')
+                            ->helperText('Where a FUEL SURCHARGE books when it rode in on this correction (carriers add fuel on top of an audit / address / residential fee). Leave blank to use the Fuel Surcharge category default (e.g. 72520). Set a value to split it out — e.g. audit fuel → 72550. Blank on every code = all fuel lands in the one default.'),
                         Toggle::make('push_to_pace')
                             ->label('Push to Pace')
                             ->helperText('Include this driver when the Pace chargeback integration runs.'),

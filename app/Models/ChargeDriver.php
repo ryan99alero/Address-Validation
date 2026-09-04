@@ -19,6 +19,7 @@ class ChargeDriver extends Model
         'disposition',
         'color',
         'pace_activity_code',
+        'fuel_cost_center',
         'push_to_pace',
         'sort_order',
         'is_active',

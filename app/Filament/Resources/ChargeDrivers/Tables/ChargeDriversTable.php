@@ -33,6 +33,12 @@ class ChargeDriversTable
                     ->label('Pace Code')
                     ->fontFamily('mono')
                     ->placeholder('—'),
+                TextColumn::make('fuel_cost_center')
+                    ->label('Fuel → Code')
+                    ->fontFamily('mono')
+                    ->placeholder('category default')
+                    ->tooltip('Where a fuel surcharge riding on this correction books. Blank = the Fuel Surcharge category default.')
+                    ->toggleable(),
                 IconColumn::make('push_to_pace')->label('Push')->boolean(),
                 IconColumn::make('is_active')->label('Active')->boolean(),
             ])
