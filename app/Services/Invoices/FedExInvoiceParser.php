@@ -84,9 +84,10 @@ class FedExInvoiceParser
         $shipments = [];
         $reconciled = 0;
         $skipped = 0;
+        $product = $this->detectProduct($text);
 
         foreach ($blocks as $block) {
-            $shipment = $this->parseBlock($block, $source);
+            $shipment = $this->parseBlock($block, $source, $product);
             if ($shipment === null) {
                 $skipped++;
 
@@ -189,8 +190,9 @@ class FedExInvoiceParser
         }
 
         $shipments = [];
+        $product = $this->detectProduct($text);
         foreach ($blocks as $block) {
-            $shipment = $this->parseBlock($block, $source);
+            $shipment = $this->parseBlock($block, $source, $product);
             if ($shipment !== null) {
                 $shipments[] = $shipment;
             }
@@ -202,7 +204,7 @@ class FedExInvoiceParser
     /**
      * @return array{tracking_id: ?string, type: string, service_type: ?string, recipient: array<int, string>, charge_ledger: array<int, array{description: string, amount: float}>, total_charge: float}|null
      */
-    protected function parseBlock(string $block, string $source): ?array
+    protected function parseBlock(string $block, string $source, ?string $product = null): ?array
     {
         if (preg_match('/Total Charge\s+USD\s+\$([0-9,]+\.\d{2})/', $block, $m)) {
             $type = 'Ground';
@@ -235,7 +237,7 @@ class FedExInvoiceParser
                     'tracking_id' => $this->findTracking($block),
                     'type' => $type,
                     'ship_date' => preg_match('/^\s*([A-Z][a-z]{2} \d{1,2}, \d{4})/', $block, $d) ? $d[1] : null,
-                    'service_type' => $this->extractServiceType($block, $type),
+                    'service_type' => $this->extractServiceType($block, $type, $product),
                     'recipient' => $this->extractRecipient($block),
                     'charge_ledger' => $ledger,
                     'total_charge' => $total,
@@ -458,13 +460,65 @@ class FedExInvoiceParser
         ));
     }
 
-    protected function extractServiceType(string $block, string $type): ?string
+    /**
+     * Resolve a shipment's real FedEx service from its PDF block. The two FedEx invoice families
+     * print the per-shipment "Service Type" column (the line right after the tracking number)
+     * completely differently:
+     *
+     *  - EXPRESS invoices put the real service there, e.g. "FedEx 2Day". (Digit-initial names —
+     *    2Day / 2Day AM / 1Day Freight — used to fail a letter-only pattern and fall through to
+     *    the payment term, so every 2Day shipment recorded NULL or "Ppd, Domestic".)
+     *  - GROUND invoices put the PAYMENT TERM there ("Ppd, Domestic" / "Collect, Domestic" /
+     *    "Bill 3rd Party, Dom") and carry the product only as a section header ("Total FedEx
+     *    Ground"). Home Delivery still self-identifies as "Home Delivery Ppd".
+     *
+     * $product is the invoice family the caller detected (see detectProduct); it lets a payment-term
+     * Service Type resolve to "FedEx Ground" only inside a Ground invoice, never on an Express one.
+     */
+    protected function extractServiceType(string $block, string $type, ?string $product = null): ?string
     {
-        if (preg_match('/\b(FedEx (?:International |Priority |Standard |First |Home |Ground )?[A-Z][A-Za-z ]+?)(?=\n)/', $block, $m)) {
+        $serviceCol = null;
+        if (preg_match('/(?<!\d)\d{12,22}(?!\d)\s*\n\s*([^\n]+)/', $block, $m)) {
+            $serviceCol = trim($m[1]);
+        }
+
+        // Express: the Service Type column names the service directly ("FedEx 2Day").
+        if ($serviceCol !== null && stripos($serviceCol, 'FedEx ') === 0) {
+            return $serviceCol;
+        }
+        // Ground Home Delivery self-identifies even though the rest of the line is a payment term.
+        if ($serviceCol !== null && stripos($serviceCol, 'Home Delivery') !== false) {
+            return 'FedEx Home Delivery';
+        }
+        // Ground: a payment-term Service Type on a Ground invoice IS a FedEx Ground shipment.
+        if ($product === 'ground' && $serviceCol !== null
+            && preg_match('/^(Ppd|Collect|Bill 3rd Party|Bill Recipient)\b/i', $serviceCol)) {
+            return 'FedEx Ground';
+        }
+
+        // Fallbacks: any "FedEx <service>" token anywhere (digit-safe), then the raw payment term so
+        // a serviceless billing block still records something rather than silently dropping to NULL.
+        if (preg_match('/\b(FedEx (?:International |Priority |Standard |First |Home |Ground |Express )?[A-Za-z0-9][A-Za-z0-9 .\-]*?)(?=\n)/', $block, $m)) {
             return trim($m[1]);
         }
         if (preg_match('/\b((?:Ppd|Bill 3rd Party|Bill Recipient|Collect)[A-Za-z ,]*)/', $block, $m)) {
             return trim($m[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * The invoice's FedEx product family, read from its section markers. Ground invoices bury the
+     * real service in a section header ("Total FedEx Ground" / "FedEx Ground Services") while the
+     * per-shipment Service Type column shows only the payment term — extractServiceType needs this
+     * to resolve those to "FedEx Ground". Express invoices name the service per shipment, so a null
+     * here is fine for them.
+     */
+    protected function detectProduct(string $text): ?string
+    {
+        if (preg_match('/Total FedEx Ground|FedEx Ground Services|FedEx Home Delivery/i', $text)) {
+            return 'ground';
         }
 
         return null;
