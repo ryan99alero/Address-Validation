@@ -99,12 +99,11 @@ class ValidateAddress extends Page implements HasSchemas
                             ->maxLength(20),
                         Select::make('input_country')
                             ->label('Country')
-                            ->options([
-                                'US' => 'United States',
-                                'CA' => 'Canada',
-                            ])
+                            ->options(config('countries'))
+                            ->searchable()
                             ->default('US')
-                            ->required(),
+                            ->required()
+                            ->helperText('Type to search. The stored value is the 2-letter ISO code the carriers expect. Validation coverage is carrier-dependent: UPS and Smarty validate US only; FedEx covers the most countries.'),
                     ]),
 
                 Section::make('Validation Options')
