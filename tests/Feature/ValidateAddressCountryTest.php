@@ -30,3 +30,12 @@ test('the validate-address page renders with the searchable country field', func
         ->assertOk()
         ->assertSee('Country');
 });
+
+test('State/Province is required only for US and Canada, optional elsewhere', function () {
+    expect(ValidateAddress::isStateRequired('US'))->toBeTrue()
+        ->and(ValidateAddress::isStateRequired('CA'))->toBeTrue()
+        ->and(ValidateAddress::isStateRequired('DE'))->toBeFalse()
+        ->and(ValidateAddress::isStateRequired('GB'))->toBeFalse()
+        ->and(ValidateAddress::isStateRequired('MX'))->toBeFalse()
+        ->and(ValidateAddress::isStateRequired(null))->toBeFalse();
+});

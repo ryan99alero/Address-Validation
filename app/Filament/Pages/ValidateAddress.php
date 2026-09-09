@@ -18,6 +18,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Schemas\Schema;
@@ -38,7 +39,24 @@ class ValidateAddress extends Page implements HasSchemas
 
     protected string $view = 'filament.pages.validate-address';
 
+    /**
+     * Countries where UPS/FedEx require a state/province in the address. State is optional
+     * everywhere else, so a non-US/CA address doesn't get blocked by a field it doesn't use.
+     *
+     * @var array<int, string>
+     */
+    private const STATE_REQUIRED_COUNTRIES = ['US', 'CA'];
+
     public ?array $data = [];
+
+    /**
+     * Whether a state/province is required for the given country. Only US and Canada mandate it
+     * (UPS/FedEx require it there); every other country leaves it optional.
+     */
+    public static function isStateRequired(?string $country): bool
+    {
+        return in_array($country, self::STATE_REQUIRED_COUNTRIES, true);
+    }
 
     public ?Address $result = null;
 
@@ -91,7 +109,7 @@ class ValidateAddress extends Page implements HasSchemas
                             ->maxLength(255),
                         TextInput::make('input_state')
                             ->label('State/Province')
-                            ->required()
+                            ->required(fn (Get $get): bool => self::isStateRequired($get('input_country')))
                             ->maxLength(50),
                         TextInput::make('input_postal')
                             ->label('Postal/ZIP Code')
@@ -101,6 +119,7 @@ class ValidateAddress extends Page implements HasSchemas
                             ->label('Country')
                             ->options(config('countries'))
                             ->searchable()
+                            ->live()
                             ->default('US')
                             ->required()
                             ->helperText('Type to search. The stored value is the 2-letter ISO code the carriers expect. Validation coverage is carrier-dependent: UPS and Smarty validate US only; FedEx covers the most countries.'),
