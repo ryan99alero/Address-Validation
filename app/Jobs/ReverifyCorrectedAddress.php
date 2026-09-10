@@ -10,6 +10,7 @@ use App\Models\CorrectedAddress;
 use App\Services\AddressValidationService;
 use App\Services\Invoices\CorrectionGuard;
 use App\Services\Invoices\CorrectionThreader;
+use App\Services\Invoices\RecorrectionRules;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -57,7 +58,9 @@ class ReverifyCorrectedAddress implements ShouldQueue
 
             if ($result->output_address_1 === null) {
                 $this->stampChecked($good->id, $carrier->id, AddressVerification::STATUS_FAILED);
-            } elseif ($this->matches($good, $result)) {
+            } elseif ($this->matches($good, $result) || $this->isFeeFreeReformat($good, $result)) {
+                // Exact match, OR the carrier only dropped a trailing suite/unit while keeping the same
+                // city/state/ZIP — that's fee-free, not a reviewable correction, so verify (don't drift).
                 $this->stampVerified($good->id, $carrier->id);
             } else {
                 $this->stampDrifted($good, $carrier, $result);
@@ -74,6 +77,14 @@ class ReverifyCorrectedAddress implements ShouldQueue
         return CorrectedAddress::normalize($result->output_address_1) === CorrectedAddress::normalize($good->address_1)
             && CorrectedAddress::normalize($result->output_state) === CorrectedAddress::normalize($good->state)
             && $this->zip5($result->output_postal) === $this->zip5($good->postal);
+    }
+
+    private function isFeeFreeReformat(CorrectedAddress $good, Address $result): bool
+    {
+        return RecorrectionRules::isFeeFreeReformat(
+            ['address_1' => $good->address_1, 'city' => $good->city, 'state' => $good->state, 'postal' => $good->postal],
+            ['address_1' => $result->output_address_1, 'city' => $result->output_city, 'state' => $result->output_state, 'postal' => $result->output_postal],
+        );
     }
 
     private function stampVerified(int $addressId, int $carrierId): void
@@ -117,10 +128,17 @@ class ReverifyCorrectedAddress implements ShouldQueue
         if ($newGood->id === $good->id) {
             return;
         }
+        // Include DISMISSED + REJECTED_GARBAGE: once a reviewer has acted on this drift (or it was
+        // rejected as garbage), a later re-probe must not re-raise it as a fresh pending event.
         $alreadyQueued = AddressSupersession::query()
             ->where('old_corrected_address_id', $good->id)
             ->where('new_corrected_address_id', $newGood->id)
-            ->whereIn('status', [AddressSupersession::STATUS_PENDING_REVIEW, AddressSupersession::STATUS_APPLIED])
+            ->whereIn('status', [
+                AddressSupersession::STATUS_PENDING_REVIEW,
+                AddressSupersession::STATUS_APPLIED,
+                AddressSupersession::STATUS_DISMISSED,
+                AddressSupersession::STATUS_REJECTED_GARBAGE,
+            ])
             ->exists();
         if ($alreadyQueued) {
             return;

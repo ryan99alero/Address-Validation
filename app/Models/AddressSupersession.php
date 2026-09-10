@@ -2,9 +2,9 @@
 
 namespace App\Models;
 
+use App\Services\Invoices\RecorrectionRules;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Carbon;
 
 class AddressSupersession extends Model
 {
@@ -236,7 +236,9 @@ class AddressSupersession extends Model
         $refLine = $c2 ?? $c1;
         if ($refLine !== null) {
             $refDate = $refLine->ship_date ?: optional(CarrierInvoice::find($refLine->carrier_invoice_id))->invoice_date;
-            $this->reference_date = $refDate ? Carbon::parse($refDate)->toDateString() : null;
+            // Guard against garbage source dates (old UPS 2-digit years parse to year 00xx) — recover
+            // 2-digit years, drop anything still implausible, so the queue never shows "Nov 7, 0020".
+            $this->reference_date = RecorrectionRules::sanitizeDate($refDate !== null ? (string) $refDate : null);
 
             $tracking = ($refLine->tracking_number ?? '') !== '' ? (string) $refLine->tracking_number : null;
             $this->tracking = $tracking;
