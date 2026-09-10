@@ -59,7 +59,10 @@ class UpsPdfChargeParser
     {
         $year = null;
         $date = null;
-        if (preg_match('/Invoice Date\s+([A-Z][a-z]+ \d{1,2}, \d{4})/', $text, $m)) {
+        // \s* not \s+: current UPS PDFs render the label glued to the value ("Invoice DateSeptember
+        // 5, 2026"), so requiring whitespace left invoice_date (and thus $year) null — which made
+        // composeDate() return null and dropped ship_date on EVERY shipment (rows carry only MM/DD).
+        if (preg_match('/Invoice Date\s*([A-Z][a-z]+ \d{1,2}, \d{4})/', $text, $m)) {
             $date = date('Y-m-d', strtotime($m[1]));
             $year = (int) substr($date, 0, 4);
             $this->invoiceMonth = (int) substr($date, 5, 2);

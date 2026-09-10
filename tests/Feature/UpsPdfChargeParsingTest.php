@@ -55,6 +55,16 @@ test('parser reconciles sections and captures shipment detail', function () {
     expect($r['message_codes']['w'])->toBe('Dimensional Weight adjustment based upon UPS audit');
 });
 
+test('captures ship dates when UPS glues the invoice date to the label (Invoice DateJune...)', function () {
+    // Real 2026 UPS PDF layout: no space after "Invoice Date"; rows carry only MM/DD. Before the fix
+    // this left invoice_date/$year null, so every shipment lost its ship_date.
+    $text = str_replace('Invoice Date June 27, 2026', 'Invoice DateJune 27, 2026', syntheticUpsPdfText());
+    $r = (new UpsPdfChargeParser)->parse($text);
+
+    expect($r['invoice_date'])->toBe('2026-06-27')
+        ->and(collect($r['shipments'])->firstWhere('tracking_number', '1Z1111111111111111')['ship_date'])->toBe('2026-06-15');
+});
+
 test('parser captures dims, third-party zero-amount, and pickup date', function () {
     $shipments = collect((new UpsPdfChargeParser)->parse(syntheticUpsPdfText())['shipments']);
 
