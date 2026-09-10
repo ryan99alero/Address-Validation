@@ -65,6 +65,14 @@ test('captures ship dates when UPS glues the invoice date to the label (Invoice 
         ->and(collect($r['shipments'])->firstWhere('tracking_number', '1Z1111111111111111')['ship_date'])->toBe('2026-06-15');
 });
 
+test('carries the pickup date forward to same-group shipments that omit it', function () {
+    // UPS prints the pickup date once per date-group; 1Z2222 has no date of its own and sits in the
+    // same outbound group as 1Z1111 (06/15), so it must inherit that date rather than come back null.
+    $shipments = collect((new UpsPdfChargeParser)->parse(syntheticUpsPdfText())['shipments']);
+
+    expect($shipments->firstWhere('tracking_number', '1Z2222222222222222')['ship_date'])->toBe('2026-06-15');
+});
+
 test('parser captures dims, third-party zero-amount, and pickup date', function () {
     $shipments = collect((new UpsPdfChargeParser)->parse(syntheticUpsPdfText())['shipments']);
 

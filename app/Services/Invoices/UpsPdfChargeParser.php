@@ -206,7 +206,11 @@ class UpsPdfChargeParser
             }
             $shipment = $this->parseShipmentBlock($key, $intCols, $tm[1], $part, $year);
             $shipment['ship_date'] = $pendingDate !== null ? $this->composeDate($pendingDate, $year) : null;
-            $pendingDate = $this->trailingDate($part);
+            // UPS prints the pickup date ONCE per date-group; the ~78% of shipments that continue a
+            // group have no date before their tracking. Carry the last-seen date forward (keep it when
+            // this block has no trailing date) instead of resetting to null. $pendingDate resets per
+            // section (initialized above), so a new section's first shipment doesn't inherit across it.
+            $pendingDate = $this->trailingDate($part) ?? $pendingDate;
             $shipments[] = $shipment;
         }
 
