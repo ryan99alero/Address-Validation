@@ -3,11 +3,11 @@
 namespace App\Console\Commands;
 
 use App\Models\Carrier;
+use App\Services\Invoices\PdfTextExtractor;
 use App\Services\Invoices\UpsPdfChargeParser;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Smalot\PdfParser\Parser;
 use Throwable;
 
 /**
@@ -64,7 +64,9 @@ class BackfillUpsShipDates extends Command
             }
 
             try {
-                $parsed = (new UpsPdfChargeParser)->parse((new Parser)->parseFile($path)->getText());
+                // Use the app's PdfTextExtractor (same as importUpsPdf) — raw smalot getText() under-
+                // extracts these 150+ page invoices, yielding a fraction of the shipments.
+                $parsed = (new UpsPdfChargeParser)->parse((new PdfTextExtractor)->extractFile($path));
             } catch (Throwable $e) {
                 $this->warn('  ! '.basename((string) $rel).': '.$e->getMessage());
                 $totals['unreadable']++;
