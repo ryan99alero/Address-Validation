@@ -39,12 +39,14 @@ class BackfillUpsShipDates extends Command
         $limit = (int) $this->option('limit');
         $dry = (bool) $this->option('dry-run');
 
+        // Key on the shipment's source_file (the real batch filename) rather than archived_path: most
+        // UPS PDFs aren't mail-archived, but the importer's extracted copy survives in the work dir.
         $files = DB::table('carrier_invoices as i')
             ->join('carrier_shipments as s', 's.carrier_invoice_id', '=', 'i.id')
             ->where('i.carrier_id', $upsId)->where('s.source_type', 'pdf')->whereNull('s.ship_date')
             ->whereYear('i.invoice_date', $year)
-            ->whereNotNull('i.archived_path')->where('i.archived_path', '<>', '')
-            ->distinct()->pluck('i.archived_path');
+            ->whereNotNull('s.source_file')->where('s.source_file', '<>', '')
+            ->distinct()->pluck('s.source_file');
 
         if ($limit > 0) {
             $files = $files->take($limit);
@@ -133,19 +135,30 @@ class BackfillUpsShipDates extends Command
     }
 
     /**
-     * Resolve an archived relative path to a readable absolute path (the 'local' disk, then a couple
-     * of known fallbacks), or null if the file can't be found.
+     * Resolve a source_file (or archived relative path) to a readable absolute PDF. Tries the archived
+     * copy, then globs the importer's work/extracted dirs and the processed archive for the basename.
      */
-    private function resolvePath(string $rel): ?string
+    private function resolvePath(string $ref): ?string
     {
-        $candidates = [
-            Storage::disk('local')->path($rel),
-            storage_path('app/'.$rel),
-            storage_path('app/private/'.ltrim($rel, '/')),
+        $base = basename($ref);
+
+        // Direct paths (when $ref is an archived relative path).
+        foreach ([Storage::disk('local')->path($ref), storage_path('app/'.$ref)] as $direct) {
+            if (! str_contains($direct, '*') && is_file($direct)) {
+                return $direct;
+            }
+        }
+
+        // Glob the known locations for a bare filename.
+        $patterns = [
+            storage_path('app/invoices/work/*/*/extracted/'.$base),
+            storage_path('app/invoices/work/*/*/'.$base),
+            storage_path('app/private/invoices/processed/UPS/*/*/'.$base),
         ];
-        foreach ($candidates as $c) {
-            if (is_file($c)) {
-                return $c;
+        foreach ($patterns as $pattern) {
+            $hits = glob($pattern) ?: [];
+            if ($hits !== [] && is_file($hits[0])) {
+                return $hits[0];
             }
         }
 
