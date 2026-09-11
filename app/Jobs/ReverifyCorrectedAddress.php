@@ -6,6 +6,7 @@ use App\Models\Address;
 use App\Models\AddressSupersession;
 use App\Models\AddressVerification;
 use App\Models\Carrier;
+use App\Models\CarrierInvoiceLine;
 use App\Models\CorrectedAddress;
 use App\Services\AddressValidationService;
 use App\Services\Invoices\CorrectionGuard;
@@ -117,6 +118,14 @@ class ReverifyCorrectedAddress implements ShouldQueue
         // Surface the drift as an actionable review event (good -> the carrier's preferred form), unless
         // one is already pending. Never auto-applied — a human decides.
         if ($result->output_city === null || $result->output_state === null || $result->output_postal === null) {
+            return;
+        }
+
+        // Recency gate: only surface drifts for addresses shipped/corrected within the window. The cache
+        // holds long-dormant entries; re-probing and re-queuing those just re-clutters the review queue
+        // with old-dated items. The verification is still stamped above, so we don't re-check it soon.
+        $lastActivity = RecorrectionRules::sanitizeDate((string) (CarrierInvoiceLine::where('corrected_address_id', $good->id)->max('ship_date') ?? ''));
+        if (RecorrectionRules::isStaleDate($lastActivity, (int) config('correction_cache.reverify_activity_days', 90))) {
             return;
         }
         $newGood = CorrectedAddress::findOrCreateFromCorrection(

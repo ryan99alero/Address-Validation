@@ -73,6 +73,27 @@ class RecorrectionRules
         return $date->toDateString();
     }
 
+    /**
+     * True when an address has no usable activity date, or its last activity is older than $days.
+     * Used to gate the reverify so drifts on long-dormant addresses don't re-enter the queue.
+     * $days <= 0 disables the gate (never stale).
+     */
+    public static function isStaleDate(?string $date, int $days): bool
+    {
+        if ($days <= 0) {
+            return false;
+        }
+        if ($date === null || $date === '') {
+            return true;
+        }
+
+        try {
+            return Carbon::parse($date)->lessThan(Carbon::now()->subDays($days));
+        } catch (Throwable) {
+            return true;
+        }
+    }
+
     private static function zip5(?string $postal): string
     {
         return substr((string) preg_replace('/[^0-9]/', '', (string) $postal), 0, 5);

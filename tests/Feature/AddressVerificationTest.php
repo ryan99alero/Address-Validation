@@ -73,9 +73,26 @@ test('reverify job stamps verified when the carrier returns the same address', f
         ->and($v->verified_at)->not->toBeNull();
 });
 
+/**
+ * Give a good address a correction line so the reverify recency gate treats it as active.
+ */
+function vActivity(int $goodId, int $carrierId, string $shipDate): void
+{
+    $invId = DB::table('carrier_invoices')->insertGetId([
+        'carrier_id' => $carrierId, 'invoice_number' => 'INV'.$goodId, 'invoice_date' => $shipDate,
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+    DB::table('carrier_invoice_lines')->insert([
+        'carrier_invoice_id' => $invId, 'corrected_address_id' => $goodId, 'tracking_number' => 'T'.$goodId,
+        'original_address_1' => '100 main', 'original_postal' => '78701', 'original_country' => 'US',
+        'ship_date' => $shipDate, 'charge_code' => 'ADC', 'charge_amount' => 11, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+}
+
 test('reverify job marks drifted + queues a review event when the carrier wants a different address', function () {
     $carrier = Carrier::factory()->create(['slug' => 'ups', 'name' => 'UPS']);
     $good = vGood('100 main st', 'austin', 'tx', '78701');
+    vActivity($good->id, $carrier->id, now()->subDays(10)->toDateString()); // recently active -> gate passes
 
     (new ReverifyCorrectedAddress($good->id, $carrier->id))->handle(mockValidation(function (Address $a): void {
         $a->output_address_1 = '200 OAK AVE';
@@ -89,6 +106,22 @@ test('reverify job marks drifted + queues a review event when the carrier wants 
         ->and($v->verified_at)->toBeNull()
         ->and($v->result_snapshot['postal'])->toBe('78704');
     expect(AddressSupersession::where('trigger', 'reverify_drift')->where('status', 'pending_review')->count())->toBe(1);
+});
+
+test('reverify recency gate: a long-dormant address is stamped drifted but NOT re-queued', function () {
+    $carrier = Carrier::factory()->create(['slug' => 'ups', 'name' => 'UPS']);
+    $good = vGood('100 main st', 'austin', 'tx', '78701');
+    vActivity($good->id, $carrier->id, now()->subDays(400)->toDateString()); // last shipped >1yr ago
+
+    (new ReverifyCorrectedAddress($good->id, $carrier->id))->handle(mockValidation(function (Address $a): void {
+        $a->output_address_1 = '200 OAK AVE';
+        $a->output_city = 'AUSTIN';
+        $a->output_state = 'TX';
+        $a->output_postal = '78704';
+    }));
+
+    expect(AddressVerification::where('corrected_address_id', $good->id)->first()->status)->toBe('drifted')
+        ->and(AddressSupersession::where('trigger', 'reverify_drift')->count())->toBe(0); // gated out
 });
 
 test('a reverify API failure records the attempt but never un-verifies a good address', function () {

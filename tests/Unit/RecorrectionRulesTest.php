@@ -30,6 +30,14 @@ test('a different city/ZIP is NOT fee-free even if a unit was dropped', function
     ))->toBeFalse();
 });
 
+test('isStaleDate gates on recency: null/old are stale, recent is not, 0 disables', function () {
+    expect(RecorrectionRules::isStaleDate(null, 90))->toBeTrue()
+        ->and(RecorrectionRules::isStaleDate('', 90))->toBeTrue()
+        ->and(RecorrectionRules::isStaleDate(now()->subDays(30)->toDateString(), 90))->toBeFalse()
+        ->and(RecorrectionRules::isStaleDate(now()->subDays(200)->toDateString(), 90))->toBeTrue()
+        ->and(RecorrectionRules::isStaleDate(now()->subDays(999)->toDateString(), 0))->toBeFalse();
+});
+
 test('sanitizeDate recovers 2-digit years and nulls the implausible', function () {
     expect(RecorrectionRules::sanitizeDate('0020-11-07'))->toBe('2020-11-07')
         ->and(RecorrectionRules::sanitizeDate('2013-10-15'))->toBe('2013-10-15')

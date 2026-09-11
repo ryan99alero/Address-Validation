@@ -25,4 +25,9 @@ return [
     // Max addresses the nightly reverify dispatches per carrier per run (drains a big backlog over time
     // without API-storming). 0 = disable the reverify job entirely.
     'verification_daily_limit' => (int) env('CORRECTION_VERIFICATION_DAILY_LIMIT', 50),
+
+    // A reverify drift only becomes a Re-Correction when the address was shipped/corrected within this
+    // many days. The cache holds long-dormant addresses; a drift on one we haven't used in months isn't
+    // actionable and just re-clutters the queue. 0 disables the recency gate.
+    'reverify_activity_days' => (int) env('CORRECTION_REVERIFY_ACTIVITY_DAYS', 90),
 ];
