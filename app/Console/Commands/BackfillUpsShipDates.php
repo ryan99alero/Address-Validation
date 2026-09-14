@@ -3,7 +3,9 @@
 namespace App\Console\Commands;
 
 use App\Models\Carrier;
+use App\Models\FolderIntegration;
 use App\Services\Invoices\PdfTextExtractor;
+use App\Services\Invoices\SmbInvoiceReader;
 use App\Services\Invoices\UpsPdfChargeParser;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -22,11 +24,12 @@ class BackfillUpsShipDates extends Command
     protected $signature = 'ups:backfill-ship-dates
         {--year=2026 : Invoice year to backfill}
         {--limit=0 : Max PDF files to process (0 = all)}
+        {--smb : Re-parse straight from the UPS SMB share (reaches invoices with no on-disk copy / no source_file)}
         {--dry-run : Report what would change without writing}';
 
-    protected $description = 'Re-parse archived UPS invoice PDFs and fill missing ship_date on shipments/charges/lines.';
+    protected $description = 'Re-parse UPS invoice PDFs and fill missing ship_date on shipments/charges/lines.';
 
-    public function handle(): int
+    public function handle(SmbInvoiceReader $smb): int
     {
         $upsId = (int) (Carrier::where('slug', 'ups')->value('id') ?? 0);
         if ($upsId === 0) {
@@ -38,6 +41,10 @@ class BackfillUpsShipDates extends Command
         $year = (int) $this->option('year');
         $limit = (int) $this->option('limit');
         $dry = (bool) $this->option('dry-run');
+
+        if ($this->option('smb')) {
+            return $this->handleSmb($smb, $upsId, $year, $limit, $dry);
+        }
 
         // Key on the shipment's source_file (the real batch filename) rather than archived_path: most
         // UPS PDFs aren't mail-archived, but the importer's extracted copy survives in the work dir.
@@ -64,23 +71,12 @@ class BackfillUpsShipDates extends Command
             }
 
             try {
-                // Use the app's PdfTextExtractor (same as importUpsPdf) — raw smalot getText() under-
-                // extracts these 150+ page invoices, yielding a fraction of the shipments.
-                $parsed = (new UpsPdfChargeParser)->parse((new PdfTextExtractor)->extractFile($path));
+                $map = $this->parseToMap($path);
             } catch (Throwable $e) {
                 $this->warn('  ! '.basename((string) $rel).': '.$e->getMessage());
                 $totals['unreadable']++;
 
                 continue;
-            }
-
-            $map = [];
-            foreach ($parsed['shipments'] as $s) {
-                $tracking = trim((string) ($s['tracking_number'] ?? ''));
-                $date = $s['ship_date'] ?? null;
-                if ($tracking !== '' && $date) {
-                    $map[$tracking] = $date;
-                }
             }
 
             $result = $this->applyShipDates($upsId, $map, $dry);
@@ -90,6 +86,98 @@ class BackfillUpsShipDates extends Command
             $totals['lines'] += $result['lines'];
         }
 
+        $this->reportTotals($totals, $dry);
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Re-parse from the UPS SMB share for a year — reaches invoices with no on-disk copy or no
+     * source_file. The tracking number is the join key, so no invoice-to-file matching is needed.
+     */
+    protected function handleSmb(SmbInvoiceReader $smb, int $upsId, int $year, int $limit, bool $dry): int
+    {
+        $folder = FolderIntegration::whereHas('carrier', fn ($q) => $q->where('slug', 'ups'))
+            ->where('connection_type', FolderIntegration::TYPE_SMB)->first();
+        if ($folder === null) {
+            $this->error('No UPS SMB folder integration configured.');
+
+            return self::FAILURE;
+        }
+
+        $folder->base_path = $this->parentPath($folder->base_path).'/'.$year;
+        $this->info("Scanning SMB //{$folder->smb_host}/{$folder->smb_share}/{$folder->base_path} ...");
+
+        try {
+            $files = $smb->listFiles($folder, ['pdf'], (bool) $folder->recursive);
+        } catch (Throwable $e) {
+            $this->error('  SMB list failed: '.$e->getMessage());
+
+            return self::FAILURE;
+        }
+        if ($limit > 0) {
+            $files = array_slice($files, 0, $limit);
+        }
+        $this->info('  '.count($files).' PDF file(s).');
+
+        $totals = ['files' => 0, 'unreadable' => 0, 'shipments' => 0, 'charges' => 0, 'lines' => 0];
+
+        foreach ($files as $remote) {
+            $tmp = (string) tempnam(sys_get_temp_dir(), 'upsbf').'.pdf';
+            try {
+                $smb->download($folder, $remote, $tmp);
+                $map = $this->parseToMap($tmp);
+            } catch (Throwable $e) {
+                $this->warn('  ! '.basename($remote).': '.$e->getMessage());
+                $totals['unreadable']++;
+                @unlink($tmp);
+
+                continue;
+            }
+            @unlink($tmp);
+
+            $result = $this->applyShipDates($upsId, $map, $dry);
+            $totals['files']++;
+            $totals['shipments'] += $result['shipments'];
+            $totals['charges'] += $result['charges'];
+            $totals['lines'] += $result['lines'];
+            if ($result['shipments'] > 0) {
+                $this->line('  '.basename($remote).': +'.$result['shipments'].' shipments');
+            }
+        }
+
+        $this->reportTotals($totals, $dry);
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Parse a UPS PDF (via the same PdfTextExtractor importUpsPdf uses — raw smalot under-extracts
+     * 150+ page invoices) into a tracking -> ship_date map (non-null dates only).
+     *
+     * @return array<string, string>
+     */
+    protected function parseToMap(string $localPath): array
+    {
+        $parsed = (new UpsPdfChargeParser)->parse((new PdfTextExtractor)->extractFile($localPath));
+
+        $map = [];
+        foreach ($parsed['shipments'] as $s) {
+            $tracking = trim((string) ($s['tracking_number'] ?? ''));
+            $date = $s['ship_date'] ?? null;
+            if ($tracking !== '' && $date) {
+                $map[$tracking] = $date;
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param  array{files: int, unreadable: int, shipments: int, charges: int, lines: int}  $totals
+     */
+    protected function reportTotals(array $totals, bool $dry): void
+    {
         $this->newLine();
         $this->table(['Metric', 'Count'], [
             ['PDF files re-parsed', $totals['files']],
@@ -98,8 +186,6 @@ class BackfillUpsShipDates extends Command
             [$dry ? 'Charges that would be dated' : 'Charges dated', $totals['charges']],
             [$dry ? 'Invoice lines that would be dated' : 'Invoice lines dated', $totals['lines']],
         ]);
-
-        return self::SUCCESS;
     }
 
     /**
