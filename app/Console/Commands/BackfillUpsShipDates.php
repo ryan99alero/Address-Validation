@@ -189,6 +189,20 @@ class BackfillUpsShipDates extends Command
     }
 
     /**
+     * The share path without a trailing 4-digit year, so year folders can be addressed. The UPS SMB
+     * base_path has no year (".../UPS Invoices"), so this returns it unchanged.
+     */
+    protected function parentPath(?string $base): string
+    {
+        $base = trim((string) $base, '/');
+        if (preg_match('#^(.*)/\d{4}$#', $base, $m)) {
+            return $m[1];
+        }
+
+        return $base;
+    }
+
+    /**
      * Fill null ship_date on UPS PDF shipments/charges (and any invoice lines) for the parsed
      * tracking -> date map. Only touches rows whose ship_date IS NULL, so it is idempotent.
      *
