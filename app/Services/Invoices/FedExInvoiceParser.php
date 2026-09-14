@@ -238,6 +238,7 @@ class FedExInvoiceParser
                     'type' => $type,
                     'ship_date' => preg_match('/^\s*([A-Z][a-z]{2} \d{1,2}, \d{4})/', $block, $d) ? $d[1] : null,
                     'service_type' => $this->extractServiceType($block, $type, $product),
+                    'billing_type' => $this->billingTypeFromBlock($block),
                     'recipient' => $this->extractRecipient($block),
                     'charge_ledger' => $ledger,
                     'total_charge' => $total,
@@ -475,6 +476,20 @@ class FedExInvoiceParser
      * $product is the invoice family the caller detected (see detectProduct); it lets a payment-term
      * Service Type resolve to "FedEx Ground" only inside a Ground invoice, never on an Express one.
      */
+    /**
+     * Billing type from the same Service Type column extractServiceType reads. Ground invoices print
+     * the payment term there ("Ppd / Collect / Bill 3rd Party"); Express names the service, so there's
+     * no term to read and this returns null (persist defaults it to prepaid / the backfill refines it).
+     */
+    protected function billingTypeFromBlock(string $block): ?string
+    {
+        if (preg_match('/(?<!\d)\d{12,22}(?!\d)\s*\n\s*([^\n]+)/', $block, $m)) {
+            return BillingType::fromServiceTerm(trim($m[1]));
+        }
+
+        return null;
+    }
+
     protected function extractServiceType(string $block, string $type, ?string $product = null): ?string
     {
         $serviceCol = null;

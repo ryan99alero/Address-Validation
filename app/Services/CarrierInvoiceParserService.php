@@ -10,6 +10,7 @@ use App\Models\CarrierCharge;
 use App\Models\CarrierInvoice;
 use App\Models\CarrierInvoiceLine;
 use App\Models\CarrierShipment;
+use App\Services\Invoices\BillingType;
 use App\Services\Invoices\ChargeCategoryResolver;
 use App\Services\Invoices\ChargeDriverResolver;
 use App\Services\Invoices\FedExInvoiceParser;
@@ -1129,6 +1130,7 @@ class CarrierInvoiceParserService
                 'carrier_id' => $invoice->carrier_id,
                 'tracking_number' => (string) $tracking,
                 'service' => $s['service'] ?? null,
+                'billing_type' => $s['billing_type'] ?? null,
                 'zip' => $s['zip'] ?? null,
                 'weight' => $s['weight'] ?? null,
                 'ship_date' => $s['ship_date'] ?? null,
@@ -1288,6 +1290,7 @@ class CarrierInvoiceParserService
                     $fedexPdfShipments[$invoice->id][$tracking] = [
                         'zip' => $zip,
                         'service' => $shipment['service_type'] ?? null,
+                        'billing_type' => $shipment['billing_type'] ?? null,
                         'receiver' => $recvText ?: null,
                         'ship_date' => $shipDate,
                     ];
@@ -1620,6 +1623,7 @@ class CarrierInvoiceParserService
                 'carrier_id' => $invoice->carrier_id,
                 'tracking_number' => $s['tracking_number'],
                 'section' => $s['section'],
+                'billing_type' => BillingType::forUps($s['section'] ?? null, (bool) ($s['is_third_party'] ?? false)),
                 'service' => $s['service'],
                 'zip' => $s['zip'],
                 'zone' => $s['zone'],

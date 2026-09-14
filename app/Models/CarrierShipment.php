@@ -14,6 +14,7 @@ class CarrierShipment extends Model
         'carrier_id',
         'tracking_number',
         'section',
+        'billing_type',
         'service',
         'zip',
         'zone',
