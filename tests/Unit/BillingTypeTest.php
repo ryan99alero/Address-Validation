@@ -19,6 +19,17 @@ test('fromServiceTerm maps the FedEx/UPS payment-term prefix', function () {
         ->and(BillingType::fromServiceTerm(''))->toBeNull();
 });
 
+test('fromPayor maps the FedEx CSV Payor column authoritatively', function () {
+    expect(BillingType::fromPayor('Shipper'))->toBe('prepaid')
+        ->and(BillingType::fromPayor('Recipient'))->toBe('collect')
+        ->and(BillingType::fromPayor('Third Party'))->toBe('third_party')
+        ->and(BillingType::fromPayor('third-party'))->toBe('third_party')
+        ->and(BillingType::fromPayor('  shipper '))->toBe('prepaid')
+        ->and(BillingType::fromPayor(''))->toBeNull()
+        ->and(BillingType::fromPayor(null))->toBeNull()
+        ->and(BillingType::fromPayor('Unknown'))->toBeNull();
+});
+
 test('forFedEx falls back to the is_third_party flag when the term is a real service', function () {
     expect(BillingType::forFedEx('Collect, Domestic', false))->toBe('collect')
         ->and(BillingType::forFedEx('FedEx 2Day', true))->toBe('third_party')

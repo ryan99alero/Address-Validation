@@ -46,6 +46,21 @@ class BillingType
     }
 
     /**
+     * FedEx CSV "Payor" column — the authoritative bill-to for every row (Express and Ground alike),
+     * independent of the Service Type. "Shipper" = we paid as sender (Prepaid), "Recipient" = the
+     * consignee paid (Collect), "Third Party" = billed to another account. Returns null when unknown.
+     */
+    public static function fromPayor(?string $payor): ?string
+    {
+        return match (strtolower(trim((string) $payor))) {
+            'shipper' => self::PREPAID,
+            'recipient' => self::COLLECT,
+            'third party', 'third-party', 'thirdparty' => self::THIRD_PARTY,
+            default => null,
+        };
+    }
+
+    /**
      * Map a FedEx/UPS payment-term string ("Ppd, Domestic", "Collect, Domestic", "Bill 3rd Party, Dom",
      * "Bill Recipient") to a billing type. Returns null when the string isn't a payment term.
      */

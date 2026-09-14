@@ -143,6 +143,24 @@ class CarrierCharge extends Model
     }
 
     /**
+     * Filter charges by the invoice-authoritative billing type (prepaid | collect | third_party)
+     * recorded on the shipment, correlated on tracking + carrier. This is the invoice's own bill-to
+     * (UPS section / 3rd-party block, FedEx Payor), not the base-charge heuristic scopeThirdParty uses.
+     * Account-level fees (null tracking) match no bucket.
+     */
+    public function scopeBillingType(Builder $query, string $type): Builder
+    {
+        return $query
+            ->whereNotNull('carrier_charges.tracking_number')
+            ->whereExists(function ($q) use ($type) {
+                $q->select(DB::raw(1))->from('carrier_shipments as bs')
+                    ->whereColumn('bs.tracking_number', 'carrier_charges.tracking_number')
+                    ->whereColumn('bs.carrier_id', 'carrier_charges.carrier_id')
+                    ->where('bs.billing_type', $type);
+            });
+    }
+
+    /**
      * Id of the "Base Transportation" charge category, used by the billing-type
      * heuristic (its presence on a tracking = on-account).
      */

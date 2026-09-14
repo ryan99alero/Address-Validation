@@ -1027,6 +1027,10 @@ class CarrierInvoiceParserService
             Log::info('FedEx CSV: no known ship-method column; shipments recorded without service.', ['headers' => array_keys($col)]);
         }
 
+        // "Payor" is FedEx's authoritative bill-to for every row (Shipper/Recipient/Third Party) —
+        // independent of Service Type, so it classifies Express (which names the service) as well.
+        $payorCol = $col['Payor'] ?? null;
+
         $this->chargeCategoryResolver ??= new ChargeCategoryResolver;
 
         /** @var array<string, CarrierInvoice> $invoices */
@@ -1069,9 +1073,12 @@ class CarrierInvoiceParserService
                 $addr1 = trim((string) ($row[$col['Recipient Address Line 1'] ?? 35] ?? ''));
                 $city = trim((string) ($row[$col['Recipient City'] ?? 37] ?? ''));
                 $state = trim((string) ($row[$col['Recipient State'] ?? 38] ?? ''));
+                $service = $serviceCol !== null ? (trim((string) ($row[$serviceCol] ?? '')) ?: null) : null;
+                $payor = $payorCol !== null ? ($row[$payorCol] ?? null) : null;
                 $fedexShipments[$invoice->id][$tracking] = [
                     'zip' => $zip !== '' ? $zip : null,
-                    'service' => $serviceCol !== null ? (trim((string) ($row[$serviceCol] ?? '')) ?: null) : null,
+                    'service' => $service,
+                    'billing_type' => BillingType::fromPayor($payor) ?? BillingType::fromServiceTerm($service),
                     'receiver' => trim($name.' '.$addr1.' '.$city.' '.$state.' '.$zip) ?: null,
                     'weight' => $weight,
                     'ship_date' => $shipDate,

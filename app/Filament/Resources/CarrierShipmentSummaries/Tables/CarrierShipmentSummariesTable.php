@@ -104,11 +104,20 @@ class CarrierShipmentSummariesTable
                     ->color('gray')
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('is_third_party')
+                TextColumn::make('billing_type')
                     ->label('Billing')
                     ->badge()
-                    ->formatStateUsing(fn ($state): string => $state ? '3rd Party' : 'On Account')
-                    ->color(fn ($state): string => $state ? 'warning' : 'gray')
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'third_party' => '3rd Party',
+                        'collect' => 'Collect',
+                        'prepaid' => 'Prepaid',
+                        default => '—',
+                    })
+                    ->color(fn (?string $state): string => match ($state) {
+                        'third_party' => 'warning',
+                        'collect' => 'info',
+                        default => 'gray',
+                    })
                     ->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('source_type')
                     ->label('Source')
@@ -141,9 +150,13 @@ class CarrierShipmentSummariesTable
                         ->orderBy('service')
                         ->pluck('service', 'service')
                         ->all()),
-                SelectFilter::make('is_third_party')
+                SelectFilter::make('billing_type')
                     ->label('Billing')
-                    ->options([1 => '3rd Party', 0 => 'On Account']),
+                    ->options([
+                        'prepaid' => 'Prepaid',
+                        'collect' => 'Collect',
+                        'third_party' => '3rd Party',
+                    ]),
                 Filter::make('ship_date')
                     ->schema([
                         DatePicker::make('from')->label('From'),
