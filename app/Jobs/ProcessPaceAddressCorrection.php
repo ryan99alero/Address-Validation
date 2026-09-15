@@ -3,13 +3,13 @@
 namespace App\Jobs;
 
 use App\Models\Address;
-use App\Models\Carrier;
 use App\Models\IntegrationConnection;
 use App\Models\IntegrationObject;
 use App\Models\ShipViaCode;
 use App\Models\SystemLog;
 use App\Services\AddressValidationService;
 use App\Services\Integrations\PaceApiClient;
+use App\Services\Shipping\HomeDeliverySwap;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -73,8 +73,12 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                 throw new RuntimeException("No contact id in payload for shipment {$shipmentId}");
             }
 
-            $carrierSlugs = $connection->validation_carriers ?: ['smarty', 'ups', 'fedex'];
-            $corrected = $this->cleanse($validation, $this->payload, $carrierSlugs);
+            // Validate against the SHIPMENT'S carrier (derived from its ship-via) so residential comes
+            // from the carrier that will bill it; the connection's Fall Back Priority list is used only
+            // if that carrier's API is down or the ship-via maps to no carrier (e.g. "Call CSR").
+            $primaryCarrier = $this->carrierFromShipVia($this->payload['ship_via'] ?? null);
+            $fallbackSlugs = array_values((array) ($connection->validation_carriers ?? []));
+            $corrected = $this->cleanse($validation, $this->payload, $primaryCarrier, $fallbackSlugs);
 
             // Only act when the address was actually validated. On an API error / no
             // deliverable result, do nothing so the constraint re-fires it later.
@@ -94,7 +98,7 @@ class ProcessPaceAddressCorrection implements ShouldQueue
                         'contact_id' => $contactId,
                         'csr' => $csr,
                         'sales_person' => $salesPerson,
-                        'carriers_tried' => array_values($carrierSlugs),
+                        'carriers_tried' => array_values(array_filter(array_merge([$primaryCarrier], $fallbackSlugs))),
                     ],
                 ]);
 
@@ -121,7 +125,7 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             // ship_via_codes, not Pace). Null when not residential, not a FedEx Ground ship-via, or no
             // Home Delivery equivalent exists (e.g. UPS Ground — residential is a surcharge there, not a
             // separate service).
-            $homeSwap = $residentialFinal ? $this->resolveHomeDeliverySwap((string) ($this->payload['ship_via'] ?? '')) : null;
+            $homeSwap = $residentialFinal ? (new HomeDeliverySwap)->resolve($this->payload['ship_via'] ?? null) : null;
 
             // JobShipment guard: only touch a shipment that is still Planned (JobShipment/@planned ==
             // true). One that has moved on must not be corrected OR re-routed. Checked when there's work
@@ -256,17 +260,11 @@ class ProcessPaceAddressCorrection implements ShouldQueue
      * deliverable result).
      *
      * @param  array<string, mixed>  $source  The Contact (Pace scalar fields)
-     * @param  array<int, string>  $carrierSlugs  Validator slugs in priority order
+     * @param  array<int, string>  $fallbackSlugs  Fall Back Priority validators (carrier down / unknown)
      * @return array<string, mixed>
      */
-    protected function cleanse(AddressValidationService $validation, array $source, array $carrierSlugs): array
+    protected function cleanse(AddressValidationService $validation, array $source, ?string $primaryCarrier, array $fallbackSlugs): array
     {
-        // Real-time Connect corrections ALWAYS re-validate against the carrier API — never short-circuit
-        // on a cached answer. The address may have changed (e.g. a ZIP update) since it was cached, and
-        // a cache hit carries no residential classification, so serving it would push a null residential
-        // and wipe Pace's flag. The API result still refreshes the cache for the batch/invoice paths.
-        $validation->useLocalCache(false);
-
         $input = [
             'input_address_1' => $source['address1'] ?? null,
             'input_address_2' => $source['address2'] ?? null,
@@ -281,61 +279,37 @@ class ProcessPaceAddressCorrection implements ShouldQueue
             'input_name' => $source['name'] ?? null,
         ];
 
-        $carriers = Carrier::query()
-            ->where('is_active', true)
-            ->whereIn('slug', $carrierSlugs)
-            ->get()
-            ->sortBy(fn (Carrier $c): int => array_search($c->slug, $carrierSlugs));
-
-        if ($carriers->isEmpty() || empty($input['input_address_1'])) {
+        if (empty($input['input_address_1'])) {
             return $this->normalizeFromInput($input) + ['validated' => false];
         }
 
-        foreach ($carriers as $carrier) {
-            $address = Address::create($input + [
-                'validation_status' => 'pending',
-                'source' => 'api',
-            ]);
+        // The shared engine: check the cache, feed the carrier the cached good form (else the raw
+        // input), validate LIVE against the shipment's carrier (fresh residential), fall back through
+        // the priority list, and never write the cache from here.
+        $address = Address::create($input + ['validation_status' => 'pending', 'source' => 'api']);
 
-            try {
-                $validated = $validation->validateAddress($address, $carrier->slug);
+        try {
+            $validated = $validation->validateForCarrier($address, $primaryCarrier, $fallbackSlugs);
 
-                // A usable result sets output_address_1 (even for an already-clean
-                // address). A carrier error / undeliverable address leaves it null.
-                if ($validated->output_address_1 !== null) {
-                    return $this->normalizeFromOutput($validated) + ['validated' => true];
-                }
-            } catch (Throwable $e) {
-                // Validator failed — fall through to the next one in priority order.
-            } finally {
-                $address->delete();
-            }
+            // A usable result sets output_address_1 (even for an already-clean address); an
+            // all-carriers-down / undeliverable result leaves it null.
+            return $validated->output_address_1 !== null
+                ? $this->normalizeFromOutput($validated) + ['validated' => true]
+                : $this->normalizeFromInput($input) + ['validated' => false];
+        } finally {
+            $address->delete();
         }
-
-        return $this->normalizeFromInput($input) + ['validated' => false];
     }
 
     /**
-     * The FedEx Home Delivery ship-via to swap a residential FedEx Ground shipment to — same plant,
-     * payer, and account as the original (reuses the BestWay matcher; plant lives on our ship_via_codes,
-     * resolved from the code). Null when the incoming ship-via isn't a resolvable FedEx Ground, or there
-     * is no Home Delivery equivalent (e.g. UPS Ground — its residential handling is a surcharge, not a
-     * separate service).
+     * The carrier the shipment is set to ship on, from its ship-via code — the primary validator. Null
+     * when the ship-via maps to no carrier (e.g. "Call CSR"), leaving only the fallback list.
      */
-    protected function resolveHomeDeliverySwap(string $shipViaCode): ?ShipViaCode
+    protected function carrierFromShipVia(?string $shipViaCode): ?string
     {
-        if (trim($shipViaCode) === '') {
-            return null;
-        }
+        $code = trim((string) $shipViaCode);
 
-        $original = ShipViaCode::lookup($shipViaCode);
-        if ($original === null || $original->carrier_slug !== 'fedex' || $original->service_type !== 'FEDEX_GROUND') {
-            return null;
-        }
-
-        $home = ShipViaCode::findMatchingForBestWay('GROUND_HOME_DELIVERY', $original->plant_id, $original);
-
-        return ($home !== null && $home->code !== $original->code) ? $home : null;
+        return $code === '' ? null : ShipViaCode::lookup($code)?->carrier_slug;
     }
 
     /**
