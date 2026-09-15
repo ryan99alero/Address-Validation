@@ -16,6 +16,7 @@ class CarrierChargeRollup extends Model
         'carrier_id',
         'charge_category_id',
         'is_third_party',
+        'billing_type',
         'year',
         'charge_count',
         'total_amount',

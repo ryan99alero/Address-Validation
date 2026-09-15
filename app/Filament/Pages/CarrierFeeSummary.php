@@ -104,8 +104,9 @@ class CarrierFeeSummary extends Page implements HasTable
                 SelectFilter::make('billing_type')
                     ->label('Billing')
                     ->options([
+                        'prepaid' => 'Prepaid',
+                        'collect' => 'Collect',
                         'third_party' => '3rd Party',
-                        'on_account' => 'On Account',
                     ]),
                 SelectFilter::make('scope')
                     ->label('Scope')
@@ -148,8 +149,8 @@ class CarrierFeeSummary extends Page implements HasTable
             ->when($carrierId, fn ($q) => $q->where('carrier_charge_rollup.carrier_id', $carrierId))
             ->when($from, fn ($q) => $q->where('year', '>=', $from))
             ->when($to, fn ($q) => $q->where('year', '<=', $to))
-            ->when($billingType === 'third_party', fn ($q) => $q->where('carrier_charge_rollup.is_third_party', true))
-            ->when($billingType === 'on_account', fn ($q) => $q->where('carrier_charge_rollup.is_third_party', false))
+            ->when(in_array($billingType, ['prepaid', 'collect', 'third_party'], true),
+                fn ($q) => $q->where('carrier_charge_rollup.billing_type', $billingType))
             ->when($scope === 'fees', fn ($q) => $q->where(function ($w): void {
                 $w->whereNull('cat.name')->orWhere('cat.name', '!=', 'Base Transportation');
             }))
@@ -204,6 +205,7 @@ class CarrierFeeSummary extends Page implements HasTable
             ],
             'controls' => [
                 ['name' => 'Carrier', 'means' => 'Limit to one carrier, or leave blank for both.'],
+                ['name' => 'Billing', 'means' => 'Who the carrier billed: Prepaid (our account), Collect (consignee-billed), or 3rd Party. Blank = all. Account-level fees with no tracking are excluded when a billing type is selected.'],
                 ['name' => 'Scope', 'means' => '"Aux fees only" excludes Base Transportation; "All charges" includes it.'],
                 ['name' => 'Year from / to', 'means' => 'Blank both = all years; set one = single year; set both = a range.'],
                 ['name' => 'Dollars: Nominal vs Real', 'means' => 'Real restates older years into constant 2026 dollars via CPI, so cross-year totals are not skewed by inflation.'],

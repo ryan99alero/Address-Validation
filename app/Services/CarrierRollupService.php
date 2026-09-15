@@ -20,30 +20,34 @@ class CarrierRollupService
 
     public function rebuild(): void
     {
-        // Base Transportation category drives the third-party heuristic (a tracking
+        // Base Transportation category drives the fallback heuristic (a tracking
         // with no base charge is third-party). 0 = "no such category" so the
         // heuristic simply never matches a base charge.
         $baseCategoryId = (int) (DB::table('charge_categories')->where('name', 'Base Transportation')->value('id') ?? 0);
 
-        // Precompute per-tracking billing type into an INDEXED temp table (Pace flag
-        // first, else the base-charge heuristic). Joining an unindexed derived
-        // subquery against the 3.4M-row charges table is O(n×m) — minutes long; an
-        // indexed temp table makes the aggregation join an index lookup. Built
-        // outside the swap transaction (temp tables are session-scoped).
+        // Precompute per-tracking billing_type into an INDEXED temp table (the
+        // invoice-authoritative carrier_shipments.billing_type first, else the
+        // base-charge heuristic). Joining an unindexed derived subquery against the
+        // 3.4M-row charges table is O(n×m) — minutes long; an indexed temp table
+        // makes the aggregation join an index lookup. Built outside the swap
+        // transaction (temp tables are session-scoped).
         $this->buildTrackingBillingTemp($baseCategoryId);
 
         DB::transaction(function (): void {
             DB::table('carrier_charge_rollup')->delete();
-            // NULL tracking (account-level fees) has no temp row → is_third_party NULL.
+            // NULL tracking (account-level fees) has no temp row → billing_type NULL.
+            // is_third_party is kept for back-compat, derived from billing_type.
             DB::statement('
                 INSERT INTO carrier_charge_rollup
-                    (carrier_id, charge_category_id, is_third_party, year, charge_count, total_amount, distinct_ships, created_at, updated_at)
-                SELECT cc.carrier_id, cc.charge_category_id, tmp.is_third_party, YEAR(cc.invoice_date), COUNT(*),
+                    (carrier_id, charge_category_id, is_third_party, billing_type, year, charge_count, total_amount, distinct_ships, created_at, updated_at)
+                SELECT cc.carrier_id, cc.charge_category_id,
+                       CASE WHEN tmp.billing_type IS NULL THEN NULL WHEN tmp.billing_type = \'third_party\' THEN 1 ELSE 0 END,
+                       tmp.billing_type, YEAR(cc.invoice_date), COUNT(*),
                        COALESCE(SUM(cc.amount), 0), COUNT(DISTINCT cc.tracking_number), NOW(), NOW()
                 FROM carrier_charges cc
                 LEFT JOIN tmp_tracking_billing tmp ON tmp.tracking_number = cc.tracking_number
                 WHERE cc.invoice_date IS NOT NULL
-                GROUP BY cc.carrier_id, cc.charge_category_id, tmp.is_third_party, YEAR(cc.invoice_date)
+                GROUP BY cc.carrier_id, cc.charge_category_id, tmp.billing_type, YEAR(cc.invoice_date)
             ');
 
             DB::table('carrier_ship_rollup')->delete();
@@ -65,10 +69,12 @@ class CarrierRollupService
     }
 
     /**
-     * Build an indexed temp table mapping tracking_number → is_third_party. Pace's
-     * carton flag wins where known; otherwise the base-charge heuristic (a tracking
-     * with no Base Transportation charge is third-party). The PRIMARY KEY makes the
-     * later join to carrier_charges an index lookup rather than a full-scan.
+     * Build an indexed temp table mapping tracking_number → billing_type. The invoice-authoritative
+     * carrier_shipments.billing_type (UPS section / 3rd-party block, FedEx Payor) wins where known —
+     * the same source the All Charges / All Shipments filters use, and the only one that surfaces
+     * Collect; otherwise the base-charge heuristic (a tracking with no Base Transportation charge is
+     * third-party, else prepaid). The PRIMARY KEY makes the later join to carrier_charges an index
+     * lookup rather than a full-scan.
      */
     protected function buildTrackingBillingTemp(int $baseCategoryId): void
     {
@@ -76,19 +82,21 @@ class CarrierRollupService
         DB::statement('
             CREATE TEMPORARY TABLE tmp_tracking_billing (
                 tracking_number VARCHAR(64) NOT NULL PRIMARY KEY,
-                is_third_party TINYINT(1) NULL
+                billing_type VARCHAR(16) NULL
             )
         ');
         DB::statement("
-            INSERT INTO tmp_tracking_billing (tracking_number, is_third_party)
+            INSERT INTO tmp_tracking_billing (tracking_number, billing_type)
             SELECT t.tracking_number,
-                   CASE
-                       WHEN k.is_third_party IS NOT NULL THEN k.is_third_party
-                       WHEN b.tracking_number IS NOT NULL THEN 0
-                       ELSE 1
-                   END
+                   COALESCE(
+                       s.billing_type,
+                       CASE WHEN b.tracking_number IS NOT NULL THEN 'prepaid' ELSE 'third_party' END
+                   )
             FROM (SELECT DISTINCT tracking_number FROM carrier_charges WHERE tracking_number IS NOT NULL AND tracking_number <> '') t
-            LEFT JOIN carton_costs k ON k.tracking_number = t.tracking_number
+            LEFT JOIN (
+                SELECT tracking_number, MAX(billing_type) AS billing_type
+                FROM carrier_shipments WHERE billing_type IS NOT NULL GROUP BY tracking_number
+            ) s ON s.tracking_number = t.tracking_number
             LEFT JOIN (SELECT DISTINCT tracking_number FROM carrier_charges WHERE charge_category_id = {$baseCategoryId}) b
                 ON b.tracking_number = t.tracking_number
         ");
