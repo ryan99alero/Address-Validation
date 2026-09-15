@@ -121,6 +121,127 @@ class AddressValidationService
     }
 
     /**
+     * The unified validation flow shared by every path (Pace Connect, Batch, Single):
+     *
+     *   1. Look the input up in the local correction cache.
+     *   2. Hand the carrier the CACHED corrected form on a hit (else the raw input) and validate LIVE —
+     *      always — so residential comes fresh from the carrier that will actually bill the shipment.
+     *   3. Try the primary (shipment's) carrier, then the Fall Back Priority slugs in order, until one
+     *      returns a usable result.
+     *   4. If every carrier is unreachable, fall back to the cached good form (never ship the raw bad
+     *      address) with residential left UNKNOWN rather than fabricated.
+     *
+     * The carrier's result wins (ZIPs/streets change); the cache is never written here. The original
+     * input is preserved — the cached form is fed only for the duration of the carrier call.
+     *
+     * @param  array<int, string>  $fallbackSlugs  the Fall Back Priority list, in order
+     */
+    public function validateForCarrier(Address $address, ?string $primarySlug, array $fallbackSlugs = []): Address
+    {
+        $order = $this->carrierTryOrder($primarySlug, $fallbackSlugs);
+
+        // Cache lookup on the ORIGINAL input; on a hit, feed the cached corrected form to the carrier.
+        $cached = $this->useLocalCache ? $this->lookupLocalCache($address) : null;
+        $override = $cached === null ? null : [
+            'input_address_1' => $cached['corrected_address_line_1'] ?? $address->input_address_1,
+            'input_address_2' => $cached['corrected_address_line_2'] ?? $address->input_address_2,
+            'input_city' => $cached['corrected_city'] ?? $address->input_city,
+            'input_state' => $cached['corrected_state'] ?? $address->input_state,
+            'input_postal' => $cached['corrected_postal_code'] ?? $address->input_postal,
+            'input_country' => $cached['corrected_country_code'] ?? $address->input_country,
+        ];
+
+        foreach ($order as $slug) {
+            $carrier = Carrier::where('slug', $slug)->where('is_active', true)->first();
+            if ($carrier === null) {
+                continue;
+            }
+            try {
+                $service = $this->createCarrierService($carrier);
+                $this->withInputOverride($address, $override, fn () => $service->validateAddress($address));
+
+                if ($address->output_address_1 !== null) {
+                    $address->update([
+                        'validation_source' => $this->sourceForSlug($slug),
+                        'validated_by_carrier_id' => $carrier->id,
+                    ]);
+
+                    return $address->refresh();
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Address validator failed; trying next', [
+                    'slug' => $slug, 'address_id' => $address->id, 'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Every carrier was unreachable. Use the cached good form so we don't ship the raw bad address,
+        // but never fabricate a residential flag when no carrier answered.
+        if ($cached !== null) {
+            $address->update([
+                'output_address_1' => $cached['corrected_address_line_1'] ?? $address->input_address_1,
+                'output_address_2' => $cached['corrected_address_line_2'] ?? $address->input_address_2,
+                'output_city' => $cached['corrected_city'] ?? $address->input_city,
+                'output_state' => $cached['corrected_state'] ?? $address->input_state,
+                'output_postal' => $cached['corrected_postal_code'] ?? $address->input_postal,
+                'output_postal_ext' => $cached['corrected_postal_code_ext'] ?? null,
+                'output_country' => $cached['corrected_country_code'] ?? $address->input_country,
+                'validation_status' => 'valid',
+                'is_residential' => null,
+                'classification' => null,
+                'validation_source' => Address::SOURCE_LOCAL_CACHE,
+                'validated_at' => now(),
+            ]);
+        }
+
+        return $address->refresh();
+    }
+
+    /**
+     * The ordered, de-duplicated validator slugs to try: the shipment's own carrier first, then the
+     * Fall Back Priority list. Only slugs with a registered driver AND an active Carrier Account
+     * survive, so an unknown ship-via carrier (e.g. "Call CSR") simply drops to the fallbacks.
+     *
+     * @param  array<int, string>  $fallbacks
+     * @return array<int, string>
+     */
+    private function carrierTryOrder(?string $primary, array $fallbacks): array
+    {
+        $available = $this->availableValidatorSlugs();
+        $ordered = [];
+        foreach (array_merge($primary !== null ? [$primary] : [], $fallbacks) as $slug) {
+            $slug = trim((string) $slug);
+            if ($slug !== '' && in_array($slug, $available, true) && ! in_array($slug, $ordered, true)) {
+                $ordered[] = $slug;
+            }
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * Run $fn with the address's input_* fields temporarily overridden (so the carrier validates the
+     * cached corrected form), then restore the original input — even if $fn throws. The carrier's
+     * output is kept; the original input survives for the "was it corrected" comparison.
+     *
+     * @param  array<string, mixed>|null  $override
+     */
+    private function withInputOverride(Address $address, ?array $override, callable $fn): mixed
+    {
+        if ($override === null) {
+            return $fn();
+        }
+
+        $original = $address->only(array_keys($override));
+        $address->forceFill($override);
+        try {
+            return $fn();
+        } finally {
+            $address->forceFill($original)->save();
+        }
+    }
+
+    /**
      * Look up address in local correction cache.
      *
      * @return array<string, mixed>|null Validation result array or null if not found
@@ -340,13 +461,9 @@ class AddressValidationService
      */
     protected function sourceForSlug(string $slug): string
     {
-        return match ($slug) {
-            'ups' => Address::SOURCE_UPS_API,
-            'fedex' => Address::SOURCE_FEDEX_API,
-            'usps' => Address::SOURCE_USPS_API,
-            'smarty' => Address::SOURCE_SMARTY_API,
-            default => Address::SOURCE_UPS_API,
-        };
+        // "<slug>_api" — matches the SOURCE_*_API constants for known carriers and extends to any new
+        // one (usps_api, dhl_api) with no edit here, instead of silently mislabeling it as UPS.
+        return $slug.'_api';
     }
 
     /**
