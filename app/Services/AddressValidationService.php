@@ -198,6 +198,114 @@ class AddressValidationService
     }
 
     /**
+     * The bulk form of validateForCarrier: same flow (cache → feed the cached form → live carrier →
+     * fallback list → cached-form safety net), but the carrier is called ONCE per carrier attempt for
+     * the whole set, so batching is preserved. Every address here shares one primary carrier — the
+     * caller groups rows by their per-line ship-via carrier and calls this once per group.
+     *
+     * @param  array<int, Address>  $addresses
+     * @param  array<int, string>  $fallbackSlugs
+     * @return array<int, Address>
+     */
+    public function validateBatchForCarrier(array $addresses, ?string $primarySlug, array $fallbackSlugs = []): array
+    {
+        if ($addresses === []) {
+            return [];
+        }
+        $order = $this->carrierTryOrder($primarySlug, $fallbackSlugs);
+
+        // Cache lookup for the whole set; build the per-row input override (cached good form) for hits,
+        // and keep the cache result for the all-carriers-down safety net.
+        $overrides = [];
+        $cachedResults = [];
+        if ($this->useLocalCache) {
+            foreach ($addresses as $a) {
+                $cached = $this->lookupLocalCache($a);
+                if ($cached !== null) {
+                    $cachedResults[$a->id] = $cached;
+                    $overrides[$a->id] = [
+                        'input_address_1' => $cached['corrected_address_line_1'] ?? $a->input_address_1,
+                        'input_address_2' => $cached['corrected_address_line_2'] ?? $a->input_address_2,
+                        'input_city' => $cached['corrected_city'] ?? $a->input_city,
+                        'input_state' => $cached['corrected_state'] ?? $a->input_state,
+                        'input_postal' => $cached['corrected_postal_code'] ?? $a->input_postal,
+                        'input_country' => $cached['corrected_country_code'] ?? $a->input_country,
+                    ];
+                }
+            }
+        }
+
+        $pending = [];
+        foreach ($addresses as $a) {
+            $pending[$a->id] = $a;
+        }
+
+        foreach ($order as $slug) {
+            if ($pending === []) {
+                break;
+            }
+            $carrier = Carrier::where('slug', $slug)->where('is_active', true)->first();
+            if ($carrier === null) {
+                continue;
+            }
+            try {
+                $service = $this->createCarrierService($carrier);
+
+                // Hand the carrier the cached good form on hits (raw input on misses); restore after.
+                $originals = [];
+                foreach ($pending as $id => $a) {
+                    if (isset($overrides[$id])) {
+                        $originals[$id] = $a->only(array_keys($overrides[$id]));
+                        $a->forceFill($overrides[$id]);
+                    }
+                }
+                try {
+                    $service->validateBatch(array_values($pending));
+                } finally {
+                    foreach ($originals as $id => $orig) {
+                        $pending[$id]->forceFill($orig)->save();
+                    }
+                }
+
+                foreach ($pending as $id => $a) {
+                    $a->refresh();
+                    if ($a->output_address_1 !== null) {
+                        $a->update(['validation_source' => $this->sourceForSlug($slug), 'validated_by_carrier_id' => $carrier->id]);
+                        unset($pending[$id]);
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Batch validator failed; trying next', [
+                    'slug' => $slug, 'error' => $e->getMessage(), 'remaining' => count($pending),
+                ]);
+            }
+        }
+
+        // Anything still unresolved with a cache hit: use the cached good form (residential unknown).
+        foreach ($pending as $id => $a) {
+            if (isset($cachedResults[$id])) {
+                $c = $cachedResults[$id];
+                $a->update([
+                    'output_address_1' => $c['corrected_address_line_1'] ?? $a->input_address_1,
+                    'output_address_2' => $c['corrected_address_line_2'] ?? $a->input_address_2,
+                    'output_city' => $c['corrected_city'] ?? $a->input_city,
+                    'output_state' => $c['corrected_state'] ?? $a->input_state,
+                    'output_postal' => $c['corrected_postal_code'] ?? $a->input_postal,
+                    'output_postal_ext' => $c['corrected_postal_code_ext'] ?? null,
+                    'output_country' => $c['corrected_country_code'] ?? $a->input_country,
+                    'validation_status' => 'valid',
+                    'is_residential' => null,
+                    'classification' => null,
+                    'validation_source' => Address::SOURCE_LOCAL_CACHE,
+                    'validated_at' => now(),
+                ]);
+            }
+        }
+
+        return array_map(fn (Address $a): Address => $a->fresh() ?? $a, $addresses);
+    }
+
+    /**
      * The ordered, de-duplicated validator slugs to try: the shipment's own carrier first, then the
      * Fall Back Priority list. Only slugs with a registered driver AND an active Carrier Account
      * survive, so an unknown ship-via carrier (e.g. "Call CSR") simply drops to the fallbacks.

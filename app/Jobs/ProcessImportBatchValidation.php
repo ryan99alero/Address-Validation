@@ -2,10 +2,14 @@
 
 namespace App\Jobs;
 
+use App\Models\Address;
 use App\Models\Carrier;
 use App\Models\ImportBatch;
+use App\Models\IntegrationConnection;
+use App\Models\ShipViaCode;
 use App\Services\AddressValidationService;
 use App\Services\FedExServiceAvailabilityService;
+use App\Services\Shipping\HomeDeliverySwap;
 use App\Services\ShippingRecommendationService;
 use App\Services\UpsTimeInTransitService;
 use Illuminate\Bus\Queueable;
@@ -83,6 +87,12 @@ class ProcessImportBatchValidation implements ShouldQueue
         $validatedCount = 0;
         $failedCount = 0;
 
+        // The shared Fall Back Priority list (used only when a line's carrier is down / unidentified),
+        // read from the Pace connection so every path uses the same fallback order.
+        $fallbackSlugs = array_values((array) (IntegrationConnection::query()
+            ->where('driver', IntegrationConnection::DRIVER_PACE)->where('is_active', true)
+            ->value('validation_carriers') ?? []));
+
         // Use the carrier's configured chunk_size for batch processing
         // The carrier service handles concurrency internally based on its settings
         $batchSize = $carrier->chunk_size ?? 100;
@@ -107,19 +117,21 @@ class ProcessImportBatchValidation implements ShouldQueue
             }
 
             try {
-                // Engine may be a single carrier or a fallback chain (fedex_ups / ups_fedex).
-                // Falls back to the batch's carrier slug for older batches with no engine set.
-                $engine = $this->batch->validation_engine ?: $carrier->slug;
-                $corrections = $validationService->validateBatchWithEngine(
-                    $chunk->all(),
-                    $engine,
-                    (bool) $this->batch->check_both_sources,
-                );
-
-                // Process results
-                foreach ($corrections as $correction) {
-                    $validatedCount++;
-                    $this->batch->increment('validated_rows');
+                // Each line carries its own ship-via, so a batch can mix carriers. Group by the carrier
+                // resolved from each row's ship_via_code (falling back to the batch's carrier when a row
+                // has none), then validate each group in one bulk call through the shared engine — the
+                // per-line carrier drives residential; the Fall Back Priority list covers a down/unknown
+                // carrier. Bulk is preserved (one carrier call per group).
+                foreach ($this->groupByCarrier($chunk->all(), $carrier->slug) as $primarySlug => $group) {
+                    $results = $validationService->validateBatchForCarrier(
+                        $group,
+                        $primarySlug !== '' ? $primarySlug : null,
+                        $fallbackSlugs,
+                    );
+                    foreach ($results as $result) {
+                        $validatedCount++;
+                        $this->batch->increment('validated_rows');
+                    }
                 }
             } catch (\Exception $e) {
                 Log::warning('ProcessImportBatchValidation: Batch failed', [
@@ -172,6 +184,17 @@ class ProcessImportBatchValidation implements ShouldQueue
                 }
             }
 
+            // Residential FedEx Ground -> Home Delivery, applied LAST so it also corrects a shipment
+            // BestWay may have landed on FedEx Ground — a residential shipment never ships Ground.
+            try {
+                $this->applyResidentialHomeDeliverySwaps();
+            } catch (\Exception $e) {
+                Log::error('ProcessImportBatchValidation: Home Delivery swap failed', [
+                    'batch_id' => $this->batch->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
             $this->batch->markCompleted();
         }
 
@@ -181,6 +204,62 @@ class ProcessImportBatchValidation implements ShouldQueue
             'failed' => $failedCount,
             'was_cancelled' => $this->batch->isCancelled(),
         ]);
+    }
+
+    /**
+     * Group a chunk of addresses by the carrier resolved from each row's ship_via_code — so a mixed
+     * carrier batch validates each carrier's rows in one bulk call. Rows whose ship-via maps to no
+     * carrier fall to $defaultSlug (the batch's own carrier). Keyed by slug ('' = none).
+     *
+     * @param  array<int, Address>  $addresses
+     * @return array<string, array<int, Address>>
+     */
+    protected function groupByCarrier(array $addresses, string $defaultSlug): array
+    {
+        $groups = [];
+        foreach ($addresses as $address) {
+            $slug = $this->carrierForAddress($address) ?? $defaultSlug;
+            $groups[$slug][] = $address;
+        }
+
+        return $groups;
+    }
+
+    /**
+     * The carrier a row is set to ship on, from its ship_via_code. Null when it has none or the code
+     * maps to no carrier (e.g. "Call CSR").
+     */
+    protected function carrierForAddress(Address $address): ?string
+    {
+        $code = trim((string) ($address->ship_via_code ?? ''));
+
+        return $code === '' ? null : ShipViaCode::lookup($code)?->carrier_slug;
+    }
+
+    /**
+     * Residential FedEx Ground -> FedEx Home Delivery for the batch's residential rows, reusing the
+     * shared HomeDeliverySwap (same plant/payer/account). Runs after BestWay, so a residential shipment
+     * never ships FedEx Ground even if BestWay chose it; the original code is kept in
+     * previous_ship_via_code (not clobbering one BestWay already recorded).
+     */
+    protected function applyResidentialHomeDeliverySwaps(): void
+    {
+        $swap = new HomeDeliverySwap;
+
+        $this->batch->addresses()
+            ->where('is_residential', true)
+            ->whereNotNull('ship_via_code')
+            ->chunkById(500, function ($rows) use ($swap): void {
+                foreach ($rows as $address) {
+                    $home = $swap->resolve($address->ship_via_code);
+                    if ($home !== null && $home->code !== $address->ship_via_code) {
+                        $address->update([
+                            'previous_ship_via_code' => $address->previous_ship_via_code ?: $address->ship_via_code,
+                            'ship_via_code' => $home->code,
+                        ]);
+                    }
+                }
+            });
     }
 
     /**

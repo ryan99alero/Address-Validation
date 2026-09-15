@@ -25,6 +25,9 @@ class FakeValidatorDriver implements CarrierInterface
     /** @var array<string, array<string, mixed>> */
     public static array $returnFor = [];
 
+    /** @var array<string, int> batch calls per slug — proves bulk (one call per carrier group) */
+    public static array $batchCalls = [];
+
     protected Carrier $carrier;
 
     public function setCarrier(Carrier $carrier): CarrierInterface
@@ -51,6 +54,8 @@ class FakeValidatorDriver implements CarrierInterface
 
     public function validateBatch(array $addresses): array
     {
+        self::$batchCalls[$this->carrier->slug] = (self::$batchCalls[$this->carrier->slug] ?? 0) + 1;
+
         return array_map(fn (Address $a): Address => $this->validateAddress($a), $addresses);
     }
 
@@ -74,6 +79,7 @@ beforeEach(function () {
     FakeValidatorDriver::$log = [];
     FakeValidatorDriver::$throwFor = [];
     FakeValidatorDriver::$returnFor = [];
+    FakeValidatorDriver::$batchCalls = [];
     config([
         'address_validation.drivers.primary' => FakeValidatorDriver::class,
         'address_validation.drivers.backup' => FakeValidatorDriver::class,
@@ -82,11 +88,11 @@ beforeEach(function () {
     Carrier::factory()->create(['slug' => 'backup', 'name' => 'Backup', 'is_active' => true]);
 });
 
-function vfcAddress(): Address
+function vfcAddress(string $addr1 = '123 Main St', string $city = 'Wichita', string $postal = '67209'): Address
 {
     return Address::create([
-        'input_address_1' => '123 Main St', 'input_city' => 'Wichita', 'input_state' => 'KS',
-        'input_postal' => '67209', 'input_country' => 'US', 'validation_status' => 'pending', 'source' => 'api',
+        'input_address_1' => $addr1, 'input_city' => $city, 'input_state' => 'KS',
+        'input_postal' => $postal, 'input_country' => 'US', 'validation_status' => 'pending', 'source' => 'api',
     ]);
 }
 
@@ -176,4 +182,42 @@ test('unknown primary carrier (no driver) drops straight to the fallback list', 
 
     expect($out->validation_source)->toBe('backup_api')
         ->and(collect(FakeValidatorDriver::$log)->pluck('slug')->all())->toBe(['backup']); // primary never called
+});
+
+test('batch: a cache-miss set is validated in ONE bulk carrier call', function () {
+    FakeValidatorDriver::$returnFor['primary'] = vfcValid('CORRECTED');
+
+    $out = (new AddressValidationService)->validateBatchForCarrier(
+        [vfcAddress(), vfcAddress('999 Elm St', 'Derby', '67037')], 'primary', ['backup']
+    );
+
+    expect(collect($out)->pluck('validation_source')->all())->toBe(['primary_api', 'primary_api'])
+        ->and(FakeValidatorDriver::$batchCalls['primary'])->toBe(1); // one bulk call, not per-row
+});
+
+test('batch: a cache hit gets the cached form and a miss the raw input, in the same bulk call', function () {
+    vfcSeedCache(); // 123 Main St -> 456 CACHED AVE
+    FakeValidatorDriver::$returnFor['primary'] = vfcValid('X');
+    $hit = vfcAddress();
+    $miss = vfcAddress('999 Elm St', 'Derby', '67037');
+
+    (new AddressValidationService)->validateBatchForCarrier([$hit, $miss], 'primary', ['backup']);
+
+    $inputsSeen = collect(FakeValidatorDriver::$log)->pluck('input_address_1')->all();
+    expect($inputsSeen)->toContain('456 CACHED AVE')          // cached form fed for the hit
+        ->and($inputsSeen)->toContain('999 Elm St')           // raw input for the miss
+        ->and(FakeValidatorDriver::$batchCalls['primary'])->toBe(1)
+        ->and($hit->fresh()->input_address_1)->toBe('123 Main St'); // original input restored
+});
+
+test('batch: primary carrier down falls the whole set through to the fallback', function () {
+    FakeValidatorDriver::$throwFor['primary'] = true;
+    FakeValidatorDriver::$returnFor['backup'] = vfcValid('BK');
+
+    $out = (new AddressValidationService)->validateBatchForCarrier(
+        [vfcAddress(), vfcAddress('999 Elm St', 'Derby', '67037')], 'primary', ['backup']
+    );
+
+    expect(collect($out)->pluck('validation_source')->all())->toBe(['backup_api', 'backup_api'])
+        ->and(FakeValidatorDriver::$batchCalls['backup'])->toBe(1);
 });
