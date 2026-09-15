@@ -78,19 +78,24 @@ it('excludes account-level fees with no tracking number from both buckets', func
 
 it('splits the Carrier Fee Summary rollup by billing type', function () {
     CarrierChargeRollup::create([
-        'carrier_id' => $this->carrier->id, 'charge_category_id' => $this->fuel->id, 'is_third_party' => true,
+        'carrier_id' => $this->carrier->id, 'charge_category_id' => $this->fuel->id, 'is_third_party' => true, 'billing_type' => 'third_party',
         'year' => 2026, 'charge_count' => 10, 'total_amount' => 100, 'distinct_ships' => 5,
     ]);
     CarrierChargeRollup::create([
-        'carrier_id' => $this->carrier->id, 'charge_category_id' => $this->fuel->id, 'is_third_party' => false,
+        'carrier_id' => $this->carrier->id, 'charge_category_id' => $this->fuel->id, 'is_third_party' => false, 'billing_type' => 'prepaid',
         'year' => 2026, 'charge_count' => 20, 'total_amount' => 500, 'distinct_ships' => 8,
+    ]);
+    CarrierChargeRollup::create([
+        'carrier_id' => $this->carrier->id, 'charge_category_id' => $this->fuel->id, 'is_third_party' => false, 'billing_type' => 'collect',
+        'year' => 2026, 'charge_count' => 3, 'total_amount' => 30, 'distinct_ships' => 2,
     ]);
 
     $total = fn (array $filters): float => (float) collect(CarrierFeeSummary::computeData($filters))->sum('total');
 
-    expect($total(['scope' => 'all']))->toBe(600.0)                                    // both
-        ->and($total(['scope' => 'all', 'billing_type' => 'third_party']))->toBe(100.0) // TP only
-        ->and($total(['scope' => 'all', 'billing_type' => 'on_account']))->toBe(500.0); // on-account only
+    expect($total(['scope' => 'all']))->toBe(630.0)                                     // all three
+        ->and($total(['scope' => 'all', 'billing_type' => 'third_party']))->toBe(100.0) // 3rd party
+        ->and($total(['scope' => 'all', 'billing_type' => 'prepaid']))->toBe(500.0)     // prepaid (was "on account")
+        ->and($total(['scope' => 'all', 'billing_type' => 'collect']))->toBe(30.0);     // collect
 });
 
 it('interprets Pace thirdPartyCharges values into a boolean on sync', function () {
