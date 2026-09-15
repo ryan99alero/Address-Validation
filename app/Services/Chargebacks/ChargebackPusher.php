@@ -42,6 +42,43 @@ class ChargebackPusher
         return (bool) ($connection?->chargeback_record_only);
     }
 
+    /**
+     * Test mode: post JobCosts ONLY for the allow-listed customers. Returns true when this job must be
+     * HELD (resolved + recorded, but not posted) because test mode is on and the resolved customer id
+     * is not on the list. Never overrides record-only — the caller checks record-only first, so an
+     * Audit-only connection posts nothing regardless. With test mode on but no customers listed, every
+     * job is held (a safe "armed but empty" default — nothing bills until a customer is added).
+     */
+    public function testModeHolds(?IntegrationConnection $connection, ?string $customerId): bool
+    {
+        if (! (bool) ($connection?->chargeback_test_mode)) {
+            return false;
+        }
+
+        $allow = $this->testCustomerIds($connection);
+        $id = mb_strtolower(trim((string) $customerId));
+
+        return $id === '' || ! in_array($id, $allow, true);
+    }
+
+    /**
+     * The allow-listed customer ids, parsed from the free-text CSV field ("ID1, ID2, ID3"). Split on
+     * commas/whitespace, lower-cased + trimmed for case-insensitive matching, de-duplicated.
+     *
+     * @return array<int, string>
+     */
+    public function testCustomerIds(?IntegrationConnection $connection): array
+    {
+        $raw = (string) ($connection?->chargeback_test_customer_ids ?? '');
+
+        return collect(preg_split('/[,\s]+/', $raw) ?: [])
+            ->map(fn (string $s): string => mb_strtolower(trim($s)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
     /** activityCode recorded = the Fee Category's cost center, falling back to the driver's. */
     public function resolveActivityCode(?string $categoryCostCenter, ?string $driverCostCenter): ?string
     {

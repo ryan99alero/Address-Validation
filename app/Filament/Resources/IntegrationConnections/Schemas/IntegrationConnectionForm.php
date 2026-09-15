@@ -6,6 +6,7 @@ use App\Models\Carrier;
 use App\Models\IntegrationConnection;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
@@ -152,8 +153,20 @@ class IntegrationConnectionForm
                                     Toggle::make('chargeback_record_only')
                                         ->label('Audit only — record, don\'t post to Pace')
                                         ->default(true)
+                                        ->live()
                                         ->visible(fn (Get $get): bool => (bool) $get('chargeback_push_enabled'))
                                         ->helperText('ON (safe): eligible charges are written to the chargeback ledger for review, but NO JobCost is posted to Pace and no customer is billed (status shows "recorded"). OFF: charges post as real JobCosts to the customer\'s job in Pace — live billing. Already-recorded charges are released deliberately via the backfill command, never automatically.'),
+                                    Toggle::make('chargeback_test_mode')
+                                        ->label('Test mode — only bill the customers listed below')
+                                        ->live()
+                                        ->visible(fn (Get $get): bool => (bool) $get('chargeback_push_enabled') && ! (bool) $get('chargeback_record_only'))
+                                        ->helperText('Only relevant when Audit only is OFF (live posting). ON: a JobCost posts ONLY when the resolved job\'s customer id is on the list below; every other charge is resolved and recorded but HELD (status "skipped_test_mode"), never billed. Add a customer id later and re-drive the held rows (chargebacks:redrive --status=skipped_test_mode) to release them. With the list empty, nothing bills.'),
+                                    Textarea::make('chargeback_test_customer_ids')
+                                        ->label('Customer IDs to bill (comma-separated)')
+                                        ->rows(2)
+                                        ->visible(fn (Get $get): bool => (bool) $get('chargeback_push_enabled') && ! (bool) $get('chargeback_record_only') && (bool) $get('chargeback_test_mode'))
+                                        ->placeholder('ID1, ID2, ID3')
+                                        ->helperText('Pace Job customer ids (Job/@customer). Comma- or space-separated; case-insensitive. Append more any time, e.g. add "ID22" to make it "ID1, ID2, ID3, ID22", then re-drive the held rows.'),
                                 ]),
                             Section::make('Correction Cache')
                                 ->description('Enrichment for the address-correction cache.')

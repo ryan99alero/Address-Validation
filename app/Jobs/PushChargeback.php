@@ -133,9 +133,19 @@ class PushChargeback implements ShouldQueue
 
         // Record-only: the job resolved and is billable, but we deliberately do NOT create a Pace
         // JobCost — the full record (job/customer/CSR/salesperson) is written for the billing export
-        // and nothing is posted to the ERP.
+        // and nothing is posted to the ERP. Checked FIRST so Audit-only always wins: when it is on,
+        // nothing posts regardless of test mode.
         if ($pusher->recordOnly($connection)) {
             $ledger->update(['status' => ChargebackPush::STATUS_RECORDED]);
+
+            return;
+        }
+
+        // Test mode: post ONLY to the allow-listed customers. The customer is already stamped on the
+        // ledger above, so a held row is fully reviewable; it re-posts once its id is added to the list
+        // and the row is re-driven (chargebacks:redrive --status=skipped_test_mode).
+        if ($pusher->testModeHolds($connection, isset($shipment['customer']) ? (string) $shipment['customer'] : null)) {
+            $ledger->update(['status' => ChargebackPush::STATUS_SKIPPED_TEST_MODE]);
 
             return;
         }
