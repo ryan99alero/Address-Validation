@@ -8,9 +8,6 @@ use App\Models\AddressVariant;
 use App\Models\Carrier;
 use App\Models\CorrectedAddress;
 use App\Services\Carriers\CarrierInterface;
-use App\Services\Carriers\FedExCarrier;
-use App\Services\Carriers\SmartyCarrier;
-use App\Services\Carriers\UpsCarrier;
 use Exception;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Log;
@@ -38,18 +35,41 @@ class AddressValidationService
     }
 
     /**
-     * Create the appropriate carrier service instance.
+     * Create the carrier's validation driver from the registry (config/address_validation.php),
+     * so a new carrier is added by registering a slug + driver class — no change here.
      */
     protected function createCarrierService(Carrier $carrier): CarrierInterface
     {
-        $service = match ($carrier->slug) {
-            'ups' => new UpsCarrier,
-            'fedex' => new FedExCarrier,
-            'smarty' => new SmartyCarrier,
-            default => throw new Exception("Unsupported carrier: {$carrier->slug}"),
-        };
+        $driverClass = config('address_validation.drivers.'.$carrier->slug);
+        if ($driverClass === null || ! class_exists($driverClass)) {
+            throw new Exception("No address-validation driver registered for carrier '{$carrier->slug}'. Add it to config/address_validation.php.");
+        }
+
+        $service = new $driverClass;
+        if (! $service instanceof CarrierInterface) {
+            throw new Exception("Driver {$driverClass} for '{$carrier->slug}' must implement CarrierInterface.");
+        }
 
         return $service->setCarrier($carrier);
+    }
+
+    /**
+     * Carrier slugs that both have a registered validation driver AND an active Carrier Account — the
+     * carriers actually available to validate with. Drives the Fall Back Priority options and lets the
+     * engine skip a shipment's carrier that has no driver (e.g. a non-carrier "Call CSR" ship-via).
+     *
+     * @return array<int, string>
+     */
+    public function availableValidatorSlugs(): array
+    {
+        $registered = array_keys((array) config('address_validation.drivers', []));
+
+        return Carrier::query()
+            ->where('is_active', true)
+            ->whereIn('slug', $registered)
+            ->orderBy('slug')
+            ->pluck('slug')
+            ->all();
     }
 
     /**
