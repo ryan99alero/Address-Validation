@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Models\Address;
 use App\Models\Carrier;
 use App\Models\CompanySetting;
+use App\Models\IntegrationConnection;
 use App\Models\ShipViaCode;
 use App\Models\TransitTime;
 use App\Services\AddressValidationService;
@@ -222,12 +223,14 @@ class ValidateAddress extends Page implements HasSchemas
         ]);
 
         try {
+            // Same shared engine as Pace/Batch, with the UI-selected carrier as the primary override
+            // (there's no shipment to derive it from). The Fall Back Priority list — read from the Pace
+            // connection — covers that carrier's API being down.
             $service = app(AddressValidationService::class);
-            $validatedAddress = $service->validateAddress(
-                $address,
-                $carrier->slug,
-                (bool) ($data['check_both_sources'] ?? false),
-            );
+            $fallbackSlugs = array_values((array) (IntegrationConnection::query()
+                ->where('driver', IntegrationConnection::DRIVER_PACE)->where('is_active', true)
+                ->value('validation_carriers') ?? []));
+            $validatedAddress = $service->validateForCarrier($address, $carrier->slug, $fallbackSlugs);
 
             $this->result = $validatedAddress;
             $this->transitTimes = null;

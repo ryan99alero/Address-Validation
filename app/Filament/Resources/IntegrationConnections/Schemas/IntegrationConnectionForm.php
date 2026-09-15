@@ -131,14 +131,14 @@ class IntegrationConnectionForm
                                     TextInput::make('rate_limit_per_minute')->label('Rate Limit (per min)')->numeric()->minValue(1)->helperText('Blank = unlimited'),
                                 ]),
                             Section::make('Address Validation')
-                                ->description('Validators used for address correction, in priority order. The first that returns a result wins; the rest are fallbacks.')
+                                ->description('Fall Back Priority — used only when the shipment\'s own carrier API is down or its carrier can\'t be identified (e.g. "Call CSR"). Normal validation always goes to the carrier the shipment is set to ship on; these are the fallbacks, tried in order.')
                                 ->schema([
                                     Select::make('validation_carriers')
-                                        ->label('Validators (drag to set priority)')
+                                        ->label('Fall Back Priority (drag to set order)')
                                         ->multiple()
                                         ->reorderable()
                                         ->options(fn (): array => Carrier::query()->orderBy('name')->pluck('name', 'slug')->all())
-                                        ->helperText('e.g. Smarty → UPS → FedEx. Leave empty to use all active carriers (Smarty preferred).'),
+                                        ->helperText('Tried in order when the shipment\'s carrier can\'t validate — e.g. Smarty → UPS → FedEx. Empty = no fallback (the shipment\'s carrier only).'),
                                     Toggle::make('dry_run')
                                         ->label('Audit only — don\'t write corrections back to Pace')
                                         ->helperText('ON: we receive the shipment and calculate the corrected address, and log exactly what we WOULD change — but nothing is written back to Pace (safe; Pace is untouched). OFF: corrected addresses are written back to Pace (live).'),
