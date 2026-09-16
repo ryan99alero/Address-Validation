@@ -25,10 +25,9 @@ class ShipViaCodeForm
                     ->schema([
                         TextInput::make('code')
                             ->label('Your Code')
-                            ->unique(ignoreRecord: true)
                             ->maxLength(50)
                             ->placeholder('e.g., 5137')
-                            ->helperText('Your internal shipping code (optional)'),
+                            ->helperText('Your internal shipping code. The SAME code may map to several options — e.g. a sender-paid and a third-party version, or a Ground and a Home Delivery — distinguished by service type, payment type, plant and account. Uniqueness is intentionally not enforced.'),
                         TextInput::make('carrier_code')
                             ->label('Primary Carrier Code')
                             ->maxLength(20)
