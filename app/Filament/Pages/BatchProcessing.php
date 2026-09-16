@@ -264,11 +264,7 @@ class BatchProcessing extends Page implements HasSchemas
                                     if ($company->postal_code) {
                                         $set('origin_postal_code', $company->postal_code);
                                     }
-                                    // Default to FedEx for transit times if not set
-                                    $fedex = Carrier::where('slug', 'fedex')->where('is_active', true)->first();
-                                    if ($fedex) {
-                                        $set('transit_carrier_id', $fedex->id);
-                                    }
+                                    // Leave the transit carrier on "Auto" (per Ship-Via) by default.
                                 } else {
                                     // Clear BestWay if transit times disabled
                                     $set('find_best_service', false);
@@ -283,13 +279,14 @@ class BatchProcessing extends Page implements HasSchemas
                     ->schema([
                         Select::make('transit_carrier_id')
                             ->label('Transit Time Carrier')
+                            ->placeholder('Auto — use each shipment\'s Ship-Via carrier')
                             ->options(fn () => Carrier::whereIn('slug', ['ups', 'fedex'])
                                 ->where('is_active', true)
-                                ->pluck('name', 'id'))
+                                ->pluck('name', 'id')
+                                ->map(fn (string $name): string => 'Override — all rows use '.$name))
                             ->live()
                             ->visible(fn ($get) => $get('include_transit_times'))
-                            ->required(fn ($get) => $get('include_transit_times'))
-                            ->helperText('Select UPS or FedEx for transit time lookups'),
+                            ->helperText('Auto (default): each row\'s transit is looked up on the carrier its Ship-Via maps to — so a mixed-carrier file gets correct times. Or pick a carrier to force every row to it. (Transit APIs exist for UPS + FedEx; a row on any other carrier uses FedEx.)'),
                         TextInput::make('origin_postal_code')
                             ->label('Origin ZIP Code')
                             ->placeholder('e.g., 38017')

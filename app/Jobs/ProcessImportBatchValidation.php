@@ -14,6 +14,7 @@ use App\Services\ShippingRecommendationService;
 use App\Services\UpsTimeInTransitService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
@@ -267,111 +268,125 @@ class ProcessImportBatchValidation implements ShouldQueue
     }
 
     /**
-     * Fetch transit times for all validated addresses in the batch.
-     * Supports both UPS and FedEx based on transit_carrier_id.
+     * Fetch transit times for the batch's validated addresses.
+     *
+     * Override (transit_carrier_id set): one carrier for the whole batch. Auto (null): each row's
+     * transit is looked up on the carrier its Ship-Via maps to — a mixed-carrier file gets correct
+     * times. Transit APIs exist for UPS + FedEx, so any other carrier (Smarty/USPS/unknown) uses FedEx.
      */
     protected function fetchTransitTimes(): void
     {
-        // Get transit carrier from batch or fall back to FedEx
-        $transitCarrier = $this->batch->transit_carrier_id
-            ? Carrier::where('id', $this->batch->transit_carrier_id)->where('is_active', true)->first()
-            : Carrier::where('slug', 'fedex')->where('is_active', true)->first();
+        $total = $this->batch->addresses()->where('validation_status', 'valid')->count();
+        $this->batch->update([
+            'processing_phase' => ImportBatch::PHASE_TRANSIT_TIMES,
+            'total_for_transit' => $total,
+            'transit_time_rows' => 0,
+        ]);
 
-        if (! $transitCarrier) {
-            Log::warning('ProcessImportBatchValidation: Transit carrier not found or inactive', [
-                'batch_id' => $this->batch->id,
-                'transit_carrier_id' => $this->batch->transit_carrier_id,
-            ]);
+        // Override: one carrier for every row.
+        if ($this->batch->transit_carrier_id) {
+            $carrier = Carrier::where('id', $this->batch->transit_carrier_id)->where('is_active', true)->first();
+            if (! $carrier) {
+                Log::warning('ProcessImportBatchValidation: Transit carrier not found or inactive', [
+                    'batch_id' => $this->batch->id, 'transit_carrier_id' => $this->batch->transit_carrier_id,
+                ]);
+
+                return;
+            }
+            $this->fetchTransitTimesForCarrier($carrier, $this->batch->addresses()->where('validation_status', 'valid'));
 
             return;
         }
 
-        // Get validated addresses count first (denormalized schema)
-        $totalValidated = $this->batch->addresses()
-            ->where('validation_status', 'valid')
-            ->count();
+        // Auto: group valid addresses by their Ship-Via carrier (UPS/FedEx; anything else -> FedEx) and
+        // look each group up on that carrier. Progress accumulates across groups.
+        $processedBase = 0;
+        foreach ($this->transitCarrierGroups() as $slug => $ids) {
+            if ($ids === []) {
+                continue;
+            }
+            $carrier = Carrier::where('slug', $slug)->where('is_active', true)->first();
+            if (! $carrier) {
+                continue;
+            }
+            $processedBase += $this->fetchTransitTimesForCarrier(
+                $carrier,
+                $this->batch->addresses()->where('validation_status', 'valid')->whereIn('id', $ids),
+                $processedBase,
+            );
+        }
+    }
 
-        // Update phase to transit times
-        $this->batch->update([
-            'processing_phase' => ImportBatch::PHASE_TRANSIT_TIMES,
-            'total_for_transit' => $totalValidated,
-            'transit_time_rows' => 0,
-        ]);
-
-        Log::info('ProcessImportBatchValidation: Fetching transit times', [
-            'batch_id' => $this->batch->id,
-            'carrier' => $transitCarrier->name,
-            'carrier_slug' => $transitCarrier->slug,
-            'origin_postal_code' => $this->batch->origin_postal_code,
-            'total_addresses' => $totalValidated,
-        ]);
-
-        // Create appropriate transit service based on carrier
-        $transitService = match ($transitCarrier->slug) {
-            'ups' => new UpsTimeInTransitService($transitCarrier),
-            'fedex' => new FedExServiceAvailabilityService($transitCarrier),
-            default => new FedExServiceAvailabilityService($transitCarrier),
+    /**
+     * Run transit lookups for one carrier over the given address query, in concurrent chunks. Returns
+     * the number processed; $progressBase offsets the batch's transit_time_rows so Auto mode's several
+     * carrier groups report a single running total.
+     *
+     * @param  Builder<Address>  $addressQuery
+     */
+    protected function fetchTransitTimesForCarrier(Carrier $carrier, $addressQuery, int $progressBase = 0): int
+    {
+        $transitService = match ($carrier->slug) {
+            'ups' => new UpsTimeInTransitService($carrier),
+            default => new FedExServiceAvailabilityService($carrier),
         };
 
+        $concurrentRequests = $carrier->concurrent_requests ?? 10;
+        $chunkSize = $concurrentRequests * 5;
         $processed = 0;
         $failed = 0;
 
-        // Use carrier's concurrent request setting, default to 10
-        $concurrentRequests = $transitCarrier->concurrent_requests ?? 10;
-        $chunkSize = $concurrentRequests * 5; // Process 5 concurrent batches at a time
-
-        Log::info('ProcessImportBatchValidation: Using concurrent transit time fetching', [
-            'batch_id' => $this->batch->id,
-            'carrier' => $transitCarrier->name,
-            'concurrent_requests' => $concurrentRequests,
-            'chunk_size' => $chunkSize,
+        Log::info('ProcessImportBatchValidation: Fetching transit times', [
+            'batch_id' => $this->batch->id, 'carrier' => $carrier->name, 'origin_postal_code' => $this->batch->origin_postal_code,
         ]);
 
-        // Process in chunks using cursor for memory efficiency (denormalized schema)
-        $this->batch->addresses()
-            ->where('validation_status', 'valid')
-            ->chunk($chunkSize, function ($addresses) use ($transitService, $concurrentRequests, &$processed, &$failed) {
-                // Check if cancelled at chunk boundary
-                $this->batch->refresh();
-                if ($this->batch->isCancelled()) {
-                    return false; // Stop chunking
+        $addressQuery->chunk($chunkSize, function ($addresses) use ($transitService, $concurrentRequests, $progressBase, &$processed, &$failed) {
+            $this->batch->refresh();
+            if ($this->batch->isCancelled()) {
+                return false;
+            }
+
+            $result = $transitService->getTransitTimesBatch(
+                $addresses,
+                $this->batch->origin_postal_code,
+                $this->batch->origin_country_code ?? 'US',
+                $concurrentRequests
+            );
+            $processed += $result['processed'];
+            $failed += $result['failed'];
+            $this->batch->update(['transit_time_rows' => $progressBase + $processed]);
+
+            if ($failed > 10 && $processed === 0) {
+                Log::error('ProcessImportBatchValidation: Too many transit time failures, stopping', ['batch_id' => $this->batch->id]);
+
+                return false;
+            }
+
+            return true;
+        });
+
+        return $processed;
+    }
+
+    /**
+     * Valid-address ids grouped by the carrier to run transit on (Auto mode). Only UPS + FedEx have
+     * transit APIs, so a row whose Ship-Via maps to neither is looked up on FedEx.
+     *
+     * @return array<string, array<int, int>>
+     */
+    protected function transitCarrierGroups(): array
+    {
+        $groups = ['fedex' => [], 'ups' => []];
+        $this->batch->addresses()->where('validation_status', 'valid')
+            ->select('id', 'ship_via_code')
+            ->chunkById(1000, function ($rows) use (&$groups): void {
+                foreach ($rows as $row) {
+                    $slug = $this->carrierForAddress($row);
+                    $groups[in_array($slug, ['ups', 'fedex'], true) ? $slug : 'fedex'][] = $row->id;
                 }
-
-                // Use concurrent batch processing
-                $result = $transitService->getTransitTimesBatch(
-                    $addresses,
-                    $this->batch->origin_postal_code,
-                    $this->batch->origin_country_code ?? 'US',
-                    $concurrentRequests
-                );
-
-                $processed += $result['processed'];
-                $failed += $result['failed'];
-
-                // Update progress after each chunk
-                $this->batch->update(['transit_time_rows' => $processed]);
-
-                // If we get too many consecutive failures, stop trying
-                if ($failed > 10 && $processed === 0) {
-                    Log::error('ProcessImportBatchValidation: Too many transit time failures, stopping', [
-                        'batch_id' => $this->batch->id,
-                    ]);
-
-                    return false; // Stop chunking
-                }
-
-                return true; // Continue to next chunk
             });
 
-        // Final update of transit time progress
-        $this->batch->update(['transit_time_rows' => $processed]);
-
-        Log::info('ProcessImportBatchValidation: Transit times completed', [
-            'batch_id' => $this->batch->id,
-            'carrier' => $transitCarrier->name,
-            'processed' => $processed,
-            'failed' => $failed,
-        ]);
+        return $groups;
     }
 
     /**

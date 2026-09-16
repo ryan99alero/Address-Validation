@@ -35,10 +35,11 @@ beforeEach(function () {
     ShipViaCode::create(['code' => 'FDG', 'carrier_id' => $fedex->id, 'service_type' => 'FEDEX_GROUND', 'service_name' => 'FedEx Ground', 'is_active' => true]);
     ShipViaCode::create(['code' => 'UPG', 'carrier_id' => $ups->id, 'service_type' => 'GND', 'service_name' => 'UPS Ground', 'is_active' => true]);
 
-    $this->job = new ProcessImportBatchValidation(ImportBatch::create([
+    $this->batch = ImportBatch::create([
         'original_filename' => 'x.csv', 'file_path' => 'x', 'status' => 'mapping', 'total_rows' => 3,
         'carrier_id' => $fedex->id, 'validation_engine' => 'auto',
-    ]));
+    ]);
+    $this->job = new ProcessImportBatchValidation($this->batch);
     $this->rows = [modeAddress('FDG'), modeAddress('UPG'), modeAddress(null)];
 });
 
@@ -55,4 +56,25 @@ it('override mode forces every row to the chosen carrier, ignoring ship-via', fu
 
     expect(array_keys($groups))->toBe(['fedex'])
         ->and($groups['fedex'])->toBe(['FDG', 'UPG', null]);
+});
+
+it('transit Auto groups valid addresses by ship-via carrier (non-UPS/FedEx -> FedEx)', function () {
+    $mk = function (?string $code): Address {
+        return Address::create([
+            'input_address_1' => '1 Main St', 'input_city' => 'Wichita', 'input_state' => 'KS',
+            'input_postal' => '67209', 'input_country' => 'US', 'validation_status' => 'valid',
+            'source' => 'api', 'ship_via_code' => $code, 'import_batch_id' => $this->batch->id,
+        ]);
+    };
+    $fedexRow = $mk('FDG');
+    $upsRow = $mk('UPG');
+    $otherRow = $mk(null); // no ship-via carrier -> transit falls to FedEx
+
+    $m = new ReflectionMethod($this->job, 'transitCarrierGroups');
+    $m->setAccessible(true);
+    $groups = $m->invoke($this->job);
+
+    expect($groups['ups'])->toBe([$upsRow->id])
+        ->and($groups['fedex'])->toContain($fedexRow->id)
+        ->and($groups['fedex'])->toContain($otherRow->id);
 });
