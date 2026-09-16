@@ -19,7 +19,7 @@ it('groups the import form into task sections', function () {
         ->assertSee('Upload File')
         ->assertSee('Validation Options')
         ->assertSee('Import Name')
-        ->assertSee('Validation Engine')
+        ->assertSee('Validation Carrier')
         // The Transit / BestWay block only appears once "Include Time in Transit" is ticked.
         ->assertDontSee('Transit Time & BestWay');
 });

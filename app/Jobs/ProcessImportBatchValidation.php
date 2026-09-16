@@ -93,6 +93,10 @@ class ProcessImportBatchValidation implements ShouldQueue
             ->where('driver', IntegrationConnection::DRIVER_PACE)->where('is_active', true)
             ->value('validation_carriers') ?? []));
 
+        // validation_engine 'auto' = per-row Ship-Via carrier; any carrier slug = force EVERY row to it.
+        $engine = (string) ($this->batch->validation_engine ?? 'auto');
+        $overrideCarrier = ($engine !== '' && $engine !== 'auto') ? explode('_', $engine)[0] : null;
+
         // Use the carrier's configured chunk_size for batch processing
         // The carrier service handles concurrency internally based on its settings
         $batchSize = $carrier->chunk_size ?? 100;
@@ -117,12 +121,11 @@ class ProcessImportBatchValidation implements ShouldQueue
             }
 
             try {
-                // Each line carries its own ship-via, so a batch can mix carriers. Group by the carrier
-                // resolved from each row's ship_via_code (falling back to the batch's carrier when a row
-                // has none), then validate each group in one bulk call through the shared engine — the
-                // per-line carrier drives residential; the Fall Back Priority list covers a down/unknown
-                // carrier. Bulk is preserved (one carrier call per group).
-                foreach ($this->groupByCarrier($chunk->all(), $carrier->slug) as $primarySlug => $group) {
+                // Auto: a batch can mix carriers, so group by the carrier resolved from each row's
+                // ship_via_code (a row with none drops to the Fall Back Priority list). Override: every
+                // row uses the chosen carrier. Either way each group is validated in one bulk call — the
+                // per-line carrier drives residential; bulk is preserved (one carrier call per group).
+                foreach ($this->groupByCarrier($chunk->all(), $overrideCarrier) as $primarySlug => $group) {
                     $results = $validationService->validateBatchForCarrier(
                         $group,
                         $primarySlug !== '' ? $primarySlug : null,
@@ -207,18 +210,19 @@ class ProcessImportBatchValidation implements ShouldQueue
     }
 
     /**
-     * Group a chunk of addresses by the carrier resolved from each row's ship_via_code — so a mixed
-     * carrier batch validates each carrier's rows in one bulk call. Rows whose ship-via maps to no
-     * carrier fall to $defaultSlug (the batch's own carrier). Keyed by slug ('' = none).
+     * Group a chunk of addresses by the carrier to validate each against. In OVERRIDE mode ($override set)
+     * every row goes to that one carrier. In AUTO mode ($override null) rows are grouped by the carrier
+     * resolved from their ship_via_code — a mixed-carrier file validates each carrier's rows in one bulk
+     * call; a row whose ship-via maps to no carrier gets key '' (→ null primary → the Fall Back list).
      *
      * @param  array<int, Address>  $addresses
      * @return array<string, array<int, Address>>
      */
-    protected function groupByCarrier(array $addresses, string $defaultSlug): array
+    protected function groupByCarrier(array $addresses, ?string $override): array
     {
         $groups = [];
         foreach ($addresses as $address) {
-            $slug = $this->carrierForAddress($address) ?? $defaultSlug;
+            $slug = $override ?? ($this->carrierForAddress($address) ?? '');
             $groups[$slug][] = $address;
         }
 

@@ -12,6 +12,7 @@ use App\Models\ExportTemplate;
 use App\Models\ImportBatch;
 use App\Models\ImportFieldTemplate;
 use App\Models\Plant;
+use App\Services\AddressValidationService;
 use App\Services\ImportService;
 use BackedEnum;
 use Filament\Forms\Components\Checkbox;
@@ -91,7 +92,7 @@ class BatchProcessing extends Page implements HasSchemas
     public function mount(): void
     {
         $this->uploadForm->fill([
-            'validation_engine' => Carrier::where('slug', 'fedex')->where('is_active', true)->exists() ? 'fedex' : 'ups',
+            'validation_engine' => 'auto',
             'auto_validate' => true,
             'check_both_sources' => true,
         ]);
@@ -139,23 +140,23 @@ class BatchProcessing extends Page implements HasSchemas
     }
 
     /**
-     * Active single-carrier validation engines. FedEx↔UPS fallback chains were
-     * evaluated and dropped: both carriers validate US addresses against the same
-     * USPS/CASS data, so a second carrier recovers ~no additional corrections
-     * (measured n=120). validateBatchWithEngine() still supports chains if ever
-     * re-enabled, but they are intentionally not offered here.
+     * Validation-carrier choices for the batch: "auto" (validate each row against the carrier its
+     * Ship-Via code maps to — a file can mix carriers) plus one "override" entry per active validator
+     * (force every row to that carrier). Override list is driver-aware, so USPS/DHL appear once
+     * registered. In auto mode a row whose Ship-Via maps to no carrier falls to the Fall Back Priority.
      *
      * @return array<string, string>
      */
     public function validationEngineOptions(): array
     {
-        $active = Carrier::where('is_active', true)->pluck('name', 'slug');
-        $options = [];
-        if ($active->has('fedex')) {
-            $options['fedex'] = 'FedEx';
-        }
-        if ($active->has('ups')) {
-            $options['ups'] = 'UPS';
+        // Auto (default): each row validates against the carrier its Ship-Via code maps to — a file can
+        // mix carriers. Or pick a carrier to force EVERY row to that one, ignoring the Ship-Via.
+        $options = ['auto' => 'Auto — use each shipment\'s Ship-Via carrier'];
+
+        $slugs = app(AddressValidationService::class)->availableValidatorSlugs();
+        $names = Carrier::whereIn('slug', $slugs)->pluck('name', 'slug');
+        foreach ($slugs as $slug) {
+            $options[$slug] = 'Override — all rows use '.($names[$slug] ?? ucfirst($slug));
         }
 
         return $options;
@@ -179,10 +180,10 @@ class BatchProcessing extends Page implements HasSchemas
             ],
             'sections' => [
                 [
-                    'title' => 'Validation engine (Import tab)',
+                    'title' => 'Validation carrier (Import tab)',
                     'items' => [
-                        ['name' => 'FedEx / UPS', 'means' => 'Checks the local invoice-correction cache first, then the chosen carrier\'s API for anything not found. FedEx and UPS validate US addresses against the same USPS/CASS data, so they return near-identical results — pick either.', 'how' => 'cache → carrier'],
-                        ['name' => 'Check both sources', 'means' => 'Validates against the invoice cache AND the carrier, flagging disagreements as Needs Review for a manual pick.'],
+                        ['name' => 'Auto (default)', 'means' => 'Each row is validated against the carrier its Ship-Via code maps to — so a file that mixes carriers is handled correctly, and residential comes from the carrier that will actually bill it. A row whose Ship-Via maps to no carrier uses the Fall Back Priority list.', 'how' => 'cache → row\'s carrier → fallback'],
+                        ['name' => 'Override — a carrier', 'means' => 'Forces every row to the chosen carrier, ignoring the Ship-Via. Use when a whole file should validate against one carrier.'],
                     ],
                 ],
                 [
@@ -234,12 +235,12 @@ class BatchProcessing extends Page implements HasSchemas
                             ->placeholder('Leave blank to use filename')
                             ->helperText('Optional: Give this import a custom name for easy identification'),
                         Select::make('validation_engine')
-                            ->label('Validation Engine')
+                            ->label('Validation Carrier')
                             ->options(fn (): array => $this->validationEngineOptions())
-                            ->default('fedex')
+                            ->default('auto')
                             ->required()
                             ->live()
-                            ->helperText('Which carrier API to validate against. Checks the local invoice cache first, then that carrier.'),
+                            ->helperText('Auto (recommended): each row is validated against the carrier its Ship-Via code maps to — so a file that mixes carriers is handled correctly — with the Fall Back Priority list covering any row whose carrier can\'t be identified. Or pick a carrier to force every row to that one. The local invoice cache is checked first either way.'),
                     ]),
                 Section::make('Validation Options')
                     ->columns(['default' => 1, 'md' => 2, 'xl' => 3])
@@ -519,12 +520,14 @@ class BatchProcessing extends Page implements HasSchemas
             // Count rows efficiently without loading all data into memory
             $totalRows = $importService->countRows($file);
 
-            // The engine may be a single carrier or a fallback chain; carrier_id stores
-            // the PRIMARY carrier (first in the chain) so chunk-sizing, transit and other
-            // Carrier-model lookups keep working. validation_engine drives the loop.
-            $engine = $data['validation_engine'] ?? 'fedex';
-            $primarySlug = explode('_', $engine)[0];
-            $primaryCarrier = Carrier::where('slug', $primarySlug)->where('is_active', true)->first();
+            // validation_engine = 'auto' (per-row Ship-Via carrier) OR a carrier slug (force every row to
+            // it). carrier_id keeps a real carrier for chunk-sizing / model lookups either way; in 'auto'
+            // it's just a default (a fallback for rows with no Ship-Via) — the per-line resolution in
+            // ProcessImportBatchValidation is what actually drives the carrier per row.
+            $engine = $data['validation_engine'] ?? 'auto';
+            $primaryCarrier = $engine === 'auto'
+                ? Carrier::where('is_active', true)->orderByRaw("slug = 'fedex' desc")->first()
+                : Carrier::where('slug', explode('_', $engine)[0])->where('is_active', true)->first();
 
             $importName = $data['import_name'] ?? null;
             $this->batch = ImportBatch::create([
@@ -782,7 +785,7 @@ class BatchProcessing extends Page implements HasSchemas
         $this->lastProcessedFile = null;
 
         $this->uploadForm->fill([
-            'validation_engine' => Carrier::where('slug', 'fedex')->where('is_active', true)->exists() ? 'fedex' : 'ups',
+            'validation_engine' => 'auto',
             'auto_validate' => true,
             'check_both_sources' => true,
         ]);
