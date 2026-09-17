@@ -75,11 +75,13 @@ class ChargebackPushes extends Page implements HasTable
             ->query(ChargebackPush::query()->with(['carrier', 'invoice', 'category', 'cartonCost'])->latest('id'))
             ->columns([
                 TextColumn::make('status')->badge()->sortable()
+                    ->formatStateUsing(fn (?string $state): string => ChargebackPush::statusLabel($state))
                     ->color(fn (string $state): string => match ($state) {
                         'pushed' => 'success',
                         'failed', 'unverified' => 'danger',
                         'pending' => 'warning',
-                        default => 'gray', // skipped_*
+                        'skipped_test_mode' => 'info', // held by test mode — would have posted otherwise
+                        default => 'gray', // other skipped_*
                     }),
                 TextColumn::make('line_state')
                     ->label('Line')

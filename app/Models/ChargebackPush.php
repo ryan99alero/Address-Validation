@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 /**
  * One row in the chargeback ledger — see the create migration. Status is the disposition of every
@@ -46,6 +47,30 @@ class ChargebackPush extends Model
     public const CONFLICT_AMOUNT = 'amount_changed';   // same shipment+category, a re-import changed the amount
 
     public const CONFLICT_CATEGORY = 'category_changed'; // same shipment+amount, a re-import recategorized it
+
+    /**
+     * Human-readable label for a ledger status — shared by the ChargebackPushes table, the invoice
+     * relation manager, and the status filter so the raw slugs never surface in the UI.
+     */
+    public static function statusLabel(?string $status): string
+    {
+        return match ($status) {
+            self::STATUS_PUSHED => 'Pushed',
+            self::STATUS_PENDING => 'Pending',
+            self::STATUS_UNVERIFIED => 'Unverified',
+            self::STATUS_FAILED => 'Failed',
+            self::STATUS_RECORDED => 'Recorded (Audit only)',
+            self::STATUS_SKIPPED_TEST_MODE => 'Outside Test Parameters',
+            self::STATUS_SKIPPED_JOB_CLOSED => 'Skipped — Job Closed',
+            self::STATUS_SKIPPED_NO_JOBSHIPMENT => 'Skipped — No Job/Shipment',
+            self::STATUS_SKIPPED_AMBIGUOUS => 'Skipped — Ambiguous Shipment',
+            self::STATUS_SKIPPED_CREDIT => 'Skipped — Credit',
+            self::STATUS_QUARANTINED => 'Needs Review',
+            self::STATUS_DISMISSED => 'Dismissed',
+            self::STATUS_REVERSED => 'Reversed',
+            default => $status !== null && $status !== '' ? Str::headline($status) : '—',
+        };
+    }
 
     protected $fillable = [
         'txn_id', 'identity_version', 'dedupe_key', 'duplicate_of_id', 'conflict_with_id', 'conflict_reason',

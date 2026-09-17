@@ -31,7 +31,8 @@ class ChargebackPushTable
         return SelectFilter::make('view')
             ->label('View')
             ->options(fn (): array => array_merge(
-                ChargebackPush::query()->distinct()->orderBy('status')->pluck('status', 'status')->all(),
+                ChargebackPush::query()->distinct()->orderBy('status')->pluck('status')
+                    ->mapWithKeys(fn (string $s): array => [$s => ChargebackPush::statusLabel($s)])->all(),
                 [ChargebackPush::REVERSAL_NEEDS => 'Duplicate — needs reversal'],
             ))
             ->query(fn (Builder $query, array $data): Builder => $query->when(

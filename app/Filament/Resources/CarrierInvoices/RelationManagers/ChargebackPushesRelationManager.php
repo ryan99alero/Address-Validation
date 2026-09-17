@@ -6,6 +6,7 @@ use App\Filament\Concerns\ScopedTableSearch;
 use App\Filament\Support\CartonReferenceColumns;
 use App\Filament\Support\ChargebackPushTable;
 use App\Filament\Support\DateRangeFilter;
+use App\Models\ChargebackPush;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -34,10 +35,12 @@ class ChargebackPushesRelationManager extends RelationManager
         return $table
             ->columns([
                 TextColumn::make('status')->badge()->sortable()
+                    ->formatStateUsing(fn (?string $state): string => ChargebackPush::statusLabel($state))
                     ->color(fn (string $state): string => match ($state) {
                         'pushed' => 'success',
                         'failed', 'unverified' => 'danger',
                         'pending' => 'warning',
+                        'skipped_test_mode' => 'info',
                         default => 'gray',
                     }),
                 TextColumn::make('tracking_number')->label('Tracking')->searchable()->fontFamily('mono'),
