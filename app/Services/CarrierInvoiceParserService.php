@@ -6,6 +6,7 @@ use App\Enums\ChargeDriver;
 use App\Jobs\PushInvoiceChargebacks;
 use App\Jobs\SyncInvoiceCartonCosts;
 use App\Models\Carrier;
+use App\Models\CarrierAccount;
 use App\Models\CarrierCharge;
 use App\Models\CarrierInvoice;
 use App\Models\CarrierInvoiceLine;
@@ -1254,7 +1255,10 @@ class CarrierInvoiceParserService
                 }
             }
 
-            $invoice = $this->getOrCreateInvoice($carrierId, $number, $invoiceDate, InvoiceIdentity::account($section['account'] ?? null));
+            // FedEx PDFs mask the account (e.g. "XXXX-X560-4") — resolve the visible suffix to the full
+            // known account so the invoice is labeled correctly; null (unmatched/ambiguous) stays unset.
+            $resolvedAccount = CarrierAccount::resolveInvoiceAccount($carrierId, $section['account'] ?? null);
+            $invoice = $this->getOrCreateInvoice($carrierId, $number, $invoiceDate, InvoiceIdentity::account($resolvedAccount));
 
             // CSV is authoritative for FedEx charges — its itemized total ties to the invoice's
             // "Net Charge Amount" column to the cent. When the CSV already imported this invoice's

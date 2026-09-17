@@ -148,7 +148,9 @@ class FedExInvoiceParser
         for ($i = 1; $i + 1 < count($parts); $i += 2) {
             $section = (string) $parts[$i + 1];
             preg_match('/Invoice Date\s+([A-Z][a-z]{2} \d{1,2}, \d{4})/', $section, $d);
-            preg_match('/Account Number\s+([0-9-]+)/', $section, $a);
+            // FedEx PDFs mask the account, printing only the last digits (e.g. "XXXX-X560-4"), so allow
+            // X's — the masked suffix is resolved to the full account at import (CarrierAccount lookup).
+            preg_match('/Account Number\s+([0-9X\-]+)/i', $section, $a);
             $shipments = $this->extractShipments($section, $source);
             $invoices[] = [
                 'number' => (string) $parts[$i],
