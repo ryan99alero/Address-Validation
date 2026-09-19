@@ -2,17 +2,24 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Widgets\Concerns\ReadsDashboardPeriod;
+use App\Services\Analytics\CostAnalyticsService;
 use App\Services\Recoup\RecoupService;
+use Filament\Widgets\Concerns\InteractsWithPageFilters;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
 /**
  * Recoup zone (Pillar 3): carrier charges above what Process Shipper quoted at ship time —
  * billable back to the customer — plus carton coverage over outbound shipments. Inbound
- * Collect / Third-Party (vendor-on-our-account) shipments are excluded from coverage.
+ * Collect / Third-Party (vendor-on-our-account) shipments are excluded from coverage. Scoped to
+ * the dashboard timeline (charge invoice_date).
  */
 class RecoupStats extends StatsOverviewWidget
 {
+    use InteractsWithPageFilters;
+    use ReadsDashboardPeriod;
+
     protected static ?int $sort = 2;
 
     protected int|string|array $columnSpan = 'full';
@@ -26,12 +33,15 @@ class RecoupStats extends StatsOverviewWidget
     protected function getStats(): array
     {
         $recoup = app(RecoupService::class);
-        $candidates = $recoup->candidates();
-        $coverage = $recoup->coverage();
+        [$year, $month] = $this->selectedPeriod(app(CostAnalyticsService::class));
+        $label = $this->periodLabel($year, $month);
+
+        $candidates = $recoup->candidates(year: $year, month: $month);
+        $coverage = $recoup->coverage($year, $month);
         $total = round($candidates->sum('delta'), 2);
 
         return [
-            Stat::make('Recoupable', '$'.number_format($total, 2))
+            Stat::make('Recoupable · '.$label, '$'.number_format($total, 2))
                 ->description($candidates->count().' shipments billed over quote (invoiced − ship cost)')
                 ->color($total > 0 ? 'success' : 'gray'),
 

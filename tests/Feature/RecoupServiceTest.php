@@ -285,3 +285,29 @@ test('SyncInvoiceCartonCosts syncs the distinct tracking numbers of the given in
 
     (new SyncInvoiceCartonCosts([$this->invoiceId]))->handle($mock);
 });
+
+test('candidates and coverage respect the dashboard period (invoice_date year/month)', function () {
+    $mk = function (string $tracking, float $amount, string $invoiceDate): void {
+        DB::table('carrier_charges')->insert([
+            'carrier_invoice_id' => $this->invoiceId, 'carrier_id' => $this->carrier->id,
+            'tracking_number' => $tracking, 'amount' => $amount, 'charge_category_id' => RecoupService::CAT_BASE_TRANSPORT,
+            'invoice_date' => $invoiceDate, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+    };
+    $mk('T2024', 15.00, '2024-03-10');
+    carton('T2024', 10.00); // $5 recoup, 2024
+    $mk('T2026', 20.00, '2026-07-15');
+    carton('T2026', 12.00); // $8 recoup, 2026
+
+    $svc = app(RecoupService::class);
+
+    expect($svc->candidates()->pluck('tracking_number')->sort()->values()->all())->toBe(['T2024', 'T2026']) // all-time
+        ->and($svc->candidates(year: 2026)->pluck('tracking_number')->all())->toBe(['T2026'])
+        ->and($svc->candidates(year: 2024)->pluck('tracking_number')->all())->toBe(['T2024'])
+        ->and($svc->candidates(year: 2026, month: 7)->pluck('tracking_number')->all())->toBe(['T2026'])
+        ->and($svc->candidates(year: 2026, month: 6)->count())->toBe(0);
+
+    expect($svc->coverage()->total)->toBe(2)
+        ->and($svc->coverage(2026)->total)->toBe(1)
+        ->and($svc->coverage(2024)->total)->toBe(1);
+});

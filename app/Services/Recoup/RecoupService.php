@@ -71,11 +71,12 @@ class RecoupService
 
     /**
      * Per-tracking recoup candidates: cartons whose invoiced total exceeds the recorded ship
-     * cost by at least $minDelta and haven't been recouped yet. Largest delta first.
+     * cost by at least $minDelta and haven't been recouped yet. Largest delta first. Optionally
+     * scoped to a period (charge invoice_date year/month) for the dashboard timeline picker.
      *
      * @return Collection<int, object{tracking_number:string, pace_job_number:?string, pace_customer_id:?string, ship_date:?string, ship_cost:float, actual:float, delta:float}>
      */
-    public function candidates(float $minDelta = 0.01): Collection
+    public function candidates(float $minDelta = 0.01, ?int $year = null, ?int $month = null): Collection
     {
         return DB::table('carrier_charges as cc')
             // Era-correct join (carton_cost_id), not bare tracking — otherwise a recycled 1Z's old
@@ -86,6 +87,8 @@ class RecoupService
             // A carton with no recorded cost (0, e.g. pre-Process-Shipper shipments) has no valid
             // baseline — actual − 0 would look like a full-amount recoup. Only real costs qualify.
             ->whereRaw('kc.ship_cost > 0')
+            ->when($year, fn ($q) => $q->whereYear('cc.invoice_date', $year))
+            ->when($month, fn ($q) => $q->whereMonth('cc.invoice_date', $month))
             ->groupBy('cc.tracking_number', 'kc.ship_cost', 'kc.pace_job_number', 'kc.pace_customer_id', 'kc.ship_date')
             ->selectRaw('cc.tracking_number,
                 kc.pace_job_number,
@@ -114,9 +117,9 @@ class RecoupService
      *
      * @return Collection<int, object{pace_customer_id:?string, cartons:int, recoupable:float}>
      */
-    public function summaryByCustomer(float $minDelta = 0.01): Collection
+    public function summaryByCustomer(float $minDelta = 0.01, ?int $year = null, ?int $month = null): Collection
     {
-        return $this->candidates($minDelta)
+        return $this->candidates($minDelta, $year, $month)
             ->groupBy(fn (object $r): string => (string) ($r->pace_customer_id ?? ''))
             ->map(fn (Collection $rows, string $customer): object => (object) [
                 'pace_customer_id' => $customer === '' ? null : $customer,
@@ -175,12 +178,14 @@ class RecoupService
      *
      * @return object{total:int, matched:int, unmatched:int, pct:float}
      */
-    public function coverage(): object
+    public function coverage(?int $year = null, ?int $month = null): object
     {
-        return Cache::remember(self::COVERAGE_CACHE_KEY, now()->addMinutes(10), function (): object {
+        $compute = function () use ($year, $month): object {
             $query = DB::table('carrier_charges as cc')
                 ->leftJoin('carton_costs as kc', 'kc.tracking_number', '=', 'cc.tracking_number')
-                ->whereNotNull('cc.tracking_number');
+                ->whereNotNull('cc.tracking_number')
+                ->when($year, fn ($q) => $q->whereYear('cc.invoice_date', $year))
+                ->when($month, fn ($q) => $q->whereMonth('cc.invoice_date', $month));
 
             $row = $this->onlyShipments($this->onlyOutbound($query))
                 ->selectRaw('COUNT(DISTINCT cc.tracking_number) AS total, COUNT(DISTINCT kc.tracking_number) AS matched')
@@ -195,6 +200,12 @@ class RecoupService
                 'unmatched' => $total - $matched,
                 'pct' => $total > 0 ? round($matched / $total * 100, 1) : 0.0,
             ];
-        });
+        };
+
+        // Cache only the all-time aggregate (the default, a full-table scan); a specific period is a
+        // bounded query, computed fresh so the timeline picker always reflects the chosen window.
+        return $year === null && $month === null
+            ? Cache::remember(self::COVERAGE_CACHE_KEY, now()->addMinutes(10), $compute)
+            : $compute();
     }
 }

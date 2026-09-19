@@ -2,16 +2,22 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Widgets\Concerns\ReadsDashboardPeriod;
+use App\Services\Analytics\CostAnalyticsService;
 use App\Services\Recoup\RecoupService;
 use Filament\Widgets\ChartWidget;
+use Filament\Widgets\Concerns\InteractsWithPageFilters;
 
 /**
  * Recoup zone: the customers with the most billable carrier overage (invoiced − ship cost),
- * so recovery effort goes where the money is. Salesperson attribution follows once Pace
- * write-back records who owns each job.
+ * so recovery effort goes where the money is. Scoped to the dashboard timeline. Salesperson
+ * attribution follows once Pace write-back records who owns each job.
  */
 class RecoupByCustomerChart extends ChartWidget
 {
+    use InteractsWithPageFilters;
+    use ReadsDashboardPeriod;
+
     protected static ?int $sort = 7;
 
     protected ?string $heading = 'Recoupable by Customer';
@@ -31,7 +37,8 @@ class RecoupByCustomerChart extends ChartWidget
 
     protected function getData(): array
     {
-        $rows = app(RecoupService::class)->summaryByCustomer()->take(12);
+        [$year, $month] = $this->selectedPeriod(app(CostAnalyticsService::class));
+        $rows = app(RecoupService::class)->summaryByCustomer(year: $year, month: $month)->take(12);
 
         return [
             'datasets' => [[

@@ -1,7 +1,9 @@
 <?php
 
 use App\Filament\Widgets\CostIntelligenceStats;
+use App\Filament\Widgets\RecoupStats;
 use App\Models\Carrier;
+use App\Models\CartonCost;
 use App\Services\Analytics\CostAnalyticsService;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
@@ -46,4 +48,20 @@ test('cost intelligence widget respects a month filter', function () {
     Livewire::test(CostIntelligenceStats::class, ['pageFilters' => ['year' => 2025, 'month' => 5]])
         ->assertOk()
         ->assertSee('Address Correction Fees · May 2025');
+});
+
+test('recoup widget reads the page filter and scopes the recoupable total to the period', function () {
+    // 2025 shipment billed $50 over a $30 ship cost => $20 recoup; 2024 billed $100 over $30 => $70.
+    $c25 = CartonCost::create(['tracking_number' => 'R25', 'ship_cost' => 30, 'ship_date' => '2025-06-01', 'pace_customer_id' => 'C1', 'pace_job_number' => 'J1']);
+    $c24 = CartonCost::create(['tracking_number' => 'R24', 'ship_cost' => 30, 'ship_date' => '2024-06-01', 'pace_customer_id' => 'C1', 'pace_job_number' => 'J2']);
+    DB::table('carrier_charges')->insert([
+        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'tracking_number' => 'R25', 'amount' => 50, 'charge_category_id' => CostAnalyticsService::CAT_BASE, 'carton_cost_id' => $c25->id, 'invoice_date' => '2025-06-10', 'created_at' => now(), 'updated_at' => now()],
+        ['carrier_id' => 1, 'carrier_invoice_id' => 1, 'tracking_number' => 'R24', 'amount' => 100, 'charge_category_id' => CostAnalyticsService::CAT_BASE, 'carton_cost_id' => $c24->id, 'invoice_date' => '2024-06-10', 'created_at' => now(), 'updated_at' => now()],
+    ]);
+
+    Livewire::test(RecoupStats::class, ['pageFilters' => ['year' => 2025, 'month' => 0]])
+        ->assertOk()->assertSee('Recoupable · 2025')->assertSee('$20.00');
+
+    Livewire::test(RecoupStats::class, ['pageFilters' => ['year' => 0, 'month' => 0]])
+        ->assertOk()->assertSee('Recoupable · All years')->assertSee('$90.00');
 });
